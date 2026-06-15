@@ -93,7 +93,7 @@ export default function Home() {
               <Reveal delay={0.18}>
                 <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                   <Link
-                    href="/agendar"
+                    href="/entrar"
                     className="btn-royal inline-flex items-center justify-center gap-2 rounded-full px-7 py-3.5 text-base font-semibold text-white"
                   >
                     <CalendarPlus className="h-5 w-5" />
@@ -246,7 +246,7 @@ export default function Home() {
                 </p>
                 <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
                   <Link
-                    href="/agendar"
+                    href="/entrar"
                     className="inline-flex items-center justify-center gap-2 rounded-full bg-white px-8 py-3.5 text-base font-semibold text-royal-600 transition-transform hover:scale-[1.02] active:scale-95"
                   >
                     <CalendarPlus className="h-5 w-5" />
@@ -346,7 +346,7 @@ function HeroVisual() {
         </div>
 
         <Link
-          href="/agendar"
+          href="/entrar"
           className="btn-royal mt-5 flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white"
         >
           Reservar este horário

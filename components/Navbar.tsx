@@ -56,7 +56,7 @@ export function Navbar() {
             Entrar
           </Link>
           <Link
-            href="/agendar"
+            href="/entrar"
             className="btn-royal inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-white"
           >
             <CalendarPlus className="h-4 w-4" />
@@ -98,7 +98,7 @@ export function Navbar() {
               Entrar
             </Link>
             <Link
-              href="/agendar"
+              href="/entrar"
               onClick={() => setOpen(false)}
               className="btn-royal inline-flex items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold text-white"
             >

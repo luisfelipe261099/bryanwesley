@@ -56,7 +56,7 @@ export default function AdminDashboard() {
       <Background />
       <AppHeader badge="Administrador" user={{ name: "Bryan W.", initial: "B" }} />
 
-      <main className="mx-auto max-w-7xl px-5 pb-20 pt-24 lg:px-8">
+      <main className="mx-auto max-w-7xl overflow-x-clip px-5 pb-20 pt-24 lg:px-8">
         <Reveal>
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
@@ -130,17 +130,17 @@ export default function AdminDashboard() {
                   return (
                     <li
                       key={a.id}
-                      className="flex items-center gap-4 rounded-2xl border border-white/6 bg-white/[0.02] p-3.5 transition-colors hover:border-white/15"
+                      className="flex items-center gap-3 rounded-2xl border border-white/6 bg-white/[0.02] p-3 transition-colors hover:border-white/15 sm:gap-4 sm:p-3.5"
                     >
-                      <div className="flex w-14 flex-none flex-col items-center">
-                        <span className="font-display text-2xl leading-none text-white">
+                      <div className="flex w-12 flex-none flex-col items-center sm:w-14">
+                        <span className="font-display text-xl leading-none text-white sm:text-2xl">
                           {a.time}
                         </span>
                         <span className="mt-0.5 text-[10px] text-steel-400">
                           {a.durationMin}min
                         </span>
                       </div>
-                      <div className="h-10 w-px bg-white/8" />
+                      <div className="hidden h-10 w-px bg-white/8 sm:block" />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="truncate font-semibold text-white">
@@ -264,8 +264,58 @@ export default function AdminDashboard() {
               </Link>
             </div>
 
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[560px] text-left">
+            {/* Celular: cards (sem rolagem lateral) */}
+            <div className="mt-4 space-y-2 lg:hidden">
+              {clients.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex items-start gap-3 rounded-2xl border border-white/6 bg-white/[0.02] p-3.5"
+                >
+                  <span className="grid h-10 w-10 flex-none place-items-center rounded-full bg-royal-grad font-display text-base text-white">
+                    {c.name.charAt(0)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-medium text-white">
+                        {c.name}
+                      </span>
+                      <span
+                        className={`flex-none rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                          c.status === "ativo"
+                            ? "bg-emerald-400/10 text-emerald-300"
+                            : "bg-amber-400/10 text-amber-300"
+                        }`}
+                      >
+                        {c.status === "ativo" ? "Ativo" : "Atrasado"}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-1 text-xs text-steel-400">
+                      <Phone className="h-3 w-3 flex-none" />
+                      <span className="truncate">{c.phone}</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {c.plan ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-royal/15 px-2.5 py-1 text-[11px] font-semibold text-electric">
+                          <Crown className="h-3 w-3" />
+                          {c.plan}
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-white/5 px-2.5 py-1 text-[11px] font-medium text-steel-300">
+                          Avulso
+                        </span>
+                      )}
+                      <span className="text-xs text-steel-400">
+                        {c.visits} visitas · {c.lastVisit}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop: tabela */}
+            <div className="mt-4 hidden lg:block">
+              <table className="w-full text-left">
                 <thead>
                   <tr className="border-b border-white/8 text-xs uppercase tracking-wider text-steel-400">
                     <th className="pb-3 font-medium">Cliente</th>
