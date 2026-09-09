@@ -16,7 +16,8 @@ import { Footer } from "@/components/Footer";
 import { Reveal } from "@/components/Reveal";
 import { ServiceCard } from "@/components/ServiceCard";
 import { PlanCard } from "@/components/PlanCard";
-import { services, plans, barbers, formatBRL } from "@/lib/data";
+import { listServices, listPlans, listTeam } from "@/lib/queries";
+import { formatBRL } from "@/lib/money";
 
 const steps = [
   {
@@ -54,7 +55,16 @@ const testimonials = [
   },
 ];
 
-export default function Home() {
+// Catálogo muda pelo painel do admin, então a home revalida sozinha.
+export const revalidate = 60;
+
+export default async function Home() {
+  const [services, plans, barbers] = await Promise.all([
+    listServices(),
+    listPlans(),
+    listTeam(),
+  ]);
+
   return (
     <>
       <Background />
@@ -163,14 +173,16 @@ export default function Home() {
               <Reveal key={b.id} delay={i * 0.07}>
                 <div className="glass glass-hover flex items-center gap-4 rounded-2xl p-5">
                   <span className="grid h-14 w-14 flex-none place-items-center rounded-2xl bg-royal-grad font-display text-xl text-white ring-2 ring-electric/25">
-                    {b.initial}
+                    {b.user.name.charAt(0)}
                   </span>
                   <div className="min-w-0">
-                    <p className="font-display text-lg text-white">{b.name}</p>
-                    <p className="truncate text-sm text-steel-400">{b.role}</p>
+                    <p className="font-display text-lg text-white">
+                      {b.user.name}
+                    </p>
+                    <p className="truncate text-sm text-steel-400">{b.title}</p>
                     <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-gold">
                       <Star className="h-3 w-3 fill-gold" />
-                      {b.rating.toFixed(1)}
+                      {(b.rating / 10).toFixed(1)}
                     </p>
                   </div>
                 </div>
@@ -380,7 +392,7 @@ function HeroVisual() {
         <div className="mt-6 space-y-2.5 rounded-2xl border border-white/6 bg-white/[0.02] p-4">
           <Row label="Serviço" value="Combo Completo" />
           <Row label="Duração" value="1h15" />
-          <Row label="Valor" value={formatBRL(150)} accent />
+          <Row label="Valor" value={formatBRL(15000)} accent />
         </div>
 
         <Link

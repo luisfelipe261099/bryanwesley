@@ -1,13 +1,11 @@
-"use client";
-
-import { useState } from "react";
 import { Check, Minus, HelpCircle } from "lucide-react";
 import { Background } from "@/components/Background";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { Reveal } from "@/components/Reveal";
 import { PlanCard } from "@/components/PlanCard";
-import { plans } from "@/lib/data";
+import { listPlans } from "@/lib/queries";
+import { PlanosGrid } from "./PlanosGrid";
 
 const comparison = [
   { feature: "Cortes de cabelo", silver: "2/mês", gold: "Ilimitado", diamond: "Ilimitado" },
@@ -47,8 +45,10 @@ function Cell({ value }: { value: string | boolean }) {
   return <span className="text-sm text-steel-200">{value}</span>;
 }
 
-export default function Planos() {
-  const [cycle, setCycle] = useState<"mensal" | "anual">("mensal");
+export const revalidate = 60;
+
+export default async function Planos() {
+  const plans = await listPlans();
 
   return (
     <>
@@ -71,42 +71,9 @@ export default function Planos() {
           </div>
         </Reveal>
 
-        {/* Ciclo de cobrança */}
         <Reveal delay={0.08}>
-          <div className="mt-10 flex justify-center">
-            <div className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-surface p-1.5">
-              <CycleButton
-                active={cycle === "mensal"}
-                onClick={() => setCycle("mensal")}
-              >
-                Mensal
-              </CycleButton>
-              <CycleButton
-                active={cycle === "anual"}
-                onClick={() => setCycle("anual")}
-              >
-                Anual
-                <span
-                  className={`ml-2 rounded-full px-2 py-1 text-[9px] ${
-                    cycle === "anual"
-                      ? "bg-white/20 text-white"
-                      : "bg-neon/15 text-neon"
-                  }`}
-                >
-                  2 meses off
-                </span>
-              </CycleButton>
-            </div>
-          </div>
+          <PlanosGrid plans={plans} />
         </Reveal>
-
-        <div className="mt-16 grid gap-6 md:grid-cols-3">
-          {plans.map((p, i) => (
-            <Reveal key={p.id} delay={i * 0.08}>
-              <PlanCard plan={p} cycle={cycle} />
-            </Reveal>
-          ))}
-        </div>
 
         {/* Tabela comparativa */}
         <Reveal>
@@ -199,28 +166,5 @@ export default function Planos() {
 
       <Footer />
     </>
-  );
-}
-
-function CycleButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`label inline-flex items-center rounded-full px-6 py-3 transition-all ${
-        active ? "btn-royal text-white" : "text-steel-300 hover:text-white"
-      }`}
-    >
-      {children}
-    </button>
   );
 }

@@ -1,9 +1,10 @@
 import { Clock } from "lucide-react";
-import { type Service, formatBRL, formatDuration } from "@/lib/data";
+import type { Service } from "@/db/schema";
+import { formatBRL, formatDuration } from "@/lib/money";
 import { serviceIcons } from "./serviceIcons";
 
 export function ServiceCard({ service }: { service: Service }) {
-  const Icon = serviceIcons[service.id] ?? serviceIcons.corte;
+  const Icon = serviceIcons[service.slug] ?? serviceIcons.corte;
   return (
     <div className="glass glass-hover group relative flex flex-col rounded-2xl p-5">
       {service.tag && (
@@ -20,7 +21,7 @@ export function ServiceCard({ service }: { service: Service }) {
       </p>
       <div className="mt-4 flex items-center justify-between border-t border-white/8 pt-4">
         <span className="font-display text-xl tabular-nums text-white">
-          {formatBRL(service.price)}
+          {formatBRL(service.priceCents)}
         </span>
         <span className="inline-flex items-center gap-1.5 text-xs font-medium text-steel-400">
           <Clock className="h-3.5 w-3.5" />

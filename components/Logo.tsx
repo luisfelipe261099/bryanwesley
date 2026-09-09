@@ -1,4 +1,4 @@
-import { barbershop } from "@/lib/data";
+import { shop } from "@/lib/shop";
 
 // Emblema hexagonal com poste de barbeiro — traço elétrico sobre o neutro.
 export function LogoMark({ className = "h-9 w-9" }: { className?: string }) {
@@ -51,7 +51,7 @@ export function LogoMark({ className = "h-9 w-9" }: { className?: string }) {
 export function Logo({
   className = "",
   compact = false,
-  subtitle = barbershop.unit,
+  subtitle = shop.unit,
 }: {
   className?: string;
   compact?: boolean;

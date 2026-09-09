@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { MapPin, Phone, Clock, Instagram } from "lucide-react";
 import { Logo } from "./Logo";
-import { barbershop } from "@/lib/data";
+import { shop } from "@/lib/shop";
 
 export function Footer() {
   return (
@@ -22,7 +22,7 @@ export function Footer() {
               className="mt-5 inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2.5 text-sm font-medium text-steel-300 transition-colors hover:border-electric/45 hover:text-white"
             >
               <Instagram className="h-4 w-4 text-electric" />
-              {barbershop.instagram}
+              {shop.instagram}
             </Link>
           </div>
 
@@ -31,11 +31,11 @@ export function Footer() {
             <ul className="mt-4 space-y-3 text-sm text-steel-400">
               <li className="flex items-start gap-2.5">
                 <MapPin className="mt-0.5 h-4 w-4 flex-none text-electric" />
-                {barbershop.address}
+                {shop.address}
               </li>
               <li className="flex items-center gap-2.5">
                 <Phone className="h-4 w-4 flex-none text-electric" />
-                {barbershop.phone}
+                {shop.phone}
               </li>
             </ul>
           </div>
@@ -45,9 +45,9 @@ export function Footer() {
             <ul className="mt-4 space-y-3 text-sm text-steel-400">
               <li className="flex items-center gap-2.5">
                 <Clock className="h-4 w-4 flex-none text-electric" />
-                Ter — Sáb · 09h às 20h
+                {shop.hoursLabel}
               </li>
-              <li className="pl-[26px] text-steel-400/70">Seg e Dom · Fechado</li>
+              <li className="pl-[26px] text-steel-400/70">{shop.closedLabel}</li>
             </ul>
           </div>
         </div>

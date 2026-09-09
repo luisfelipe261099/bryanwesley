@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Check, Sparkles, Shield, Crown, Gem } from "lucide-react";
-import { type Plan, formatBRL } from "@/lib/data";
+import type { Plan } from "@/db/schema";
+import { formatBRL } from "@/lib/money";
 
 const planIcons: Record<string, typeof Shield> = {
   silver: Shield,
@@ -16,7 +17,10 @@ export function PlanCard({
   cycle?: "mensal" | "anual";
 }) {
   const Icon = planIcons[plan.id] ?? Shield;
-  const price = cycle === "anual" ? plan.annualPrice : plan.price;
+  const priceCents =
+    cycle === "anual" ? plan.annualPriceCents : plan.priceCents;
+  // Preço inteiro em destaque; centavos raramente existem nos planos.
+  const priceLabel = Math.round(priceCents / 100).toLocaleString("pt-BR");
 
   return (
     <div
@@ -72,13 +76,13 @@ export function PlanCard({
             plan.highlight ? "text-electric" : "text-white"
           }`}
         >
-          {price}
+          {priceLabel}
         </span>
         <span className="mb-1.5 text-sm text-steel-400">/mês</span>
       </div>
       {cycle === "anual" && (
         <p className="relative mt-1.5 text-xs text-neon">
-          No plano anual · equivale a {formatBRL(price * 12)} por ano
+          No plano anual · equivale a {formatBRL(priceCents * 12)} por ano
         </p>
       )}
 

@@ -1,0 +1,39 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { SESSION_COOKIE, verifySession, type Role } from "@/lib/auth/session";
+
+// Cada área e quem pode entrar nela.
+const GUARDED: { prefix: string; roles: Role[] }[] = [
+  { prefix: "/admin", roles: ["ADMIN"] },
+  { prefix: "/barbeiro", roles: ["BARBER", "ADMIN"] },
+  { prefix: "/cliente", roles: ["CLIENT", "ADMIN"] },
+];
+
+export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+  const guard = GUARDED.find(
+    (g) => pathname === g.prefix || pathname.startsWith(`${g.prefix}/`)
+  );
+  if (!guard) return NextResponse.next();
+
+  const session = await verifySession(req.cookies.get(SESSION_COOKIE)?.value);
+
+  if (!session) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/entrar";
+    url.search = `?proximo=${encodeURIComponent(pathname)}`;
+    return NextResponse.redirect(url);
+  }
+
+  if (!guard.roles.includes(session.role)) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/entrar";
+    url.search = "?erro=sem-permissao";
+    return NextResponse.redirect(url);
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: ["/admin/:path*", "/barbeiro/:path*", "/cliente/:path*"],
+};

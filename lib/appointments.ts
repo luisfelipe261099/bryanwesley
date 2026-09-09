@@ -1,0 +1,272 @@
+// ───────────────────────────────────────────────────────────
+// Criação e transições de estado dos agendamentos.
+// A prevenção de horário duplicado é da constraint de exclusão
+// no banco; aqui traduzimos a violação para uma mensagem humana.
+// ───────────────────────────────────────────────────────────
+import { and, eq, inArray } from "drizzle-orm";
+import { db } from "@/db/client";
+import {
+  appointments,
+  appointmentServices,
+  barbers,
+  services as servicesTable,
+  subscriptions,
+  users,
+  planServices,
+} from "@/db/schema";
+import { getAvailability, getSettings, generateCode } from "./schedule";
+import { resolveBarberPct, recordCommission } from "./commissions";
+import {
+  queueBookingNotifications,
+  queueNotification,
+  cancelPendingNotifications,
+} from "./notifications";
+import { randomBytes } from "node:crypto";
+import { shopTimeToUtc, parseDateKey } from "./time";
+import { normalizePhone } from "./phone";
+
+/** Postgres: violação de constraint de exclusão. */
+const EXCLUSION_VIOLATION = "23P01";
+
+export class BookingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BookingError";
+  }
+}
+
+export type CreateBookingInput = {
+  serviceIds: number[];
+  dateKey: string;
+  time: string; // "HH:MM"
+  barberId?: number | null;
+  clientName: string;
+  clientPhone: string;
+  notes?: string;
+  /** Sessão do cliente, quando logado. */
+  userId?: number | null;
+};
+
+export async function createBooking(input: CreateBookingInput) {
+  const settings = await getSettings();
+  if (!settings.acceptingBookings) {
+    throw new BookingError(
+      "A agenda está temporariamente fechada para novos agendamentos."
+    );
+  }
+
+  if (input.serviceIds.length === 0) {
+    throw new BookingError("Escolha ao menos um serviço.");
+  }
+
+  const chosen = await db.query.services.findMany({
+    where: and(
+      inArray(servicesTable.id, input.serviceIds),
+      eq(servicesTable.active, true)
+    ),
+  });
+  if (chosen.length !== input.serviceIds.length) {
+    throw new BookingError("Algum serviço escolhido não está mais disponível.");
+  }
+
+  const durationMin = chosen.reduce((acc, s) => acc + s.durationMin, 0);
+  const phone = normalizePhone(input.clientPhone);
+
+  // Assinatura ativa cobre os serviços do plano — nesse caso não há cobrança.
+  const subscription = input.userId
+    ? await db.query.subscriptions.findFirst({
+        where: and(
+          eq(subscriptions.userId, input.userId),
+          eq(subscriptions.status, "ATIVA")
+        ),
+      })
+    : undefined;
+
+  let coveredIds = new Set<number>();
+  if (subscription) {
+    const covers = await db.query.planServices.findMany({
+      where: eq(planServices.planId, subscription.planId),
+    });
+    coveredIds = new Set(covers.map((c) => c.serviceId));
+  }
+  const allCovered =
+    !!subscription && chosen.every((s) => coveredIds.has(s.id));
+
+  const totalCents = allCovered
+    ? 0
+    : chosen.reduce(
+        (acc, s) => acc + (coveredIds.has(s.id) ? 0 : s.priceCents),
+        0
+      );
+
+  // Confere a disponibilidade e resolve "mais rápido" para um barbeiro real.
+  const availability = await getAvailability({
+    dateKey: input.dateKey,
+    durationMin,
+    barberId: input.barberId ?? null,
+    settings,
+  });
+  if (availability.closed) {
+    throw new BookingError("A barbearia não abre nesse dia.");
+  }
+  const slot = availability.slots.find((s) => s.time === input.time);
+  if (!slot) {
+    throw new BookingError("Horário fora da jornada de atendimento.");
+  }
+  if (!slot.available) {
+    throw new BookingError(
+      slot.reason === "antecedencia"
+        ? `Esse horário exige ao menos ${settings.minAdvanceHours}h de antecedência.`
+        : "Esse horário acabou de ser preenchido. Escolha outro."
+    );
+  }
+
+  const barberId = input.barberId ?? slot.barberIds[0];
+  if (!barberId) throw new BookingError("Nenhum barbeiro livre nesse horário.");
+
+  const barber = await db.query.barbers.findFirst({
+    where: and(eq(barbers.id, barberId), eq(barbers.active, true)),
+  });
+  if (!barber) throw new BookingError("Barbeiro indisponível.");
+
+  const { year, month, day } = parseDateKey(input.dateKey);
+  const startsAt = shopTimeToUtc(year, month, day, slot.minutes);
+  const endsAt = new Date(startsAt.getTime() + durationMin * 60_000);
+
+  // Cliente sem conta vira um registro "leve": dá pra reconhecê-lo na
+  // próxima visita e ele pode assumir a conta depois definindo senha.
+  let clientUserId = input.userId ?? null;
+  if (!clientUserId) {
+    const existing = await db.query.users.findFirst({
+      where: eq(users.phone, phone),
+    });
+    if (existing) {
+      clientUserId = existing.id;
+    } else {
+      const [created] = await db
+        .insert(users)
+        .values({ name: input.clientName.trim(), phone, role: "CLIENT" })
+        .returning();
+      clientUserId = created.id;
+    }
+  }
+
+  // Percentual do barbeiro congelado agora: se a meta dele mudar depois,
+  // este atendimento mantém a divisão combinada no dia.
+  const { pct: barberPct } = await resolveBarberPct(barberId);
+
+  try {
+    const appt = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(appointments)
+        .values({
+          code: generateCode(),
+          checkinToken: randomBytes(16).toString("hex"),
+          clientUserId,
+          clientName: input.clientName.trim(),
+          clientPhone: phone,
+          barberId,
+          startsAt,
+          endsAt,
+          durationMin,
+          totalCents,
+          status: "CONFIRMADO",
+          kind: allCovered ? "ASSINANTE" : "AVULSO",
+          subscriptionId: allCovered ? subscription!.id : null,
+          barberPctSnapshot: barberPct,
+          notes: input.notes?.trim() || null,
+        })
+        .returning();
+
+      await tx.insert(appointmentServices).values(
+        chosen.map((s) => ({
+          appointmentId: created.id,
+          serviceId: s.id,
+          name: s.name,
+          priceCents: coveredIds.has(s.id) ? 0 : s.priceCents,
+          durationMin: s.durationMin,
+        }))
+      );
+
+      return created;
+    });
+
+    // Confirmação + lembretes. Falha de notificação não derruba o
+    // agendamento: o horário já está garantido.
+    try {
+      await queueBookingNotifications(appt, barber.shortName);
+    } catch (e) {
+      console.error("Falha ao enfileirar notificações:", e);
+    }
+
+    return appt;
+  } catch (err) {
+    const code = (err as { code?: string })?.code;
+    if (code === EXCLUSION_VIOLATION) {
+      // Duas pessoas clicaram no mesmo horário ao mesmo tempo.
+      throw new BookingError(
+        "Esse horário acabou de ser reservado por outra pessoa. Escolha outro."
+      );
+    }
+    throw err;
+  }
+}
+
+/** Transições de estado permitidas, para não pular etapas. */
+type ApptStatusName = (typeof appointments.$inferSelect)["status"];
+
+const ALLOWED: Record<ApptStatusName, ApptStatusName[]> = {
+  PENDENTE: ["CONFIRMADO", "CANCELADO", "NO_SHOW"],
+  CONFIRMADO: ["EM_ANDAMENTO", "CONCLUIDO", "CANCELADO", "NO_SHOW"],
+  EM_ANDAMENTO: ["CONCLUIDO", "CANCELADO"],
+  CONCLUIDO: [],
+  CANCELADO: [],
+  NO_SHOW: [],
+};
+
+export type { ApptStatusName };
+
+export async function transitionAppointment(
+  id: number,
+  next: ApptStatusName
+) {
+  const current = await db.query.appointments.findFirst({
+    where: eq(appointments.id, id),
+  });
+  if (!current) throw new BookingError("Agendamento não encontrado.");
+  if (!ALLOWED[current.status]?.includes(next)) {
+    throw new BookingError(
+      `Não é possível mudar de ${current.status.toLowerCase()} para ${next.toLowerCase()}.`
+    );
+  }
+
+  const patch: Partial<typeof appointments.$inferInsert> = { status: next };
+  if (next === "EM_ANDAMENTO") patch.startedAt = new Date();
+  if (next === "CONCLUIDO") patch.finishedAt = new Date();
+
+  const [updated] = await db
+    .update(appointments)
+    .set(patch)
+    .where(eq(appointments.id, id))
+    .returning();
+
+  // Efeitos colaterais do novo estado.
+  if (next === "CONCLUIDO") {
+    await recordCommission(updated.id);
+  }
+  if (next === "CANCELADO" || next === "NO_SHOW") {
+    await cancelPendingNotifications(updated.id);
+    if (next === "CANCELADO") {
+      try {
+        await queueNotification({
+          kind: "AGENDAMENTO_CANCELADO",
+          appointment: updated,
+        });
+      } catch (e) {
+        console.error("Falha ao enfileirar cancelamento:", e);
+      }
+    }
+  }
+
+  return updated;
+}

@@ -1,89 +1,141 @@
-# Bryan Wesley Barbearia — Protótipo
+# Bryan Wesley Barbearia — Sistema de agendamento
 
-Protótipo visual navegável do sistema de agendamento da **Bryan Wesley Barbearia**.
-Feito para o cliente aprovar a experiência antes de construir o sistema completo.
-
-> ⚠️ **É um protótipo de aprovação.** Os dados são fictícios (mock) e não há
-> banco de dados, login real ou pagamento ainda. Tudo é clicável para demonstrar
-> as 3 experiências. A etapa seguinte é plugar backend, autenticação e pagamentos.
+Sistema completo de agendamento, assinaturas e gestão da **Bryan Wesley
+Barbearia** (Unidade Jardins). Não é mais um protótipo: tem banco de dados,
+login, agenda real com prevenção de conflito, comissões e notificações.
 
 ## Stack
 
-- **Next.js 14** (App Router) + **React 18** + **TypeScript**
+- **Next.js 14** (App Router, Server Actions) + **React 18** + **TypeScript**
+- **PostgreSQL** + **Drizzle ORM** (migrações versionadas em `db/migrations`)
 - **Tailwind CSS** com o design system **Modern Electric Precision**
-- **Framer Motion** (transições) e **Lucide** (ícones)
-- Pronto para deploy gratuito na **Vercel**
+- Sessão em cookie httpOnly assinado (**jose**), senhas com **bcrypt**
+- Deploy na **Vercel** (cron nativo para as notificações)
 
 ## Design system — Modern Electric Precision
 
 | Token | Cor | Uso |
 |-------|-----|-----|
-| Primary | `#1EB8FF` (`electric`) | Destaques, ícones, links, bordas ativas |
-| Secondary | `#2979FF` (`royal`) | Fim do gradiente dos botões e avatares |
-| Tertiary | `#00E5FF` (`neon`) | Acento pontual: VIP, status ativo, métricas positivas |
-| Neutral | `#0B0E14` (`ink`) | Fundo base; cards em `#131823` (`surface`) |
+| Primary | `#1EB8FF` (`electric`) | Destaques, ícones, bordas ativas |
+| Secondary | `#2979FF` (`royal`) | Fim do gradiente de botões e avatares |
+| Tertiary | `#00E5FF` (`neon`) | Acento: VIP, status ativo, valores positivos |
+| Neutral | `#0B0E14` (`ink`) | Fundo; cards em `#131823` (`surface`) |
 
-- **Headline / Label:** Space Grotesk · **Body:** Plus Jakarta Sans
-- Classes utilitárias em [`app/globals.css`](app/globals.css): `.glass` (card),
-  `.btn-royal` (botão primário), `.btn-outline` (secundário) e `.label`
-  (micro-label em caixa alta, presente em todos os cabeçalhos de bloco).
-- Tokens em [`tailwind.config.ts`](tailwind.config.ts).
+**Headline / Label:** Space Grotesk · **Body:** Plus Jakarta Sans.
+Utilitários em [`app/globals.css`](app/globals.css): `.glass`, `.btn-royal`,
+`.btn-outline` e `.label`. Tokens em [`tailwind.config.ts`](tailwind.config.ts).
 
-## As 4 experiências (perfis)
+## Perfis e telas
 
-Acesse `/entrar` para escolher o perfil — ou navegue direto:
+| Rota | Quem acessa | O que faz |
+|------|-------------|-----------|
+| `/` | Público | Vitrine: serviços, equipe, Clube VIP |
+| `/planos` | Público | Planos, ciclo mensal/anual, comparativo, FAQ |
+| `/agendar` | Público | Agenda em 3 passos, com ou sem cadastro |
+| `/entrar` | Público | Login e criação de conta |
+| `/cliente` | `CLIENT` | Horários, QR de check-in, plano, histórico |
+| `/barbeiro` | `BARBER` | Agenda do dia, iniciar/finalizar, check-in, comissão |
+| `/admin` | `ADMIN` | Faturamento, MRR, ocupação, agenda, equipe |
+| `/admin/agenda` | `ADMIN` | Regras da agenda e bloqueios |
+| `/admin/equipe` | `ADMIN` | Barbeiros, jornada individual, faixas de meta |
+| `/admin/catalogo` | `ADMIN` | Serviços e planos de assinatura |
+| `/admin/clientes` | `ADMIN` | Clientes, assinaturas e importação em CSV |
 
-| Rota | Quem usa | O que mostra |
-|------|----------|--------------|
-| `/` | Visitante | Landing: hero, serviços, equipe, Clube VIP, depoimentos |
-| `/agendar` | **Cliente avulso** | Agendamento rápido em 3 passos: serviço → barbeiro & horário → dados |
-| `/planos` | Visitante | Clube VIP: Silver / Gold Black / Diamond, ciclo mensal-anual, comparativo e FAQ |
-| `/cliente` | **Membro do Clube VIP** | Check-in, assinatura, ciclo, benefícios, histórico |
-| `/barbeiro` | **Barbeiro** | Comissão do mês, agenda diária, iniciar/finalizar atendimento |
-| `/admin` | **Administrador (Bryan)** | Dashboard: faturamento, MRR, ocupação, equipe, operação, clientes |
+O acesso é barrado no [`middleware.ts`](middleware.ts) e reconferido em cada
+Server Action — a proteção não depende da interface.
 
-As telas logadas compartilham o `AppHeader` e a `BottomNav`
-(Início · Clube VIP · Barbeiro · Admin).
+## Como a agenda evita conflito
 
-Serviços, planos, barbeiros e métricas ficam em [`lib/data.ts`](lib/data.ts) —
-fácil de ajustar preços, durações e nomes durante a validação com o cliente.
+A garantia de que dois clientes não ocupam o mesmo barbeiro no mesmo horário
+**não está na aplicação, está no banco**:
+
+```sql
+EXCLUDE USING gist (
+  barber_id WITH =,
+  tstzrange(starts_at, ends_at, '[)') WITH &&
+) WHERE (status <> 'CANCELADO' AND status <> 'NO_SHOW')
+```
+
+Mesmo com requisições simultâneas, o Postgres rejeita a segunda. O teste
+`npm run test:agenda` dispara 5 pedidos ao mesmo tempo no mesmo horário e
+confirma que exatamente 1 vence.
+
+A disponibilidade considera: jornada da loja, jornada própria do barbeiro,
+agendamentos existentes, bloqueios do admin, dias fechados e antecedência
+mínima. Horários da loja são tratados no fuso `America/São_Paulo`
+([`lib/time.ts`](lib/time.ts)).
+
+## Comissões
+
+Divisão padrão **50% barbeiro / 50% barbearia**, configurável por barbeiro.
+Como um cliente pode passar por barbeiros diferentes a cada visita, a divisão
+é calculada e gravada **por atendimento** (`appointment_commissions`), com o
+percentual congelado no momento do agendamento.
+
+As **faixas de meta** (`commission_tiers`) elevam o percentual quando o
+barbeiro ultrapassa um faturamento no mês — regra global ou individual.
+
+Atendimento de assinante não tem cobrança no balcão, mas gera comissão: a base
+vira o preço de tabela do serviço entregue (ajustável em
+`settings.subscription_commission_base`).
+
+## Check-in por QR Code
+
+Cada agendamento nasce com um `checkin_token`. O cliente abre **Meu QR** em
+`/cliente`; o barbeiro lê com a câmera (cai em `/barbeiro/checkin/<token>`) ou
+digita o código de 6 letras no painel. O check-in valida a chegada e já move o
+atendimento para *em andamento*.
+
+## Notificações
+
+A aplicação **enfileira**; quem entrega é o worker. Cada agendamento gera
+confirmação imediata e lembretes de 24h e 2h. Cancelar derruba os lembretes
+pendentes.
+
+O despacho roda em `/api/notificacoes/despachar`, acionado pelo Vercel Cron a
+cada 15 minutos ([`vercel.json`](vercel.json)). Sem `WHATSAPP_TOKEN`
+configurado o sistema segue funcionando: as mensagens ficam gravadas na fila
+até o número ser aprovado.
 
 ## Rodar localmente
 
 ```bash
 npm install
-npm run dev      # http://localhost:3000
+cp .env.example .env.local     # preencha DATABASE_URL e AUTH_SECRET
+npm run db:migrate             # cria as tabelas
+npm run db:seed                # catálogo + contas da equipe
+npm run dev                    # http://localhost:3000
 ```
 
-Build de produção:
+Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
+
+| E-mail | Papel |
+|--------|-------|
+| `bryan@bryanwesley.com.br` | Administrador |
+| `lucas@bryanwesley.com.br` | Barbeiro |
+| `matheus@bryanwesley.com.br` | Barbeiro |
+
+> Troque essas senhas antes de abrir para o público.
+
+## Testes
 
 ```bash
-npm run build
-npm run start
+npm run test:agenda   # 27 verificações do motor de agenda
 ```
 
-## Deploy na Vercel (grátis)
+Cobre disponibilidade, bloqueios, antecedência, reserva dupla, corrida de
+concorrência, ciclo de vida do atendimento e fechamento da comissão.
 
-**Opção A — pela CLI:**
-```bash
-npm i -g vercel
-vercel            # deploy de preview
-vercel --prod     # deploy de produção
-```
+## Deploy
 
-**Opção B — pelo painel (recomendado):**
-1. Suba este projeto para um repositório no GitHub.
-2. Em [vercel.com/new](https://vercel.com/new), importe o repositório.
-3. A Vercel detecta o Next.js automaticamente — é só clicar em **Deploy**.
+O build aplica as migrações antes de compilar (`npm run build`), então basta
+ter `DATABASE_URL` e `AUTH_SECRET` nas variáveis do projeto. Na Vercel:
+**Storage → Create Database** já injeta a `DATABASE_URL`.
 
-Não precisa de variáveis de ambiente nesta fase (sem backend ainda).
+## O que ainda depende de credencial externa
 
-## Próximos passos (pós-aprovação)
-
-1. **Banco de dados** — agendamentos, clientes, barbeiros, planos, pagamentos
-   (ex.: Postgres da Vercel Marketplace / Neon).
-2. **Autenticação** — login do cliente, do barbeiro e do admin (ex.: Clerk ou Auth.js).
-3. **Agenda real** — horários dinâmicos, bloqueios, evitar conflito de slot.
-4. **Pagamentos / assinaturas** — cobrança recorrente dos mensalistas
-   (ex.: Stripe ou Mercado Pago).
-5. **Notificações no WhatsApp** — confirmação e lembrete de horário.
+- **Pagamento recorrente** — a assinatura hoje é ativada pelo admin em
+  `/admin/clientes`. Falta plugar o gateway (InfinityPay) para cobrança
+  automática e baixa de inadimplência.
+- **Entrega das mensagens** — a fila está pronta; falta o número aprovado na
+  Cloud API do WhatsApp.

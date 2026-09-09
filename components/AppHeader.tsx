@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { LogOut } from "lucide-react";
 import { Logo } from "./Logo";
+import { logout } from "@/app/entrar/actions";
 
 export function AppHeader({
   badge,
@@ -32,14 +33,16 @@ export function AppHeader({
               </span>
             </div>
           )}
-          <Link
-            href="/entrar"
-            aria-label="Trocar perfil"
-            className="inline-flex items-center gap-2 rounded-full border border-white/12 px-3 py-2 text-sm font-medium text-steel-300 transition-colors hover:border-electric/40 hover:text-white sm:px-4"
-          >
-            <LogOut className="h-4 w-4" />
-            <span className="hidden sm:inline">Trocar perfil</span>
-          </Link>
+          <form action={logout}>
+            <button
+              type="submit"
+              aria-label="Sair"
+              className="inline-flex items-center gap-2 rounded-full border border-white/12 px-3 py-2 text-sm font-medium text-steel-300 transition-colors hover:border-electric/40 hover:text-white sm:px-4"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Sair</span>
+            </button>
+          </form>
         </div>
       </div>
     </header>

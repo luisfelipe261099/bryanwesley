@@ -6,7 +6,6 @@ import {
   Clock,
   ArrowRight,
   Check,
-  TrendingDown,
   CalendarDays,
   History,
   Gift,
@@ -17,43 +16,86 @@ import { Background } from "@/components/Background";
 import { AppHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
 import { Reveal } from "@/components/Reveal";
-import { plans, barbers, formatBRL } from "@/lib/data";
+import { requireRole } from "@/lib/auth";
+import {
+  activeSubscription,
+  upcomingForUser,
+  historyForUser,
+  countForUser,
+} from "@/lib/queries";
+import { formatBRL, formatDuration } from "@/lib/money";
+import { formatShopTime, utcToShopParts, labelFullDate, shopToday } from "@/lib/time";
+import { checkinQrSvg, publicBaseUrl } from "@/lib/qr";
+import { CheckinQR } from "./CheckinQR";
+import { CancelButton, EmptyState } from "./MeusHorarios";
 
-const me = {
-  name: "Ricardo Mendes",
-  initial: "R",
-  planId: "diamond",
-  renovaEmDias: 12,
-  cicloPct: 60, // % do ciclo de cobrança decorrido
-  cortesNoMes: 5,
-  economiaNoMes: 420,
-};
+export const dynamic = "force-dynamic";
 
-const proximo = {
-  service: "Corte Degradê & Barba",
-  dia: "Hoje, às 17:30",
-  hora: "17:30",
-  emAte: "Em 2h 14min",
-  barberId: "bryan",
-};
+/** "Hoje, às 17:30" ou "sexta-feira, 18 de setembro às 17:30". */
+function whenLabel(date: Date) {
+  const parts = utcToShopParts(date);
+  const hora = formatShopTime(date);
+  if (parts.dateKey === shopToday()) return `Hoje, às ${hora}`;
+  return `${labelFullDate(parts.dateKey)} às ${hora}`;
+}
 
-const historico = [
-  { service: "Corte Degradê & Barba", date: "Hoje", time: "09:00" },
-  { service: "Barboterapia", date: "Há 5 dias", time: "16:30" },
-  { service: "Corte Signature", date: "Há 11 dias", time: "10:30" },
-  { service: "Combo Completo", date: "Há 18 dias", time: "14:00" },
-];
+function countdown(date: Date) {
+  const diff = date.getTime() - Date.now();
+  if (diff <= 0) return "Agora";
+  const h = Math.floor(diff / 3600_000);
+  const m = Math.floor((diff % 3600_000) / 60_000);
+  if (h >= 24) return `Em ${Math.floor(h / 24)} dia(s)`;
+  return h > 0 ? `Em ${h}h ${m}min` : `Em ${m}min`;
+}
 
-export default function ClienteDashboard() {
-  const plan = plans.find((p) => p.id === me.planId)!;
-  const barber = barbers.find((b) => b.id === proximo.barberId)!;
+export default async function ClienteDashboard() {
+  const session = await requireRole(["CLIENT", "ADMIN"]);
+
+  const [subscription, upcoming, history, totalVisits] = await Promise.all([
+    activeSubscription(session.id),
+    upcomingForUser(session.id),
+    historyForUser(session.id),
+    countForUser(session.id),
+  ]);
+
+  const proximo = upcoming[0];
+  const plan = subscription?.plan;
+
+  // Ciclo de cobrança: quanto já passou desde a última renovação.
+  let cicloPct = 0;
+  let diasParaRenovar = 0;
+  if (subscription) {
+    const total = subscription.renewsAt.getTime() - subscription.startedAt.getTime();
+    const feito = Date.now() - subscription.startedAt.getTime();
+    cicloPct = Math.max(0, Math.min(100, Math.round((feito / total) * 100)));
+    diasParaRenovar = Math.max(
+      0,
+      Math.ceil((subscription.renewsAt.getTime() - Date.now()) / 86400_000)
+    );
+  }
+
+  const qrSvg = proximo?.checkinToken
+    ? await checkinQrSvg(publicBaseUrl(), proximo.checkinToken)
+    : null;
+
+  const atendimentosNoMes = history.filter((h) => {
+    const p = utcToShopParts(h.startsAt);
+    const now = utcToShopParts(new Date());
+    return (
+      h.status === "CONCLUIDO" && p.year === now.year && p.month === now.month
+    );
+  }).length;
+
+  const economiaNoMes = history
+    .filter((h) => h.kind === "ASSINANTE" && h.status === "CONCLUIDO")
+    .reduce((acc, h) => acc + h.items.reduce((a, i) => a + i.priceCents, 0), 0);
 
   return (
     <>
       <Background />
       <AppHeader
-        badge="Membro VIP"
-        user={{ name: me.name, initial: me.initial }}
+        badge={plan ? "Membro VIP" : "Cliente"}
+        user={{ name: session.name, initial: session.name.charAt(0) }}
       />
 
       <main className="mx-auto max-w-7xl px-5 pb-28 pt-24 lg:px-8">
@@ -61,238 +103,299 @@ export default function ClienteDashboard() {
           <span className="label text-electric">Ateliê Jardins</span>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <h1 className="font-display text-3xl text-white sm:text-4xl">
-              Boa tarde, {me.name.split(" ")[0]}
+              Olá, {session.name.split(" ")[0]}
             </h1>
-            <span className="label inline-flex items-center gap-1.5 rounded-full bg-royal-grad px-3 py-2 text-white shadow-glow-sm">
-              <Gem className="h-3 w-3" />
-              {plan.name.replace("Plano ", "")}
-            </span>
+            {plan && (
+              <span className="label inline-flex items-center gap-1.5 rounded-full bg-royal-grad px-3 py-2 text-white shadow-glow-sm">
+                <Gem className="h-3 w-3" />
+                {plan.name.replace("Plano ", "")}
+              </span>
+            )}
           </div>
           <p className="mt-2 text-sm text-steel-400">
-            Seu visual está em dia. Bora marcar o próximo?
+            {proximo
+              ? "Seu próximo horário está confirmado."
+              : "Você não tem horário marcado. Bora agendar?"}
           </p>
         </Reveal>
 
-        {/* Check-in do próximo horário */}
-        <Reveal delay={0.04}>
-          <div className="glass mt-6 rounded-2xl border-electric/25 p-5">
-            <div className="flex items-center justify-between gap-3">
-              <span className="label inline-flex items-center gap-1.5 text-electric">
-                <span className="h-1.5 w-1.5 rounded-full bg-neon" />
-                {proximo.dia}
-              </span>
-              <span className="text-xs font-medium text-steel-400">
-                {proximo.emAte}
-              </span>
-            </div>
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <span className="grid h-11 w-11 flex-none place-items-center rounded-xl bg-royal-grad text-white">
-                  <Scissors className="h-5 w-5" strokeWidth={1.75} />
+        {/* Próximo horário + check-in */}
+        {proximo && (
+          <Reveal delay={0.04}>
+            <div className="glass mt-6 rounded-2xl border-electric/25 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="label inline-flex items-center gap-1.5 text-electric">
+                  <span className="h-1.5 w-1.5 rounded-full bg-neon" />
+                  {whenLabel(proximo.startsAt)}
                 </span>
-                <div>
-                  <p className="font-display text-lg text-white">
-                    {proximo.service}
-                  </p>
-                  <p className="text-sm text-steel-400">{barber.name}</p>
+                <span className="text-xs font-medium text-steel-400">
+                  {countdown(proximo.startsAt)}
+                </span>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <span className="grid h-11 w-11 flex-none place-items-center rounded-xl bg-royal-grad text-white">
+                    <Scissors className="h-5 w-5" strokeWidth={1.75} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-display text-lg text-white">
+                      {proximo.items.map((i) => i.name).join(" + ")}
+                    </p>
+                    <p className="text-sm text-steel-400">
+                      {proximo.barber.user.name} ·{" "}
+                      {formatDuration(proximo.durationMin)}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  {qrSvg && (
+                    <CheckinQR
+                      svg={qrSvg}
+                      code={proximo.code}
+                      service={proximo.items.map((i) => i.name).join(" + ")}
+                    />
+                  )}
+                  <CancelButton appointmentId={proximo.id} />
                 </div>
               </div>
-              <button
-                type="button"
-                className="btn-outline label inline-flex items-center gap-2 rounded-full px-5 py-3 text-electric"
-              >
-                <Check className="h-3.5 w-3.5" strokeWidth={3} />
-                Check-in
-              </button>
             </div>
-          </div>
-        </Reveal>
+          </Reveal>
+        )}
 
         <div className="mt-5 grid gap-5 lg:grid-cols-3">
-          {/* Status do plano */}
+          {/* Assinatura */}
           <Reveal className="lg:col-span-2">
             <div className="glass relative h-full overflow-hidden rounded-3xl p-7">
               <div
                 aria-hidden="true"
                 className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-electric/15 blur-3xl"
               />
-              <div className="relative flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <span className="label text-electric">Sua assinatura</span>
-                  <div className="mt-2 flex flex-wrap items-end gap-x-2 gap-y-1">
-                    <h2 className="font-display text-3xl text-white">
-                      {plan.name}
-                    </h2>
-                    <span className="mb-1 text-sm text-steel-400">
-                      {formatBRL(plan.price)}/mês
+              {plan && subscription ? (
+                <>
+                  <div className="relative flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <span className="label text-electric">Sua assinatura</span>
+                      <div className="mt-2 flex flex-wrap items-end gap-x-2 gap-y-1">
+                        <h2 className="font-display text-3xl text-white">
+                          {plan.name}
+                        </h2>
+                        <span className="mb-1 text-sm text-steel-400">
+                          {formatBRL(
+                            subscription.cycle === "ANUAL"
+                              ? plan.annualPriceCents
+                              : plan.priceCents
+                          )}
+                          /mês
+                        </span>
+                      </div>
+                    </div>
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-neon/10 px-3 py-1.5 text-xs font-semibold text-neon">
+                      <span className="h-1.5 w-1.5 rounded-full bg-neon" />
+                      Ativa
                     </span>
                   </div>
-                </div>
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-neon/10 px-3 py-1.5 text-xs font-semibold text-neon">
-                  <span className="h-1.5 w-1.5 rounded-full bg-neon" />
-                  Ativo
-                </span>
-              </div>
 
-              {/* Ciclo de cobrança */}
-              <div className="relative mt-7">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-steel-300">Renovação</span>
-                  <span className="font-medium text-white">
-                    em {me.renovaEmDias} dias
-                  </span>
-                </div>
-                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/8">
-                  <div
-                    className="h-full rounded-full bg-royal-grad"
-                    style={{ width: `${me.cicloPct}%` }}
-                  />
-                </div>
-              </div>
+                  <div className="relative mt-7">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-steel-300">Renovação</span>
+                      <span className="font-medium text-white">
+                        em {diasParaRenovar} dias
+                      </span>
+                    </div>
+                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/8">
+                      <div
+                        className="h-full rounded-full bg-royal-grad"
+                        style={{ width: `${cicloPct}%` }}
+                      />
+                    </div>
+                  </div>
 
-              <div className="relative mt-7 grid grid-cols-3 gap-4 border-t border-white/8 pt-6">
-                <MiniStat
-                  icon={Scissors}
-                  value={String(me.cortesNoMes)}
-                  label="Atendimentos no mês"
-                />
-                <MiniStat
-                  icon={TrendingDown}
-                  value={formatBRL(me.economiaNoMes)}
-                  label="Economia no mês"
-                  accent
-                />
-                <MiniStat
-                  icon={Crown}
-                  value="Ilimitado"
-                  label="Cortes restantes"
-                />
-              </div>
+                  <div className="relative mt-7 grid grid-cols-3 gap-4 border-t border-white/8 pt-6">
+                    <MiniStat
+                      icon={Scissors}
+                      value={String(atendimentosNoMes)}
+                      label="Atendimentos no mês"
+                    />
+                    <MiniStat
+                      icon={Gift}
+                      value={formatBRL(economiaNoMes)}
+                      label="Economia acumulada"
+                      accent
+                    />
+                    <MiniStat
+                      icon={Crown}
+                      value={String(totalVisits)}
+                      label="Visitas no total"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="relative">
+                  <span className="label text-electric">Clube VIP</span>
+                  <h2 className="mt-2 font-display text-2xl text-white">
+                    Você ainda não é membro
+                  </h2>
+                  <p className="mt-2 max-w-md text-sm leading-relaxed text-steel-400">
+                    Assine um plano e tenha cortes ilimitados, prioridade na
+                    agenda e benefícios exclusivos todo mês.
+                  </p>
+                  <div className="mt-6 grid grid-cols-3 gap-4 border-t border-white/8 pt-6">
+                    <MiniStat
+                      icon={Scissors}
+                      value={String(atendimentosNoMes)}
+                      label="Atendimentos no mês"
+                    />
+                    <MiniStat
+                      icon={History}
+                      value={String(totalVisits)}
+                      label="Visitas no total"
+                    />
+                    <MiniStat
+                      icon={Gem}
+                      value="—"
+                      label="Plano ativo"
+                    />
+                  </div>
+                  <Link
+                    href="/planos"
+                    className="btn-royal label mt-6 inline-flex items-center gap-2 rounded-full px-6 py-3.5 text-white"
+                  >
+                    Conhecer os planos
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </div>
+              )}
             </div>
           </Reveal>
 
-          {/* Próximo agendamento */}
+          {/* Próximos horários */}
           <Reveal delay={0.08}>
             <div className="glass flex h-full flex-col rounded-3xl p-7">
-              <span className="label text-electric">Próximo horário</span>
-              <div className="mt-4 flex items-center gap-3">
-                <div className="grid h-12 w-12 place-items-center rounded-2xl border border-electric/25 bg-electric/10 text-electric">
-                  <Scissors className="h-6 w-6" strokeWidth={1.75} />
+              <span className="label text-electric">Próximos horários</span>
+              {upcoming.length === 0 ? (
+                <div className="mt-5 flex-1">
+                  <EmptyState>Nenhum horário marcado ainda.</EmptyState>
                 </div>
-                <div className="min-w-0">
-                  <p className="truncate font-semibold text-white">
-                    {proximo.service}
-                  </p>
-                  <p className="text-sm text-steel-400">{barber.name}</p>
-                </div>
-              </div>
-              <div className="mt-5 flex items-center gap-4 text-sm">
-                <span className="inline-flex items-center gap-1.5 text-steel-300">
-                  <CalendarDays className="h-4 w-4 text-electric" />
-                  Hoje
-                </span>
-                <span className="inline-flex items-center gap-1.5 text-steel-300">
-                  <Clock className="h-4 w-4 text-electric" />
-                  {proximo.hora}
-                </span>
-              </div>
+              ) : (
+                <ul className="mt-5 flex-1 space-y-3">
+                  {upcoming.slice(0, 3).map((a) => (
+                    <li
+                      key={a.id}
+                      className="rounded-2xl border border-white/6 bg-white/[0.02] p-3.5"
+                    >
+                      <p className="truncate text-sm font-semibold text-white">
+                        {a.items.map((i) => i.name).join(" + ")}
+                      </p>
+                      <p className="mt-1 flex flex-wrap items-center gap-3 text-xs text-steel-400">
+                        <span className="inline-flex items-center gap-1">
+                          <CalendarDays className="h-3 w-3 text-electric" />
+                          {whenLabel(a.startsAt)}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <Clock className="h-3 w-3 text-electric" />
+                          {formatDuration(a.durationMin)}
+                        </span>
+                      </p>
+                      <p className="mt-1 text-xs text-steel-400">
+                        {a.barber.user.name}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <Link
-                href={`/agendar?plano=${me.planId}`}
-                className="label mt-auto inline-flex items-center justify-center gap-2 rounded-xl border border-white/12 py-4 text-steel-200 transition-colors hover:border-electric/45 hover:text-white"
+                href="/agendar"
+                className="btn-royal label mt-5 inline-flex items-center justify-center gap-2 rounded-xl py-4 text-white"
               >
-                Remarcar
+                <CalendarPlus className="h-4 w-4" />
+                Agendar horário
               </Link>
             </div>
           </Reveal>
         </div>
 
-        {/* Ações rápidas */}
-        <div className="mt-5 grid gap-5 sm:grid-cols-3">
-          <Reveal delay={0.04}>
-            <QuickAction
-              href={`/agendar?plano=${me.planId}`}
-              icon={CalendarPlus}
-              title="Agendar agora"
-              desc="Marque seu próximo corte"
-              primary
-            />
-          </Reveal>
-          <Reveal delay={0.08}>
-            <QuickAction
-              href="/planos"
-              icon={Gem}
-              title="Gerenciar plano"
-              desc="Faça upgrade ou troque"
-            />
-          </Reveal>
-          <Reveal delay={0.12}>
-            <QuickAction
-              href="#historico"
-              icon={History}
-              title="Histórico"
-              desc="Veja seus atendimentos"
-            />
-          </Reveal>
-        </div>
-
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
           {/* Benefícios */}
-          <Reveal>
-            <div className="glass h-full rounded-3xl p-7">
-              <div className="flex items-center gap-2">
-                <Gift className="h-5 w-5 text-electric" />
-                <h3 className="font-display text-lg text-white">
-                  Benefícios do seu plano
-                </h3>
+          {plan && (
+            <Reveal>
+              <div className="glass h-full rounded-3xl p-7">
+                <div className="flex items-center gap-2">
+                  <Gift className="h-5 w-5 text-electric" />
+                  <h3 className="font-display text-lg text-white">
+                    Benefícios do seu plano
+                  </h3>
+                </div>
+                <ul className="mt-5 grid gap-3">
+                  {plan.features.map((f) => (
+                    <li key={f} className="flex items-start gap-2.5 text-sm">
+                      <span className="mt-0.5 grid h-5 w-5 flex-none place-items-center rounded-full bg-electric/15">
+                        <Check
+                          className="h-3 w-3 text-electric"
+                          strokeWidth={3}
+                        />
+                      </span>
+                      <span className="text-steel-300">{f}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <ul className="mt-5 grid gap-3">
-                {plan.features.map((f) => (
-                  <li key={f} className="flex items-start gap-2.5 text-sm">
-                    <span className="mt-0.5 grid h-5 w-5 flex-none place-items-center rounded-full bg-electric/15">
-                      <Check className="h-3 w-3 text-electric" strokeWidth={3} />
-                    </span>
-                    <span className="text-steel-300">{f}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </Reveal>
+            </Reveal>
+          )}
 
           {/* Histórico */}
-          <Reveal delay={0.08}>
-            <div
-              id="historico"
-              className="glass h-full scroll-mt-24 rounded-3xl p-7"
-            >
+          <Reveal delay={0.08} className={plan ? "" : "lg:col-span-2"}>
+            <div className="glass h-full rounded-3xl p-7">
               <div className="flex items-center justify-between">
                 <h3 className="font-display text-lg text-white">
                   Seus atendimentos
                 </h3>
-                <span className="text-sm text-steel-400">38 no total</span>
+                <span className="text-sm text-steel-400">
+                  {totalVisits} concluídos
+                </span>
               </div>
-              <ul className="mt-5 space-y-1">
-                {historico.map((h, i) => (
-                  <li
-                    key={i}
-                    className="flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-white/[0.03]"
-                  >
-                    <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-white/5 text-steel-300">
-                      <Scissors className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-white">
-                        {h.service}
+              {history.length === 0 ? (
+                <div className="mt-5">
+                  <EmptyState>
+                    Seu histórico aparece aqui depois do primeiro corte.
+                  </EmptyState>
+                </div>
+              ) : (
+                <ul className="mt-5 space-y-1">
+                  {history.map((h) => (
+                    <li
+                      key={h.id}
+                      className="flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-white/[0.03]"
+                    >
+                      <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-white/5 text-steel-300">
+                        <Scissors className="h-4 w-4" />
                       </span>
-                      <span className="text-xs text-steel-400">
-                        {h.date} · {h.time}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-white">
+                          {h.items.map((i) => i.name).join(" + ")}
+                        </span>
+                        <span className="text-xs text-steel-400">
+                          {whenLabel(h.startsAt)} · {h.barber.user.name}
+                        </span>
                       </span>
-                    </span>
-                    <span className="label flex-none rounded-full bg-electric/10 px-2.5 py-1.5 text-electric">
-                      Incluso
-                    </span>
-                  </li>
-                ))}
-              </ul>
+                      <span
+                        className={`label flex-none rounded-full px-2.5 py-1.5 ${
+                          h.status === "CANCELADO"
+                            ? "bg-white/5 text-steel-400"
+                            : h.kind === "ASSINANTE"
+                              ? "bg-electric/10 text-electric"
+                              : "bg-neon/10 text-neon"
+                        }`}
+                      >
+                        {h.status === "CANCELADO"
+                          ? "Cancelado"
+                          : h.kind === "ASSINANTE"
+                            ? "Incluso"
+                            : formatBRL(h.totalCents)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </Reveal>
         </div>
@@ -324,47 +427,7 @@ function MiniStat({
       >
         {value}
       </div>
-      <div className="mt-1 text-xs text-steel-400">{label}</div>
+      <div className="mt-1 text-xs leading-snug text-steel-400">{label}</div>
     </div>
-  );
-}
-
-function QuickAction({
-  href,
-  icon: Icon,
-  title,
-  desc,
-  primary,
-}: {
-  href: string;
-  icon: LucideIcon;
-  title: string;
-  desc: string;
-  primary?: boolean;
-}) {
-  return (
-    <Link
-      href={href}
-      className={`group flex items-center gap-4 rounded-2xl p-5 transition-transform duration-300 hover:-translate-y-0.5 ${
-        primary
-          ? "border border-electric/45 bg-surface shadow-glow-sm"
-          : "glass glass-hover"
-      }`}
-    >
-      <span
-        className={`grid h-12 w-12 flex-none place-items-center rounded-xl ${
-          primary
-            ? "bg-royal-grad text-white"
-            : "border border-electric/25 bg-electric/10 text-electric"
-        }`}
-      >
-        <Icon className="h-6 w-6" strokeWidth={1.75} />
-      </span>
-      <span className="flex-1">
-        <span className="block font-semibold text-white">{title}</span>
-        <span className="text-sm text-steel-400">{desc}</span>
-      </span>
-      <ArrowRight className="h-5 w-5 text-electric transition-transform group-hover:translate-x-1" />
-    </Link>
   );
 }
