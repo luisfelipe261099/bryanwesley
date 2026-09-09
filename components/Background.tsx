@@ -1,12 +1,13 @@
-// Fundo sólido e limpo (estilo Apple): quase-preto com um realce
-// radial bem sutil no topo. Sem grade, sem brilhos coloridos.
+// Fundo do sistema: neutro #0B0E14 com um halo elétrico bem sutil no topo
+// e a malha pontilhada do design system em opacidade baixíssima.
 export function Background() {
   return (
     <div
       aria-hidden="true"
       className="pointer-events-none fixed inset-0 -z-10 bg-ink"
     >
-      <div className="absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(ellipse_60%_100%_at_50%_0%,rgba(10,132,255,0.10),transparent_70%)]" />
+      <div className="absolute inset-0 bg-grid-faint bg-[size:28px_28px] opacity-[0.045]" />
+      <div className="absolute inset-x-0 top-0 h-[460px] bg-[radial-gradient(ellipse_60%_100%_at_50%_0%,rgba(30,184,255,0.13),transparent_70%)]" />
     </div>
   );
 }

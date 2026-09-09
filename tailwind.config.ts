@@ -1,5 +1,11 @@
 import type { Config } from "tailwindcss";
 
+// ───────────────────────────────────────────────────────────
+// Design system: "Modern Electric Precision"
+// Primary  #1EB8FF · Secondary #2979FF · Tertiary #00E5FF
+// Neutral  #0B0E14
+// Headline/Label: Space Grotesk · Body: Plus Jakarta Sans
+// ───────────────────────────────────────────────────────────
 const config: Config = {
   content: [
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
@@ -8,34 +14,44 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Fundo base (quase-preto, estilo Apple dark)
+        // Neutro base — azul-petróleo quase preto
         ink: {
-          DEFAULT: "#0A0A0B",
-          800: "#0E0E10",
-          700: "#161618",
-          600: "#1C1C1E",
+          DEFAULT: "#0B0E14",
+          800: "#0E121A",
+          700: "#141922",
+          600: "#1A202B",
         },
-        // Superfícies SÓLIDAS elevadas (cinzas Apple)
+        // Superfícies elevadas (cards, inputs, bordas sólidas)
         surface: {
-          DEFAULT: "#1C1C1E", // cards
-          2: "#2C2C2E", // elevado / hover
-          3: "#3A3A3C", // bordas sólidas / inputs
+          DEFAULT: "#131823",
+          2: "#1A2130",
+          3: "#252E3F",
         },
         // Texto
         steel: {
-          200: "#EBEBF0",
-          300: "#C7C7CC", // secundário
-          400: "#98989F", // terciário
+          200: "#E6EAF2",
+          300: "#A9B4C7", // secundário
+          400: "#6F7C93", // terciário
         },
-        // Azul de sistema (systemBlue)
+        // Secondary — azul profundo (ações sólidas, gradiente)
         royal: {
-          DEFAULT: "#0A84FF",
-          400: "#409CFF",
-          500: "#0A84FF",
-          600: "#0071E3",
-          700: "#0058B9",
+          DEFAULT: "#2979FF",
+          400: "#5B96FF",
+          500: "#2979FF",
+          600: "#1E63E0",
+          700: "#1749A8",
         },
-        electric: "#5EAEFF", // accent claro p/ ícones e labels (bom contraste no escuro)
+        // Primary — azul elétrico (destaques, ícones, links)
+        electric: {
+          DEFAULT: "#1EB8FF",
+          soft: "#7BD3FF",
+          deep: "#0E93D6",
+        },
+        // Tertiary — ciano (acento pontual: VIP, métricas positivas)
+        neon: {
+          DEFAULT: "#00E5FF",
+          soft: "#6FF1FF",
+        },
         gold: "#E9B872",
       },
       fontFamily: {
@@ -43,15 +59,19 @@ const config: Config = {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
       },
       boxShadow: {
-        // Sombras neutras (sem brilho colorido)
-        glow: "0 12px 40px -16px rgba(0,0,0,0.8)",
-        "glow-sm": "0 6px 18px -8px rgba(0,0,0,0.6)",
-        card: "0 1px 2px rgba(0,0,0,0.4), 0 10px 30px -18px rgba(0,0,0,0.8)",
-        blue: "0 8px 24px -10px rgba(10,132,255,0.55)",
+        glow: "0 16px 48px -20px rgba(30,184,255,0.45)",
+        "glow-sm": "0 8px 22px -10px rgba(30,184,255,0.4)",
+        card: "0 1px 2px rgba(0,0,0,0.5), 0 12px 34px -20px rgba(0,0,0,0.9)",
+        blue: "0 10px 28px -12px rgba(41,121,255,0.6)",
       },
       backgroundImage: {
-        // Azul quase-sólido com leve profundidade (não um gradiente chamativo)
-        "royal-grad": "linear-gradient(180deg, #2B9BFF 0%, #0A84FF 100%)",
+        // Primary → Secondary, o gradiente-assinatura do sistema
+        "royal-grad": "linear-gradient(135deg, #1EB8FF 0%, #2979FF 100%)",
+        // Tertiary → Primary, para o acento VIP
+        "neon-grad": "linear-gradient(135deg, #00E5FF 0%, #1EB8FF 100%)",
+        // Malha pontilhada discreta (fundo de seções em destaque)
+        "grid-faint":
+          "radial-gradient(rgba(255,255,255,0.18) 1px, transparent 1px)",
       },
       borderRadius: {
         "2xl": "1.1rem",

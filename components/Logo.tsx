@@ -1,37 +1,49 @@
+import { barbershop } from "@/lib/data";
+
+// Emblema hexagonal com poste de barbeiro — traço elétrico sobre o neutro.
 export function LogoMark({ className = "h-9 w-9" }: { className?: string }) {
   return (
     <svg viewBox="0 0 40 40" fill="none" className={className} aria-hidden="true">
       <defs>
-        <linearGradient id="bw-top" x1="20" y1="0" x2="20" y2="40">
-          <stop stopColor="#ffffff" stopOpacity="0.18" />
-          <stop offset="0.4" stopColor="#ffffff" stopOpacity="0" />
+        <linearGradient id="bw-stroke" x1="20" y1="3" x2="20" y2="37">
+          <stop stopColor="#00E5FF" />
+          <stop offset="1" stopColor="#2979FF" />
         </linearGradient>
       </defs>
-      {/* Ícone de app: quadrado arredondado sólido */}
-      <rect x="1.5" y="1.5" width="37" height="37" rx="10.5" fill="#0A84FF" />
-      <rect x="1.5" y="1.5" width="37" height="37" rx="10.5" fill="url(#bw-top)" />
+      <rect x="1" y="1" width="38" height="38" rx="11" fill="#131823" />
       <rect
-        x="1.5"
-        y="1.5"
-        width="37"
-        height="37"
-        rx="10.5"
-        stroke="#ffffff"
-        strokeOpacity="0.12"
+        x="1"
+        y="1"
+        width="38"
+        height="38"
+        rx="11"
+        stroke="url(#bw-stroke)"
+        strokeOpacity="0.55"
+        strokeWidth="1.2"
       />
-      <text
-        x="20"
-        y="21"
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontFamily="var(--font-sans), system-ui, sans-serif"
-        fontSize="17"
-        fontWeight="800"
-        letterSpacing="-0.5"
-        fill="#ffffff"
-      >
-        BW
-      </text>
+      {/* Hexágono */}
+      <path
+        d="M20 7.5 L30 13 V27 L20 32.5 L10 27 V13 Z"
+        stroke="url(#bw-stroke)"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      {/* Poste de barbeiro */}
+      <rect
+        x="17.4"
+        y="13.6"
+        width="5.2"
+        height="12.8"
+        rx="2.6"
+        stroke="#1EB8FF"
+        strokeWidth="1.3"
+      />
+      <path
+        d="M17.8 24.2 22.2 19.4M17.8 20.6 22.2 15.8"
+        stroke="#00E5FF"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -39,20 +51,22 @@ export function LogoMark({ className = "h-9 w-9" }: { className?: string }) {
 export function Logo({
   className = "",
   compact = false,
+  subtitle = barbershop.unit,
 }: {
   className?: string;
   compact?: boolean;
+  subtitle?: string;
 }) {
   return (
     <span className={`inline-flex items-center gap-2.5 ${className}`}>
       <LogoMark />
       {!compact && (
-        <span className="flex flex-col leading-none">
-          <span className="font-display text-xl tracking-wide text-white">
-            BRYAN WESLEY
+        <span className="flex flex-col gap-1 leading-none">
+          <span className="whitespace-nowrap font-display text-[15px] uppercase tracking-[0.2em] text-white">
+            Bryan Wesley
           </span>
-          <span className="text-[10px] font-medium uppercase tracking-[0.32em] text-steel-400">
-            Barbearia
+          <span className="label whitespace-nowrap text-[9px] tracking-[0.28em] text-steel-400">
+            {subtitle}
           </span>
         </span>
       )}

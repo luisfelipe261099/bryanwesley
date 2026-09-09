@@ -2,10 +2,10 @@ import {
   Scissors,
   Brush,
   Crown,
+  Droplet,
   Ruler,
   Eye,
   Sparkles,
-  Palette,
   Droplets,
   type LucideIcon,
 } from "lucide-react";
@@ -15,9 +15,9 @@ export const serviceIcons: Record<string, LucideIcon> = {
   corte: Scissors,
   barba: Brush,
   combo: Crown,
+  lavagem: Droplet,
   pezinho: Ruler,
   sobrancelha: Eye,
   platinado: Sparkles,
-  pigmentacao: Palette,
   hidratacao: Droplets,
 };

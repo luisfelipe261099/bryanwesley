@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { Check, Minus, HelpCircle } from "lucide-react";
 import { Background } from "@/components/Background";
 import { Navbar } from "@/components/Navbar";
@@ -7,13 +10,14 @@ import { PlanCard } from "@/components/PlanCard";
 import { plans } from "@/lib/data";
 
 const comparison = [
-  { feature: "Cortes de cabelo", essencial: "4/mês", premium: "Ilimitado", vip: "Ilimitado" },
-  { feature: "Barba", essencial: "—", premium: "Ilimitado", vip: "Ilimitado" },
-  { feature: "Sobrancelha", essencial: "—", premium: "Inclusa", vip: "Inclusa" },
-  { feature: "Hidratação capilar", essencial: "—", premium: "—", vip: "1/mês" },
-  { feature: "Prioridade na agenda", essencial: true, premium: true, vip: true },
-  { feature: "Horário fixo semanal", essencial: false, premium: true, vip: true },
-  { feature: "Bebida cortesia", essencial: false, premium: false, vip: true },
+  { feature: "Cortes de cabelo", silver: "2/mês", gold: "Ilimitado", diamond: "Ilimitado" },
+  { feature: "Barboterapia", silver: "—", gold: "Semanal", diamond: "Ilimitada" },
+  { feature: "Sobrancelha", silver: "—", gold: "Inclusa", diamond: "Inclusa" },
+  { feature: "Spa capilar", silver: "—", gold: "—", diamond: "1/mês" },
+  { feature: "Prioridade na agenda", silver: true, gold: true, diamond: true },
+  { feature: "Lounge VIP privativo", silver: false, gold: false, diamond: true },
+  { feature: "Convidado mensal grátis", silver: false, gold: false, diamond: true },
+  { feature: "OFF em produtos", silver: "10%", gold: "20%", diamond: "25%" },
 ];
 
 const faq = [
@@ -31,7 +35,7 @@ const faq = [
   },
   {
     q: "O plano vale para outras pessoas?",
-    a: "O plano é individual, vinculado ao seu cadastro e WhatsApp.",
+    a: "O plano é individual, vinculado ao seu cadastro e WhatsApp. O Diamond dá 1 convidado por mês.",
   },
 ];
 
@@ -44,6 +48,8 @@ function Cell({ value }: { value: string | boolean }) {
 }
 
 export default function Planos() {
+  const [cycle, setCycle] = useState<"mensal" | "anual">("mensal");
+
   return (
     <>
       <Background />
@@ -52,23 +58,52 @@ export default function Planos() {
       <main className="mx-auto max-w-7xl px-5 pb-10 pt-28 lg:px-8 lg:pt-36">
         <Reveal>
           <div className="mx-auto max-w-2xl text-center">
-            <span className="text-xs font-semibold uppercase tracking-[0.28em] text-electric">
-              Planos de assinatura
-            </span>
-            <h1 className="mt-3 font-display text-6xl text-white sm:text-7xl">
-              Vire <span className="text-gradient">mensalista</span>
+            <span className="label text-electric">Membros privados</span>
+            <h1 className="mt-4 font-display text-4xl text-white sm:text-5xl">
+              Clube de Assinatura
+              <br />
+              <span className="text-gradient">Bryan Wesley</span>
             </h1>
             <p className="mt-4 text-lg text-steel-300">
-              Escolha o plano que combina com sua rotina. Economize, ganhe
-              prioridade e mantenha o visual sempre em dia.
+              Cortes ilimitados, prioridade de agenda e experiências exclusivas
+              sob medida.
             </p>
+          </div>
+        </Reveal>
+
+        {/* Ciclo de cobrança */}
+        <Reveal delay={0.08}>
+          <div className="mt-10 flex justify-center">
+            <div className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-surface p-1.5">
+              <CycleButton
+                active={cycle === "mensal"}
+                onClick={() => setCycle("mensal")}
+              >
+                Mensal
+              </CycleButton>
+              <CycleButton
+                active={cycle === "anual"}
+                onClick={() => setCycle("anual")}
+              >
+                Anual
+                <span
+                  className={`ml-2 rounded-full px-2 py-1 text-[9px] ${
+                    cycle === "anual"
+                      ? "bg-white/20 text-white"
+                      : "bg-neon/15 text-neon"
+                  }`}
+                >
+                  2 meses off
+                </span>
+              </CycleButton>
+            </div>
           </div>
         </Reveal>
 
         <div className="mt-16 grid gap-6 md:grid-cols-3">
           {plans.map((p, i) => (
             <Reveal key={p.id} delay={i * 0.08}>
-              <PlanCard plan={p} />
+              <PlanCard plan={p} cycle={cycle} />
             </Reveal>
           ))}
         </div>
@@ -76,24 +111,24 @@ export default function Planos() {
         {/* Tabela comparativa */}
         <Reveal>
           <div className="mt-20">
-            <h2 className="text-center font-display text-4xl text-white">
+            <h2 className="text-center font-display text-3xl text-white">
               Compare os planos
             </h2>
             <div className="mt-8 overflow-x-auto">
               <table className="w-full min-w-[640px] border-separate border-spacing-0">
                 <thead>
                   <tr>
-                    <th className="w-1/3 pb-4 text-left text-sm font-medium text-steel-400">
+                    <th className="label w-1/3 pb-4 text-left text-steel-400">
                       Benefício
                     </th>
                     {plans.map((p) => (
                       <th
                         key={p.id}
-                        className={`pb-4 text-center font-display text-2xl ${
+                        className={`pb-4 text-center font-display text-lg ${
                           p.highlight ? "text-electric" : "text-white"
                         }`}
                       >
-                        {p.name}
+                        {p.name.replace("Plano ", "")}
                       </th>
                     ))}
                   </tr>
@@ -113,21 +148,21 @@ export default function Planos() {
                           i === 0 ? "" : "border-t border-white/6"
                         }`}
                       >
-                        <Cell value={row.essencial} />
+                        <Cell value={row.silver} />
                       </td>
                       <td
-                        className={`bg-royal/[0.06] py-3.5 text-center ${
+                        className={`bg-electric/[0.05] py-3.5 text-center ${
                           i === 0 ? "" : "border-t border-white/6"
                         }`}
                       >
-                        <Cell value={row.premium} />
+                        <Cell value={row.gold} />
                       </td>
                       <td
                         className={`py-3.5 text-center ${
                           i === 0 ? "" : "border-t border-white/6"
                         }`}
                       >
-                        <Cell value={row.vip} />
+                        <Cell value={row.diamond} />
                       </td>
                     </tr>
                   ))}
@@ -140,7 +175,7 @@ export default function Planos() {
         {/* FAQ */}
         <Reveal>
           <div className="mt-20">
-            <h2 className="text-center font-display text-4xl text-white">
+            <h2 className="text-center font-display text-3xl text-white">
               Perguntas frequentes
             </h2>
             <div className="mx-auto mt-8 grid max-w-3xl gap-4 sm:grid-cols-2">
@@ -148,7 +183,9 @@ export default function Planos() {
                 <div key={item.q} className="glass rounded-2xl p-5">
                   <div className="flex items-center gap-2">
                     <HelpCircle className="h-4 w-4 flex-none text-electric" />
-                    <h3 className="font-semibold text-white">{item.q}</h3>
+                    <h3 className="font-display text-base text-white">
+                      {item.q}
+                    </h3>
                   </div>
                   <p className="mt-2 text-sm leading-relaxed text-steel-400">
                     {item.a}
@@ -162,5 +199,28 @@ export default function Planos() {
 
       <Footer />
     </>
+  );
+}
+
+function CycleButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`label inline-flex items-center rounded-full px-6 py-3 transition-all ${
+        active ? "btn-royal text-white" : "text-steel-300 hover:text-white"
+      }`}
+    >
+      {children}
+    </button>
   );
 }

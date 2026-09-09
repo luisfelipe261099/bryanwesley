@@ -7,7 +7,7 @@ import { Logo } from "./Logo";
 
 const links = [
   { href: "/#servicos", label: "Serviços" },
-  { href: "/planos", label: "Planos" },
+  { href: "/planos", label: "Clube VIP" },
   { href: "/#como-funciona", label: "Como funciona" },
   { href: "/#contato", label: "Contato" },
 ];
@@ -27,7 +27,7 @@ export function Navbar() {
     <header
       className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${
         scrolled
-          ? "border-b border-white/5 bg-ink/80 backdrop-blur-xl"
+          ? "border-b border-white/8 bg-ink-800/90 backdrop-blur-xl"
           : "border-b border-transparent"
       }`}
     >
@@ -41,7 +41,7 @@ export function Navbar() {
             <Link
               key={l.href}
               href={l.href}
-              className="text-sm font-medium text-steel-300 transition-colors hover:text-white"
+              className="text-sm font-medium text-steel-300 transition-colors hover:text-electric"
             >
               {l.label}
             </Link>
@@ -56,8 +56,8 @@ export function Navbar() {
             Entrar
           </Link>
           <Link
-            href="/entrar"
-            className="btn-royal inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-white"
+            href="/agendar"
+            className="btn-royal label inline-flex items-center gap-2 rounded-full px-5 py-3 text-white"
           >
             <CalendarPlus className="h-4 w-4" />
             Agendar
@@ -76,14 +76,14 @@ export function Navbar() {
       </nav>
 
       {open && (
-        <div className="border-t border-white/5 bg-ink/95 px-5 pb-6 pt-2 backdrop-blur-xl md:hidden">
+        <div className="border-t border-white/8 bg-ink-800/98 px-5 pb-6 pt-2 backdrop-blur-xl md:hidden">
           <div className="flex flex-col">
             {links.map((l) => (
               <Link
                 key={l.href}
                 href={l.href}
                 onClick={() => setOpen(false)}
-                className="border-b border-white/5 py-3.5 text-base font-medium text-steel-300"
+                className="border-b border-white/6 py-3.5 text-base font-medium text-steel-300"
               >
                 {l.label}
               </Link>
@@ -93,14 +93,14 @@ export function Navbar() {
             <Link
               href="/entrar"
               onClick={() => setOpen(false)}
-              className="rounded-full border border-white/10 py-3 text-center text-sm font-semibold text-white"
+              className="rounded-full border border-white/12 py-3.5 text-center text-sm font-semibold text-white"
             >
               Entrar
             </Link>
             <Link
-              href="/entrar"
+              href="/agendar"
               onClick={() => setOpen(false)}
-              className="btn-royal inline-flex items-center justify-center gap-2 rounded-full py-3 text-sm font-semibold text-white"
+              className="btn-royal label inline-flex items-center justify-center gap-2 rounded-full py-4 text-white"
             >
               <CalendarPlus className="h-4 w-4" />
               Agendar horário

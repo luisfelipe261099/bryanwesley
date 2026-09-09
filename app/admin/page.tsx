@@ -1,18 +1,26 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
 import {
   DollarSign,
-  CalendarCheck,
-  Users,
+  Repeat,
   Activity,
   Target,
   Plus,
   Phone,
   Crown,
   ArrowUpRight,
+  Download,
+  FileBarChart,
+  Gem,
+  Percent,
+  AlertTriangle,
   type LucideIcon,
 } from "lucide-react";
 import { Background } from "@/components/Background";
 import { AppHeader } from "@/components/AppHeader";
+import { BottomNav } from "@/components/BottomNav";
 import { Reveal } from "@/components/Reveal";
 import { GerenciarAgenda } from "@/components/GerenciarAgenda";
 import {
@@ -20,7 +28,12 @@ import {
   todayAppointments,
   clients,
   weeklyRevenue,
+  teamPerformance,
+  operationalAlerts,
+  barbers,
+  barbershop,
   formatBRL,
+  formatCompactBRL,
   type ApptStatus,
 } from "@/lib/data";
 
@@ -30,12 +43,12 @@ const statusStyles: Record<
 > = {
   concluido: {
     label: "Concluído",
-    cls: "bg-emerald-400/10 text-emerald-300",
-    dot: "bg-emerald-400",
+    cls: "bg-neon/10 text-neon",
+    dot: "bg-neon",
   },
   confirmado: {
     label: "Confirmado",
-    cls: "bg-royal/15 text-electric",
+    cls: "bg-electric/10 text-electric",
     dot: "bg-electric",
   },
   pendente: {
@@ -45,7 +58,11 @@ const statusStyles: Record<
   },
 };
 
+const periods = ["Hoje", "Esta semana", "Este mês", "Personalizado"];
+
 export default function AdminDashboard() {
+  const [period, setPeriod] = useState("Hoje");
+
   const metaPct = Math.round(
     (adminStats.faturamentoMes / adminStats.metaMes) * 100
   );
@@ -54,22 +71,27 @@ export default function AdminDashboard() {
   return (
     <>
       <Background />
-      <AppHeader badge="Administrador" user={{ name: "Bryan W.", initial: "B" }} />
+      <AppHeader badge="Gestão executiva" user={{ name: "Bryan W.", initial: "B" }} />
 
-      <main className="mx-auto max-w-7xl overflow-x-clip px-5 pb-20 pt-24 lg:px-8">
+      <main className="mx-auto max-w-7xl overflow-x-clip px-5 pb-28 pt-24 lg:px-8">
         <Reveal>
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <h1 className="font-display text-5xl text-white sm:text-6xl">
-                Painel
+              <span className="label inline-flex items-center gap-1.5 text-electric">
+                <span className="h-1.5 w-1.5 rounded-full bg-neon" />
+                Em tempo real
+              </span>
+              <h1 className="mt-3 font-display text-3xl text-white sm:text-4xl">
+                Dashboard Geral
               </h1>
-              <p className="mt-2 text-steel-400">
-                Visão geral da barbearia · Hoje, 6 atendimentos
+              <p className="mt-2 text-sm text-steel-400">
+                Barbearia {barbershop.name} · {barbershop.unit} ·{" "}
+                {adminStats.agendamentosHoje} atendimentos hoje
               </p>
             </div>
             <Link
               href="/agendar"
-              className="btn-royal inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold text-white"
+              className="btn-royal label inline-flex items-center gap-2 rounded-full px-5 py-3.5 text-white"
             >
               <Plus className="h-4 w-4" />
               Novo agendamento
@@ -77,38 +99,59 @@ export default function AdminDashboard() {
           </div>
         </Reveal>
 
+        {/* Filtro de período */}
+        <Reveal delay={0.02}>
+          <div className="mt-6 flex flex-wrap gap-2">
+            {periods.map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPeriod(p)}
+                aria-pressed={period === p}
+                className={`label rounded-full px-4 py-2.5 transition-all ${
+                  period === p
+                    ? "btn-royal text-white"
+                    : "border border-white/10 bg-surface/70 text-steel-300 hover:border-electric/40 hover:text-white"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </Reveal>
+
         {/* KPIs */}
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Reveal delay={0.02}>
+        <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Reveal delay={0.04}>
             <Kpi
               icon={DollarSign}
               label="Faturamento hoje"
               value={formatBRL(adminStats.faturamentoHoje)}
-              trend="+12%"
+              trend={adminStats.faturamentoHojeTrend}
             />
           </Reveal>
-          <Reveal delay={0.06}>
+          <Reveal delay={0.08}>
             <Kpi
-              icon={CalendarCheck}
-              label="Agendamentos hoje"
-              value={String(adminStats.agendamentosHoje)}
-              trend="+2"
+              icon={Repeat}
+              label="MRR (assinaturas)"
+              value={formatCompactBRL(adminStats.mrr)}
+              trend={adminStats.mrrTrend}
             />
           </Reveal>
-          <Reveal delay={0.1}>
-            <Kpi
-              icon={Users}
-              label="Assinantes ativos"
-              value={String(adminStats.assinantesAtivos)}
-              trend="+5"
-            />
-          </Reveal>
-          <Reveal delay={0.14}>
+          <Reveal delay={0.12}>
             <Kpi
               icon={Activity}
               label="Taxa de ocupação"
               value={`${adminStats.taxaOcupacao}%`}
-              trend="+8%"
+              trend={adminStats.ocupacaoTrend}
+            />
+          </Reveal>
+          <Reveal delay={0.16}>
+            <Kpi
+              icon={Gem}
+              label="Membros ativos"
+              value={String(adminStats.assinantesAtivos)}
+              trend="+12"
             />
           </Reveal>
         </div>
@@ -118,25 +161,26 @@ export default function AdminDashboard() {
           <Reveal>
             <div className="glass rounded-3xl p-6">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-white">
+                <h2 className="font-display text-lg text-white">
                   Agenda de hoje
                 </h2>
-                <span className="text-sm text-steel-400">Ter · 09h–20h</span>
+                <span className="label text-steel-400">09h — 20h</span>
               </div>
 
               <ul className="mt-5 space-y-2">
                 {todayAppointments.map((a) => {
                   const st = statusStyles[a.status];
+                  const barber = barbers.find((b) => b.id === a.barberId);
                   return (
                     <li
                       key={a.id}
-                      className="flex items-center gap-3 rounded-2xl border border-white/6 bg-white/[0.02] p-3 transition-colors hover:border-white/15 sm:gap-4 sm:p-3.5"
+                      className="flex items-center gap-3 rounded-2xl border border-white/6 bg-white/[0.02] p-3 transition-colors hover:border-electric/30 sm:gap-4 sm:p-3.5"
                     >
-                      <div className="flex w-12 flex-none flex-col items-center sm:w-14">
-                        <span className="font-display text-xl leading-none text-white sm:text-2xl">
+                      <div className="flex w-14 flex-none flex-col items-center">
+                        <span className="font-display text-base leading-none text-white sm:text-lg">
                           {a.time}
                         </span>
-                        <span className="mt-0.5 text-[10px] text-steel-400">
+                        <span className="mt-1 text-[10px] text-steel-400">
                           {a.durationMin}min
                         </span>
                       </div>
@@ -150,8 +194,9 @@ export default function AdminDashboard() {
                             <Crown className="h-3.5 w-3.5 flex-none text-gold" />
                           )}
                         </div>
-                        <span className="text-sm text-steel-400">
+                        <span className="block truncate text-sm text-steel-400">
                           {a.serviceName}
+                          {barber && ` · ${barber.short}`}
                         </span>
                       </div>
                       <div className="flex flex-none flex-col items-end gap-1.5">
@@ -159,7 +204,7 @@ export default function AdminDashboard() {
                           {a.kind === "assinante" ? "Plano" : formatBRL(a.price)}
                         </span>
                         <span
-                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${st.cls}`}
+                          className={`label inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 ${st.cls}`}
                         >
                           <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
                           {st.label}
@@ -172,19 +217,17 @@ export default function AdminDashboard() {
             </div>
           </Reveal>
 
-          {/* Coluna direita: faturamento semana + meta */}
+          {/* Coluna direita: faturamento + meta */}
           <div className="flex flex-col gap-5">
             <Reveal delay={0.06}>
               <div className="glass rounded-3xl p-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold text-white">
+                  <h2 className="font-display text-lg text-white">
                     Faturamento
                   </h2>
-                  <span className="text-xs font-medium text-steel-400">
-                    Últimos 7 dias
-                  </span>
+                  <span className="label text-steel-400">Últimos 7 dias</span>
                 </div>
-                <div className="mt-2 font-display text-4xl text-white">
+                <div className="mt-2 font-display text-3xl text-white">
                   {formatBRL(weeklyRevenue.reduce((a, d) => a + d.value, 0))}
                 </div>
 
@@ -199,7 +242,7 @@ export default function AdminDashboard() {
                       >
                         <div
                           className={`w-full rounded-t-md ${
-                            isPeak ? "bg-royal-grad" : "bg-royal/45"
+                            isPeak ? "bg-royal-grad" : "bg-electric/30"
                           }`}
                           style={{ height: `${hPx}px` }}
                           title={formatBRL(d.value)}
@@ -218,10 +261,12 @@ export default function AdminDashboard() {
               <div className="glass rounded-3xl p-6">
                 <div className="flex items-center gap-2">
                   <Target className="h-5 w-5 text-electric" />
-                  <h2 className="text-lg font-semibold text-white">Meta do mês</h2>
+                  <h2 className="font-display text-lg text-white">
+                    Meta do mês
+                  </h2>
                 </div>
                 <div className="mt-4 flex items-end justify-between">
-                  <span className="font-display text-3xl text-white">
+                  <span className="font-display text-2xl text-white">
                     {formatBRL(adminStats.faturamentoMes)}
                   </span>
                   <span className="text-sm text-steel-400">
@@ -234,13 +279,116 @@ export default function AdminDashboard() {
                     style={{ width: `${metaPct}%` }}
                   />
                 </div>
-                <p className="mt-2 text-sm text-steel-400">
+                <p className="mt-2.5 text-sm text-steel-400">
                   <span className="font-semibold text-electric">{metaPct}%</span>{" "}
                   da meta atingida
                 </p>
               </div>
             </Reveal>
           </div>
+        </div>
+
+        {/* Desempenho da equipe + atenção operacional */}
+        <div className="mt-5 grid gap-5 lg:grid-cols-[1.4fr_1fr]">
+          <Reveal>
+            <div className="glass h-full rounded-3xl p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="font-display text-lg text-white">
+                  Desempenho da equipe
+                </h2>
+                <span className="label text-steel-400">Este mês</span>
+              </div>
+              <ul className="mt-5 space-y-2">
+                {teamPerformance.map((t) => {
+                  const b = barbers.find((x) => x.id === t.barberId)!;
+                  return (
+                    <li
+                      key={t.barberId}
+                      className="flex items-center gap-3 rounded-2xl border border-white/6 bg-white/[0.02] p-3.5"
+                    >
+                      <span className="grid h-10 w-10 flex-none place-items-center rounded-full bg-royal-grad font-display text-base text-white">
+                        {b.initial}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-white">
+                          {b.name}
+                        </p>
+                        <p className="truncate text-xs text-steel-400">
+                          {b.role}
+                        </p>
+                      </div>
+                      <div className="flex-none text-right">
+                        <p className="font-display text-base text-white">
+                          {formatBRL(t.faturamento)}
+                        </p>
+                        <p className="inline-flex items-center gap-1 text-xs text-electric">
+                          <Percent className="h-3 w-3" />
+                          comissão {formatBRL(t.comissao)}
+                        </p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          </Reveal>
+
+          <Reveal delay={0.06}>
+            <div className="glass flex h-full flex-col rounded-3xl p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="font-display text-lg text-white">
+                  Atenção operacional
+                </h2>
+                <span className="label text-amber-300">
+                  {operationalAlerts.length} pendências
+                </span>
+              </div>
+              <ul className="mt-5 space-y-2">
+                {operationalAlerts.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex items-start gap-3 rounded-2xl border border-white/6 bg-white/[0.02] p-3.5"
+                  >
+                    <span
+                      className={`grid h-9 w-9 flex-none place-items-center rounded-xl ${
+                        a.severity === "alta"
+                          ? "bg-amber-400/10 text-amber-300"
+                          : "bg-electric/10 text-electric"
+                      }`}
+                    >
+                      <AlertTriangle className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-white">
+                        {a.title}
+                      </p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-steel-400">
+                        {a.detail}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="label flex-none rounded-full border border-white/12 px-3 py-2 text-steel-300 transition-colors hover:border-electric/45 hover:text-white"
+                    >
+                      {a.action}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="mt-5 grid grid-cols-2 gap-3 border-t border-white/8 pt-5">
+                <Shortcut icon={FileBarChart} label="Relatório financeiro" />
+                <Shortcut icon={Gem} label="Gerenciar planos" />
+              </div>
+              <button
+                type="button"
+                className="btn-royal label mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full py-4 text-white"
+              >
+                <Download className="h-4 w-4" />
+                Exportar fechamento mensal
+              </button>
+            </div>
+          </Reveal>
         </div>
 
         {/* Gerenciar agenda (bloqueios e restrições) */}
@@ -252,15 +400,15 @@ export default function AdminDashboard() {
 
         {/* Clientes */}
         <Reveal>
-          <div className="mt-5 glass rounded-3xl p-6">
+          <div className="glass mt-5 rounded-3xl p-6">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-white">Clientes</h2>
+              <h2 className="font-display text-lg text-white">Clientes</h2>
               <Link
                 href="/entrar"
-                className="inline-flex items-center gap-1 text-sm font-medium text-electric hover:underline"
+                className="label inline-flex items-center gap-1 text-electric hover:underline"
               >
                 Ver todos
-                <ArrowUpRight className="h-4 w-4" />
+                <ArrowUpRight className="h-3.5 w-3.5" />
               </Link>
             </div>
 
@@ -279,15 +427,7 @@ export default function AdminDashboard() {
                       <span className="truncate font-medium text-white">
                         {c.name}
                       </span>
-                      <span
-                        className={`flex-none rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                          c.status === "ativo"
-                            ? "bg-emerald-400/10 text-emerald-300"
-                            : "bg-amber-400/10 text-amber-300"
-                        }`}
-                      >
-                        {c.status === "ativo" ? "Ativo" : "Atrasado"}
-                      </span>
+                      <StatusPill status={c.status} />
                     </div>
                     <div className="mt-0.5 flex items-center gap-1 text-xs text-steel-400">
                       <Phone className="h-3 w-3 flex-none" />
@@ -295,12 +435,12 @@ export default function AdminDashboard() {
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       {c.plan ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-royal/15 px-2.5 py-1 text-[11px] font-semibold text-electric">
+                        <span className="label inline-flex items-center gap-1 rounded-full bg-electric/10 px-2.5 py-1.5 text-electric">
                           <Crown className="h-3 w-3" />
-                          {c.plan}
+                          {c.plan.replace("Plano ", "")}
                         </span>
                       ) : (
-                        <span className="rounded-full bg-white/5 px-2.5 py-1 text-[11px] font-medium text-steel-300">
+                        <span className="label rounded-full bg-white/5 px-2.5 py-1.5 text-steel-300">
                           Avulso
                         </span>
                       )}
@@ -317,12 +457,12 @@ export default function AdminDashboard() {
             <div className="mt-4 hidden lg:block">
               <table className="w-full text-left">
                 <thead>
-                  <tr className="border-b border-white/8 text-xs uppercase tracking-wider text-steel-400">
-                    <th className="pb-3 font-medium">Cliente</th>
-                    <th className="pb-3 font-medium">Plano</th>
-                    <th className="pb-3 font-medium">Visitas</th>
-                    <th className="pb-3 font-medium">Última</th>
-                    <th className="pb-3 font-medium">Status</th>
+                  <tr className="label border-b border-white/8 text-steel-400">
+                    <th className="pb-3 font-semibold">Cliente</th>
+                    <th className="pb-3 font-semibold">Plano</th>
+                    <th className="pb-3 font-semibold">Visitas</th>
+                    <th className="pb-3 font-semibold">Última</th>
+                    <th className="pb-3 font-semibold">Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -349,9 +489,9 @@ export default function AdminDashboard() {
                       </td>
                       <td className="py-3.5">
                         {c.plan ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-royal/15 px-2.5 py-1 text-xs font-semibold text-electric">
+                          <span className="label inline-flex items-center gap-1 rounded-full bg-electric/10 px-2.5 py-1.5 text-electric">
                             <Crown className="h-3 w-3" />
-                            {c.plan}
+                            {c.plan.replace("Plano ", "")}
                           </span>
                         ) : (
                           <span className="text-sm text-steel-400">Avulso</span>
@@ -364,15 +504,7 @@ export default function AdminDashboard() {
                         {c.lastVisit}
                       </td>
                       <td className="py-3.5">
-                        <span
-                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            c.status === "ativo"
-                              ? "bg-emerald-400/10 text-emerald-300"
-                              : "bg-amber-400/10 text-amber-300"
-                          }`}
-                        >
-                          {c.status === "ativo" ? "Ativo" : "Atrasado"}
-                        </span>
+                        <StatusPill status={c.status} />
                       </td>
                     </tr>
                   ))}
@@ -382,7 +514,35 @@ export default function AdminDashboard() {
           </div>
         </Reveal>
       </main>
+
+      <BottomNav active="admin" />
     </>
+  );
+}
+
+function StatusPill({ status }: { status: "ativo" | "atrasado" }) {
+  return (
+    <span
+      className={`label flex-none rounded-full px-2.5 py-1.5 ${
+        status === "ativo"
+          ? "bg-neon/10 text-neon"
+          : "bg-amber-400/10 text-amber-300"
+      }`}
+    >
+      {status === "ativo" ? "Ativo" : "Atrasado"}
+    </span>
+  );
+}
+
+function Shortcut({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
+  return (
+    <button
+      type="button"
+      className="flex flex-col items-center gap-2 rounded-2xl border border-white/8 bg-white/[0.02] px-3 py-4 text-center text-steel-300 transition-colors hover:border-electric/40 hover:text-white"
+    >
+      <Icon className="h-5 w-5 text-electric" strokeWidth={1.75} />
+      <span className="label leading-[1.4]">{label}</span>
+    </button>
   );
 }
 
@@ -400,16 +560,16 @@ function Kpi({
   return (
     <div className="glass glass-hover rounded-2xl p-5">
       <div className="flex items-center justify-between">
-        <span className="grid h-10 w-10 place-items-center rounded-xl bg-royal/15 text-electric">
+        <span className="grid h-10 w-10 place-items-center rounded-xl border border-electric/25 bg-electric/10 text-electric">
           <Icon className="h-5 w-5" strokeWidth={1.75} />
         </span>
-        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-xs font-semibold text-emerald-300">
+        <span className="label inline-flex items-center gap-1 rounded-full bg-neon/10 px-2.5 py-1.5 text-neon">
           <ArrowUpRight className="h-3 w-3" />
           {trend}
         </span>
       </div>
-      <div className="mt-4 font-display text-3xl text-white">{value}</div>
-      <div className="text-sm text-steel-400">{label}</div>
+      <div className="mt-4 font-display text-2xl text-white">{value}</div>
+      <div className="mt-1 text-sm text-steel-400">{label}</div>
     </div>
   );
 }

@@ -2,8 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ───────────────────────────────────────────────────────────
+   Modern Electric Precision — tokens em CSS
+   ─────────────────────────────────────────────────────────── */
 :root {
-  --bg: #0a0a0b;
+  --bg: #0b0e14;
+  --primary: #1eb8ff;
+  --secondary: #2979ff;
+  --tertiary: #00e5ff;
+  --card: #131823;
+  --card-2: #1a2130;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
   color-scheme: dark;
 }
 
@@ -17,13 +27,25 @@ html {
 
 body {
   background-color: var(--bg);
-  color: #f5f5f7;
+  color: #e6eaf2;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
 
+/* Space Grotesk: títulos com peso e leve aperto óptico */
 .font-display {
-  letter-spacing: 0.01em;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+/* Micro-label em caixa alta — usada em todos os cabeçalhos de bloco */
+.label {
+  font-family: var(--font-display), system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
 }
 
 /* Trilhos de scroll discretos */
@@ -32,33 +54,33 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #0a0a0b;
+  background: var(--bg);
 }
 ::-webkit-scrollbar-thumb {
-  background: #2c2c2e;
+  background: #252e3f;
   border-radius: 9999px;
-  border: 2px solid #0a0a0b;
+  border: 2px solid var(--bg);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a3c;
+  background: #33405a;
 }
 
-/* Controles de formulário sempre escuros e legíveis (corrige select branco) */
+/* Controles de formulário sempre escuros e legíveis */
 select,
 input,
 textarea {
   color-scheme: dark;
 }
 select option {
-  background-color: #1c1c1e;
-  color: #f5f5f7;
+  background-color: #1a2130;
+  color: #e6eaf2;
 }
 
 @layer components {
-  /* Superfície SÓLIDA (cards) — estilo Apple, sem blur */
+  /* Superfície de card — sólida, borda fina, sem blur */
   .glass {
-    background-color: #1c1c1e;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background-color: var(--card);
+    border: 1px solid var(--line);
   }
 
   .glass-hover {
@@ -66,31 +88,42 @@ select option {
       transform 0.2s ease;
   }
   .glass-hover:hover {
-    border-color: rgba(255, 255, 255, 0.18);
-    background-color: #232325;
+    border-color: rgba(30, 184, 255, 0.35);
+    background-color: var(--card-2);
   }
 
-  /* Palavra de destaque — azul sólido (sem gradiente de texto) */
+  /* Palavra de destaque — primary sólido */
   .text-gradient {
-    color: #0a84ff;
+    color: var(--primary);
   }
 
-  /* Botão primário azul sólido */
+  /* Botão primário: primary → secondary */
   .btn-royal {
-    background-color: #0a84ff;
-    box-shadow: 0 8px 24px -10px rgba(10, 132, 255, 0.55);
-    transition: background-color 0.18s ease, transform 0.18s ease;
+    background-image: linear-gradient(135deg, #1eb8ff 0%, #2979ff 100%);
+    box-shadow: 0 10px 28px -12px rgba(41, 121, 255, 0.6);
+    transition: filter 0.18s ease, transform 0.18s ease;
   }
   .btn-royal:hover {
-    background-color: #3d9bff;
+    filter: brightness(1.08);
   }
   .btn-royal:active {
     transform: scale(0.985);
   }
 
+  /* Botão secundário "outlined" do design system */
+  .btn-outline {
+    border: 1px solid rgba(30, 184, 255, 0.4);
+    background-color: rgba(30, 184, 255, 0.06);
+    transition: border-color 0.18s ease, background-color 0.18s ease;
+  }
+  .btn-outline:hover {
+    border-color: rgba(30, 184, 255, 0.75);
+    background-color: rgba(30, 184, 255, 0.12);
+  }
+
   .chip {
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background-color: #161618;
+    border: 1px solid var(--line);
+    background-color: var(--card-2);
   }
 }
 

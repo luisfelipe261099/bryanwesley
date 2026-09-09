@@ -1,17 +1,19 @@
 import type { Metadata, Viewport } from "next";
-import { Bebas_Neue, Sora } from "next/font/google";
+import { Space_Grotesk, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 
-const display = Bebas_Neue({
+// Headline / Label — Space Grotesk
+const display = Space_Grotesk({
   subsets: ["latin"],
-  weight: "400",
+  weight: ["500", "600", "700"],
   variable: "--font-display",
   display: "swap",
 });
 
-const sans = Sora({
+// Body — Plus Jakarta Sans
+const sans = Plus_Jakarta_Sans({
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  weight: ["400", "500", "600", "700", "800"],
   variable: "--font-sans",
   display: "swap",
 });
@@ -19,11 +21,11 @@ const sans = Sora({
 export const metadata: Metadata = {
   title: "Bryan Wesley Barbearia — Agende seu corte",
   description:
-    "Barbearia Bryan Wesley. Agendamento online, planos de assinatura e serviços avulsos. Estilo e precisão em cada corte.",
+    "Barbearia Bryan Wesley, unidade Jardins. Agendamento online, Clube VIP de assinatura e serviços avulsos. Precisão em cada corte.",
 };
 
 export const viewport: Viewport = {
-  themeColor: "#070A12",
+  themeColor: "#0B0E14",
   width: "device-width",
   initialScale: 1,
 };

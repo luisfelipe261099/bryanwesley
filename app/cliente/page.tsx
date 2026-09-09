@@ -10,72 +10,117 @@ import {
   CalendarDays,
   History,
   Gift,
+  Gem,
   type LucideIcon,
 } from "lucide-react";
 import { Background } from "@/components/Background";
 import { AppHeader } from "@/components/AppHeader";
+import { BottomNav } from "@/components/BottomNav";
 import { Reveal } from "@/components/Reveal";
-import { plans, formatBRL } from "@/lib/data";
+import { plans, barbers, formatBRL } from "@/lib/data";
 
 const me = {
-  name: "Rafael Lima",
+  name: "Ricardo Mendes",
   initial: "R",
-  planId: "vip",
+  planId: "diamond",
   renovaEmDias: 12,
   cicloPct: 60, // % do ciclo de cobrança decorrido
   cortesNoMes: 5,
-  economiaNoMes: 180,
+  economiaNoMes: 420,
 };
 
 const proximo = {
-  service: "Cabelo + Barba",
-  dia: "Sexta, 18",
-  hora: "15:00",
+  service: "Corte Degradê & Barba",
+  dia: "Hoje, às 17:30",
+  hora: "17:30",
+  emAte: "Em 2h 14min",
+  barberId: "bryan",
 };
 
 const historico = [
-  { service: "Cabelo + Barba", date: "Hoje", time: "09:00" },
-  { service: "Barba", date: "Há 5 dias", time: "16:30" },
-  { service: "Corte de Cabelo", date: "Há 11 dias", time: "10:30" },
-  { service: "Cabelo + Barba", date: "Há 18 dias", time: "14:00" },
+  { service: "Corte Degradê & Barba", date: "Hoje", time: "09:00" },
+  { service: "Barboterapia", date: "Há 5 dias", time: "16:30" },
+  { service: "Corte Signature", date: "Há 11 dias", time: "10:30" },
+  { service: "Combo Completo", date: "Há 18 dias", time: "14:00" },
 ];
 
 export default function ClienteDashboard() {
   const plan = plans.find((p) => p.id === me.planId)!;
+  const barber = barbers.find((b) => b.id === proximo.barberId)!;
 
   return (
     <>
       <Background />
-      <AppHeader badge="Assinante" user={{ name: me.name, initial: me.initial }} />
+      <AppHeader
+        badge="Membro VIP"
+        user={{ name: me.name, initial: me.initial }}
+      />
 
-      <main className="mx-auto max-w-7xl px-5 pb-20 pt-24 lg:px-8">
+      <main className="mx-auto max-w-7xl px-5 pb-28 pt-24 lg:px-8">
         <Reveal>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="font-display text-5xl text-white sm:text-6xl">
-              Olá, {me.name.split(" ")[0]}
+          <span className="label text-electric">Ateliê Jardins</span>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <h1 className="font-display text-3xl text-white sm:text-4xl">
+              Boa tarde, {me.name.split(" ")[0]}
             </h1>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-royal-grad px-3 py-1.5 text-sm font-semibold text-white shadow-glow-sm">
-              <Crown className="h-4 w-4" />
-              {plan.name}
+            <span className="label inline-flex items-center gap-1.5 rounded-full bg-royal-grad px-3 py-2 text-white shadow-glow-sm">
+              <Gem className="h-3 w-3" />
+              {plan.name.replace("Plano ", "")}
             </span>
           </div>
-          <p className="mt-2 text-steel-400">
+          <p className="mt-2 text-sm text-steel-400">
             Seu visual está em dia. Bora marcar o próximo?
           </p>
         </Reveal>
 
-        <div className="mt-8 grid gap-5 lg:grid-cols-3">
+        {/* Check-in do próximo horário */}
+        <Reveal delay={0.04}>
+          <div className="glass mt-6 rounded-2xl border-electric/25 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <span className="label inline-flex items-center gap-1.5 text-electric">
+                <span className="h-1.5 w-1.5 rounded-full bg-neon" />
+                {proximo.dia}
+              </span>
+              <span className="text-xs font-medium text-steel-400">
+                {proximo.emAte}
+              </span>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <span className="grid h-11 w-11 flex-none place-items-center rounded-xl bg-royal-grad text-white">
+                  <Scissors className="h-5 w-5" strokeWidth={1.75} />
+                </span>
+                <div>
+                  <p className="font-display text-lg text-white">
+                    {proximo.service}
+                  </p>
+                  <p className="text-sm text-steel-400">{barber.name}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-outline label inline-flex items-center gap-2 rounded-full px-5 py-3 text-electric"
+              >
+                <Check className="h-3.5 w-3.5" strokeWidth={3} />
+                Check-in
+              </button>
+            </div>
+          </div>
+        </Reveal>
+
+        <div className="mt-5 grid gap-5 lg:grid-cols-3">
           {/* Status do plano */}
           <Reveal className="lg:col-span-2">
-            <div className="glass relative overflow-hidden rounded-3xl p-7">
-              <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-royal/20 blur-3xl" />
+            <div className="glass relative h-full overflow-hidden rounded-3xl p-7">
+              <div
+                aria-hidden="true"
+                className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-electric/15 blur-3xl"
+              />
               <div className="relative flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <span className="text-xs font-semibold uppercase tracking-wider text-electric">
-                    Seu plano
-                  </span>
-                  <div className="mt-1 flex items-end gap-2">
-                    <h2 className="font-display text-4xl text-white">
+                  <span className="label text-electric">Sua assinatura</span>
+                  <div className="mt-2 flex flex-wrap items-end gap-x-2 gap-y-1">
+                    <h2 className="font-display text-3xl text-white">
                       {plan.name}
                     </h2>
                     <span className="mb-1 text-sm text-steel-400">
@@ -83,8 +128,8 @@ export default function ClienteDashboard() {
                     </span>
                   </div>
                 </div>
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/10 px-3 py-1.5 text-xs font-semibold text-emerald-300">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-neon/10 px-3 py-1.5 text-xs font-semibold text-neon">
+                  <span className="h-1.5 w-1.5 rounded-full bg-neon" />
                   Ativo
                 </span>
               </div>
@@ -117,7 +162,11 @@ export default function ClienteDashboard() {
                   label="Economia no mês"
                   accent
                 />
-                <MiniStat icon={Crown} value="Ilimitado" label="Cortes restantes" />
+                <MiniStat
+                  icon={Crown}
+                  value="Ilimitado"
+                  label="Cortes restantes"
+                />
               </div>
             </div>
           </Reveal>
@@ -125,22 +174,22 @@ export default function ClienteDashboard() {
           {/* Próximo agendamento */}
           <Reveal delay={0.08}>
             <div className="glass flex h-full flex-col rounded-3xl p-7">
-              <span className="text-xs font-semibold uppercase tracking-wider text-electric">
-                Próximo horário
-              </span>
+              <span className="label text-electric">Próximo horário</span>
               <div className="mt-4 flex items-center gap-3">
-                <div className="grid h-12 w-12 place-items-center rounded-2xl bg-royal-grad text-white shadow-glow-sm">
+                <div className="grid h-12 w-12 place-items-center rounded-2xl border border-electric/25 bg-electric/10 text-electric">
                   <Scissors className="h-6 w-6" strokeWidth={1.75} />
                 </div>
-                <div>
-                  <p className="font-semibold text-white">{proximo.service}</p>
-                  <p className="text-sm text-steel-400">Bryan Wesley</p>
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-white">
+                    {proximo.service}
+                  </p>
+                  <p className="text-sm text-steel-400">{barber.name}</p>
                 </div>
               </div>
               <div className="mt-5 flex items-center gap-4 text-sm">
                 <span className="inline-flex items-center gap-1.5 text-steel-300">
                   <CalendarDays className="h-4 w-4 text-electric" />
-                  {proximo.dia}
+                  Hoje
                 </span>
                 <span className="inline-flex items-center gap-1.5 text-steel-300">
                   <Clock className="h-4 w-4 text-electric" />
@@ -149,7 +198,7 @@ export default function ClienteDashboard() {
               </div>
               <Link
                 href={`/agendar?plano=${me.planId}`}
-                className="mt-auto inline-flex items-center justify-center gap-2 rounded-xl border border-white/12 py-3 text-sm font-semibold text-white transition-colors hover:border-electric/40"
+                className="label mt-auto inline-flex items-center justify-center gap-2 rounded-xl border border-white/12 py-4 text-steel-200 transition-colors hover:border-electric/45 hover:text-white"
               >
                 Remarcar
               </Link>
@@ -171,7 +220,7 @@ export default function ClienteDashboard() {
           <Reveal delay={0.08}>
             <QuickAction
               href="/planos"
-              icon={Crown}
+              icon={Gem}
               title="Gerenciar plano"
               desc="Faça upgrade ou troque"
             />
@@ -192,17 +241,17 @@ export default function ClienteDashboard() {
             <div className="glass h-full rounded-3xl p-7">
               <div className="flex items-center gap-2">
                 <Gift className="h-5 w-5 text-electric" />
-                <h3 className="text-lg font-semibold text-white">
+                <h3 className="font-display text-lg text-white">
                   Benefícios do seu plano
                 </h3>
               </div>
               <ul className="mt-5 grid gap-3">
                 {plan.features.map((f) => (
                   <li key={f} className="flex items-start gap-2.5 text-sm">
-                    <span className="mt-0.5 grid h-5 w-5 flex-none place-items-center rounded-full bg-royal/20">
+                    <span className="mt-0.5 grid h-5 w-5 flex-none place-items-center rounded-full bg-electric/15">
                       <Check className="h-3 w-3 text-electric" strokeWidth={3} />
                     </span>
-                    <span className="text-steel-200">{f}</span>
+                    <span className="text-steel-300">{f}</span>
                   </li>
                 ))}
               </ul>
@@ -211,9 +260,12 @@ export default function ClienteDashboard() {
 
           {/* Histórico */}
           <Reveal delay={0.08}>
-            <div id="historico" className="glass h-full scroll-mt-24 rounded-3xl p-7">
+            <div
+              id="historico"
+              className="glass h-full scroll-mt-24 rounded-3xl p-7"
+            >
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-white">
+                <h3 className="font-display text-lg text-white">
                   Seus atendimentos
                 </h3>
                 <span className="text-sm text-steel-400">38 no total</span>
@@ -227,16 +279,16 @@ export default function ClienteDashboard() {
                     <span className="grid h-9 w-9 flex-none place-items-center rounded-lg bg-white/5 text-steel-300">
                       <Scissors className="h-4 w-4" />
                     </span>
-                    <span className="flex-1">
-                      <span className="block text-sm font-medium text-white">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-white">
                         {h.service}
                       </span>
                       <span className="text-xs text-steel-400">
                         {h.date} · {h.time}
                       </span>
                     </span>
-                    <span className="rounded-full bg-royal/10 px-2.5 py-1 text-[11px] font-semibold text-electric">
-                      incluso
+                    <span className="label flex-none rounded-full bg-electric/10 px-2.5 py-1.5 text-electric">
+                      Incluso
                     </span>
                   </li>
                 ))}
@@ -245,6 +297,8 @@ export default function ClienteDashboard() {
           </Reveal>
         </div>
       </main>
+
+      <BottomNav active="clube" />
     </>
   );
 }
@@ -262,17 +316,15 @@ function MiniStat({
 }) {
   return (
     <div>
-      <Icon
-        className={`h-5 w-5 ${accent ? "text-emerald-400" : "text-electric"}`}
-      />
+      <Icon className={`h-5 w-5 ${accent ? "text-neon" : "text-electric"}`} />
       <div
-        className={`mt-2 font-display text-2xl ${
-          accent ? "text-emerald-300" : "text-white"
+        className={`mt-2 font-display text-xl ${
+          accent ? "text-neon" : "text-white"
         }`}
       >
         {value}
       </div>
-      <div className="text-xs text-steel-400">{label}</div>
+      <div className="mt-1 text-xs text-steel-400">{label}</div>
     </div>
   );
 }
@@ -294,29 +346,25 @@ function QuickAction({
     <Link
       href={href}
       className={`group flex items-center gap-4 rounded-2xl p-5 transition-transform duration-300 hover:-translate-y-0.5 ${
-        primary ? "bg-royal-grad shadow-glow-sm" : "glass glass-hover"
+        primary
+          ? "border border-electric/45 bg-surface shadow-glow-sm"
+          : "glass glass-hover"
       }`}
     >
       <span
         className={`grid h-12 w-12 flex-none place-items-center rounded-xl ${
-          primary ? "bg-white/15 text-white" : "bg-royal-grad text-white"
+          primary
+            ? "bg-royal-grad text-white"
+            : "border border-electric/25 bg-electric/10 text-electric"
         }`}
       >
         <Icon className="h-6 w-6" strokeWidth={1.75} />
       </span>
       <span className="flex-1">
         <span className="block font-semibold text-white">{title}</span>
-        <span
-          className={`text-sm ${primary ? "text-white/80" : "text-steel-400"}`}
-        >
-          {desc}
-        </span>
+        <span className="text-sm text-steel-400">{desc}</span>
       </span>
-      <ArrowRight
-        className={`h-5 w-5 transition-transform group-hover:translate-x-1 ${
-          primary ? "text-white" : "text-electric"
-        }`}
-      />
+      <ArrowRight className="h-5 w-5 text-electric transition-transform group-hover:translate-x-1" />
     </Link>
   );
 }

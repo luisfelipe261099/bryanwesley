@@ -1,22 +1,45 @@
 import Link from "next/link";
-import { Check, Sparkles } from "lucide-react";
+import { Check, Sparkles, Shield, Crown, Gem } from "lucide-react";
 import { type Plan, formatBRL } from "@/lib/data";
 
-export function PlanCard({ plan }: { plan: Plan }) {
+const planIcons: Record<string, typeof Shield> = {
+  silver: Shield,
+  gold: Crown,
+  diamond: Gem,
+};
+
+export function PlanCard({
+  plan,
+  cycle = "mensal",
+}: {
+  plan: Plan;
+  cycle?: "mensal" | "anual";
+}) {
+  const Icon = planIcons[plan.id] ?? Shield;
+  const price = cycle === "anual" ? plan.annualPrice : plan.price;
+
   return (
     <div
       className={`relative flex flex-col rounded-3xl p-7 transition-transform duration-300 hover:-translate-y-1 ${
         plan.highlight
-          ? "bg-royal-grad text-white shadow-glow"
-          : "glass glass-hover text-white"
+          ? "border border-electric/45 bg-surface shadow-glow"
+          : "glass glass-hover"
       }`}
     >
+      {plan.highlight && (
+        // Halo elétrico só no plano-âncora
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 h-40 rounded-t-3xl bg-[radial-gradient(ellipse_70%_100%_at_50%_0%,rgba(30,184,255,0.16),transparent_70%)]"
+        />
+      )}
+
       {plan.badge && (
         <span
-          className={`absolute -top-3 left-7 inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wider ${
+          className={`label absolute -top-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3 py-2 ${
             plan.highlight
-              ? "bg-white text-royal-600"
-              : "bg-royal/20 text-electric"
+              ? "bg-royal-grad text-white shadow-glow-sm"
+              : "border border-white/12 bg-surface-2 text-steel-300"
           }`}
         >
           <Sparkles className="h-3 w-3" />
@@ -24,59 +47,68 @@ export function PlanCard({ plan }: { plan: Plan }) {
         </span>
       )}
 
-      <h3 className="font-display text-3xl tracking-wide">{plan.name}</h3>
-      <p
-        className={`mt-1 text-sm ${
-          plan.highlight ? "text-white/80" : "text-steel-400"
-        }`}
-      >
-        {plan.tagline}
-      </p>
-
-      <div className="mt-5 flex items-end gap-1">
-        <span className="text-4xl font-bold tabular-nums">
-          {formatBRL(plan.price)}
-        </span>
+      <div className="relative flex items-center justify-between">
+        <span className="label text-electric">{plan.kicker}</span>
         <span
-          className={`mb-1 text-sm ${
-            plan.highlight ? "text-white/75" : "text-steel-400"
+          className={`grid h-9 w-9 place-items-center rounded-xl ${
+            plan.highlight
+              ? "bg-royal-grad text-white"
+              : "border border-white/10 bg-white/5 text-steel-300"
           }`}
         >
-          /mês
+          <Icon className="h-4 w-4" strokeWidth={1.8} />
         </span>
       </div>
 
-      <ul className="mt-6 flex flex-1 flex-col gap-3">
+      <h3 className="relative mt-3 font-display text-3xl text-white">
+        {plan.name}
+      </h3>
+      <p className="relative mt-1.5 text-sm text-steel-400">{plan.tagline}</p>
+
+      <div className="relative mt-6 flex items-end gap-1.5">
+        <span className="mb-2 text-sm font-medium text-steel-400">R$</span>
+        <span
+          className={`font-display text-5xl leading-none tabular-nums ${
+            plan.highlight ? "text-electric" : "text-white"
+          }`}
+        >
+          {price}
+        </span>
+        <span className="mb-1.5 text-sm text-steel-400">/mês</span>
+      </div>
+      {cycle === "anual" && (
+        <p className="relative mt-1.5 text-xs text-neon">
+          No plano anual · equivale a {formatBRL(price * 12)} por ano
+        </p>
+      )}
+
+      <ul className="relative mt-6 flex flex-1 flex-col gap-3">
         {plan.features.map((f) => (
           <li key={f} className="flex items-start gap-2.5 text-sm">
             <span
               className={`mt-0.5 grid h-5 w-5 flex-none place-items-center rounded-full ${
-                plan.highlight ? "bg-white/20" : "bg-royal/20"
+                plan.highlight ? "bg-electric/20" : "bg-white/8"
               }`}
             >
               <Check
-                className={`h-3 w-3 ${
-                  plan.highlight ? "text-white" : "text-electric"
-                }`}
+                className={plan.highlight ? "h-3 w-3 text-electric" : "h-3 w-3 text-steel-300"}
                 strokeWidth={3}
               />
             </span>
-            <span className={plan.highlight ? "text-white/95" : "text-steel-300"}>
-              {f}
-            </span>
+            <span className="text-steel-300">{f}</span>
           </li>
         ))}
       </ul>
 
       <Link
-        href="/entrar"
-        className={`mt-7 inline-flex items-center justify-center rounded-full py-3 text-sm font-semibold transition-transform active:scale-[0.98] ${
+        href={`/agendar?plano=${plan.id}`}
+        className={`label relative mt-7 inline-flex items-center justify-center rounded-full py-4 transition-transform active:scale-[0.98] ${
           plan.highlight
-            ? "bg-white text-royal-600 hover:bg-white/90"
-            : "btn-royal text-white"
+            ? "btn-royal text-white"
+            : "border border-white/12 text-steel-200 hover:border-electric/45 hover:text-white"
         }`}
       >
-        Assinar {plan.name}
+        Assinar {plan.name.replace("Plano ", "")}
       </Link>
     </div>
   );

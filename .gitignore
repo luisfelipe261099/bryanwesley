@@ -21,3 +21,6 @@
 
 # screenshots de demonstração (gerados localmente)
 /shots
+
+# typescript incremental build
+tsconfig.tsbuildinfo

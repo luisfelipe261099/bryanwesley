@@ -82,7 +82,7 @@ export function GerenciarAgenda() {
     <div className="glass rounded-3xl p-6">
       <div className="flex items-center gap-2">
         <CalendarOff className="h-5 w-5 text-electric" />
-        <h2 className="text-lg font-semibold text-white">Gerenciar agenda</h2>
+        <h2 className="font-display text-lg text-white">Gerenciar agenda</h2>
       </div>
       <p className="mt-1 text-sm text-steel-400">
         Bloqueie dias e horários, pause a agenda e defina regras. Vale na hora
@@ -98,7 +98,7 @@ export function GerenciarAgenda() {
               <span
                 className={`grid h-10 w-10 place-items-center rounded-xl ${
                   settings.acceptingBookings
-                    ? "bg-emerald-400/10 text-emerald-300"
+                    ? "bg-neon/10 text-neon"
                     : "bg-amber-400/10 text-amber-300"
                 }`}
               >
@@ -151,10 +151,10 @@ export function GerenciarAgenda() {
                   key={h}
                   type="button"
                   onClick={() => update({ minHours: h })}
-                  className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  className={`label rounded-full px-4 py-2.5 transition-colors ${
                     settings.minHours === h
-                      ? "bg-royal-grad text-white"
-                      : "border border-white/12 text-steel-300 hover:border-white/30"
+                      ? "btn-royal text-white"
+                      : "border border-white/12 text-steel-300 hover:border-electric/40 hover:text-white"
                   }`}
                 >
                   {h === 0 ? "Sem mínimo" : `${h}h`}
@@ -183,7 +183,7 @@ export function GerenciarAgenda() {
                 type="button"
                 onClick={addBlockedDate}
                 disabled={!newDate}
-                className="btn-royal inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+                className="btn-royal label inline-flex items-center gap-1.5 rounded-xl px-4 py-3 text-white disabled:opacity-40"
               >
                 <Plus className="h-4 w-4" />
                 Bloquear
@@ -255,7 +255,7 @@ export function GerenciarAgenda() {
                       className={`rounded-lg border py-2.5 text-center text-xs font-semibold tabular-nums transition-all ${
                         blocked
                           ? "border-amber-400/40 bg-amber-400/10 text-amber-200 line-through"
-                          : "border-white/10 bg-white/[0.02] text-white hover:border-white/30"
+                          : "border-white/10 bg-white/[0.02] text-white hover:border-electric/45"
                       }`}
                     >
                       {slot.time}

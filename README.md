@@ -10,25 +10,43 @@ Feito para o cliente aprovar a experiência antes de construir o sistema complet
 ## Stack
 
 - **Next.js 14** (App Router) + **React 18** + **TypeScript**
-- **Tailwind CSS** (design system azul sobre grafite)
-- **Framer Motion** (transições do fluxo de agendamento)
-- **Lucide** (ícones)
+- **Tailwind CSS** com o design system **Modern Electric Precision**
+- **Framer Motion** (transições) e **Lucide** (ícones)
 - Pronto para deploy gratuito na **Vercel**
 
-## As 3 experiências (perfis)
+## Design system — Modern Electric Precision
+
+| Token | Cor | Uso |
+|-------|-----|-----|
+| Primary | `#1EB8FF` (`electric`) | Destaques, ícones, links, bordas ativas |
+| Secondary | `#2979FF` (`royal`) | Fim do gradiente dos botões e avatares |
+| Tertiary | `#00E5FF` (`neon`) | Acento pontual: VIP, status ativo, métricas positivas |
+| Neutral | `#0B0E14` (`ink`) | Fundo base; cards em `#131823` (`surface`) |
+
+- **Headline / Label:** Space Grotesk · **Body:** Plus Jakarta Sans
+- Classes utilitárias em [`app/globals.css`](app/globals.css): `.glass` (card),
+  `.btn-royal` (botão primário), `.btn-outline` (secundário) e `.label`
+  (micro-label em caixa alta, presente em todos os cabeçalhos de bloco).
+- Tokens em [`tailwind.config.ts`](tailwind.config.ts).
+
+## As 4 experiências (perfis)
 
 Acesse `/entrar` para escolher o perfil — ou navegue direto:
 
 | Rota | Quem usa | O que mostra |
 |------|----------|--------------|
-| `/` | Visitante | Landing: hero, serviços com preço, planos, como funciona |
-| `/agendar` | **Cliente avulso** | Fluxo passo-a-passo: serviço → data → horário → confirmação |
-| `/planos` | Visitante | Planos de assinatura + tabela comparativa + FAQ |
-| `/cliente` | **Assinante / mensalista** | Painel: plano, ciclo, benefícios, histórico, próximo horário |
-| `/admin` | **Administrador (Bryan)** | Agenda do dia, faturamento, meta, ocupação, clientes |
+| `/` | Visitante | Landing: hero, serviços, equipe, Clube VIP, depoimentos |
+| `/agendar` | **Cliente avulso** | Agendamento rápido em 3 passos: serviço → barbeiro & horário → dados |
+| `/planos` | Visitante | Clube VIP: Silver / Gold Black / Diamond, ciclo mensal-anual, comparativo e FAQ |
+| `/cliente` | **Membro do Clube VIP** | Check-in, assinatura, ciclo, benefícios, histórico |
+| `/barbeiro` | **Barbeiro** | Comissão do mês, agenda diária, iniciar/finalizar atendimento |
+| `/admin` | **Administrador (Bryan)** | Dashboard: faturamento, MRR, ocupação, equipe, operação, clientes |
 
-Os serviços, planos e dados ficam em [`lib/data.ts`](lib/data.ts) — fácil de
-ajustar preços, durações e nomes durante a validação com o cliente.
+As telas logadas compartilham o `AppHeader` e a `BottomNav`
+(Início · Clube VIP · Barbeiro · Admin).
+
+Serviços, planos, barbeiros e métricas ficam em [`lib/data.ts`](lib/data.ts) —
+fácil de ajustar preços, durações e nomes durante a validação com o cliente.
 
 ## Rodar localmente
 
@@ -62,9 +80,9 @@ Não precisa de variáveis de ambiente nesta fase (sem backend ainda).
 
 ## Próximos passos (pós-aprovação)
 
-1. **Banco de dados** — agendamentos, clientes, planos, pagamentos
+1. **Banco de dados** — agendamentos, clientes, barbeiros, planos, pagamentos
    (ex.: Postgres da Vercel Marketplace / Neon).
-2. **Autenticação** — login do cliente e do admin (ex.: Clerk ou Auth.js).
+2. **Autenticação** — login do cliente, do barbeiro e do admin (ex.: Clerk ou Auth.js).
 3. **Agenda real** — horários dinâmicos, bloqueios, evitar conflito de slot.
 4. **Pagamentos / assinaturas** — cobrança recorrente dos mensalistas
    (ex.: Stripe ou Mercado Pago).
