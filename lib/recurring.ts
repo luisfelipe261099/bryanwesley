@@ -22,6 +22,7 @@ import {
   weekdayOf,
   parseDateKey,
   minutesToHHMM,
+  shopTimeToUtc,
 } from "./time";
 
 /** Quantas semanas à frente o fixo é garantido na agenda. */
@@ -94,7 +95,6 @@ export async function materializeRecurring(): Promise<MaterializeReport> {
       if (settings.closedWeekdays.includes(weekdayOf(dateKey))) continue;
 
       const { year, month, day } = parseDateKey(dateKey);
-      const { shopTimeToUtc } = await import("./time");
       const startsAt = shopTimeToUtc(year, month, day, slot.minutesOfDay);
 
       // Já materializado?
@@ -126,6 +126,7 @@ export async function materializeRecurring(): Promise<MaterializeReport> {
           clientPhone: user.phone,
           userId: user.id,
           notes: "Horário fixo do plano",
+          fromRecurring: true,
         });
         report.criados++;
       } catch (e) {

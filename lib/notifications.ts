@@ -80,12 +80,16 @@ export async function queueNotification(opts: {
  */
 export async function queueBookingNotifications(
   appt: typeof appointments.$inferSelect,
-  barberName?: string
+  barberName?: string,
+  opts: { skipConfirmation?: boolean } = {}
 ) {
   const now = Date.now();
-  const jobs: Promise<unknown>[] = [
-    queueNotification({ kind: "AGENDAMENTO_CRIADO", appointment: appt, barberName }),
-  ];
+  const jobs: Promise<unknown>[] = [];
+  if (!opts.skipConfirmation) {
+    jobs.push(
+      queueNotification({ kind: "AGENDAMENTO_CRIADO", appointment: appt, barberName })
+    );
+  }
 
   const h24 = new Date(appt.startsAt.getTime() - 24 * 3600_000);
   if (h24.getTime() > now) {

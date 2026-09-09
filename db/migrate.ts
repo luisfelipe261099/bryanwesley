@@ -10,6 +10,16 @@ if (!url) {
   process.exit(1);
 }
 
+// Roda no build: melhor quebrar o deploy aqui do que servir 500 em toda
+// rota protegida por falta da chave da sessão.
+if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 24) {
+  console.error(
+    "AUTH_SECRET ausente ou curta (mínimo 24 caracteres). Gere com:\n" +
+      "  node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
+  );
+  process.exit(1);
+}
+
 const dir = join(process.cwd(), "db", "migrations");
 const sql = postgres(url, { max: 1, prepare: false });
 
@@ -47,7 +57,16 @@ async function main() {
   }
 
   console.log("Migrações em dia.");
+
+  // Primeiro deploy: sem catálogo a vitrine fica vazia e ninguém consegue
+  // entrar. O seed é idempotente, então só roda quando não há serviços.
+  const [{ n }] = await sql<{ n: string }[]>`SELECT count(*)::text AS n FROM services`;
   await sql.end();
+  if (Number(n) === 0) {
+    console.log("Catálogo vazio — rodando o seed inicial.");
+    const { runSeed } = await import("./seed");
+    await runSeed();
+  }
 }
 
 main().catch(async (err) => {

@@ -17,7 +17,9 @@ import { Reveal } from "@/components/Reveal";
 import { ServiceCard } from "@/components/ServiceCard";
 import { PlanCard } from "@/components/PlanCard";
 import { listServices, listPlans, listTeam } from "@/lib/queries";
-import { formatBRL } from "@/lib/money";
+import { formatBRL, formatDuration } from "@/lib/money";
+import { getSettings, listOpenDays, getAvailability } from "@/lib/schedule";
+import { getSession } from "@/lib/auth";
 
 const steps = [
   {
@@ -55,20 +57,38 @@ const testimonials = [
   },
 ];
 
-// Catálogo muda pelo painel do admin, então a home revalida sozinha.
-export const revalidate = 60;
+// Mostra o próximo horário livre de verdade, então não pode ser estática.
+export const dynamic = "force-dynamic";
+
+/** Primeiro horário livre nos próximos dias, para o card do hero. */
+async function nextFreeSlot(durationMin: number) {
+  const settings = await getSettings();
+  for (const day of listOpenDays(settings, 7)) {
+    const av = await getAvailability({
+      dateKey: day.dateKey,
+      durationMin,
+      settings,
+    });
+    const slot = av.slots.find((s) => s.available);
+    if (slot) return { day, time: slot.time };
+  }
+  return null;
+}
 
 export default async function Home() {
-  const [services, plans, barbers] = await Promise.all([
+  const [services, plans, barbers, session] = await Promise.all([
     listServices(),
     listPlans(),
     listTeam(),
+    getSession(),
   ]);
+  const combo = services.find((s) => s.slug === "combo") ?? services[0];
+  const next = combo ? await nextFreeSlot(combo.durationMin) : null;
 
   return (
     <>
       <Background />
-      <Navbar />
+      <Navbar logged={!!session} />
 
       <main className="overflow-x-clip">
         {/* ───────── HERO ───────── */}
@@ -133,7 +153,13 @@ export default async function Home() {
 
             {/* Visual do hero */}
             <Reveal delay={0.15} className="relative">
-              <HeroVisual />
+              <HeroVisual
+                time={next?.time ?? null}
+                dayLabel={next ? `${next.day.weekday}, ${next.day.dayLabel}` : null}
+                serviceName={combo?.name ?? "Combo Completo"}
+                duration={combo ? formatDuration(combo.durationMin) : "1h15"}
+                priceCents={combo?.priceCents ?? 15000}
+              />
             </Reveal>
           </div>
         </section>
@@ -362,26 +388,42 @@ function SectionHeading({
   );
 }
 
-function HeroVisual() {
+function HeroVisual({
+  time,
+  dayLabel,
+  serviceName,
+  duration,
+  priceCents,
+}: {
+  time: string | null;
+  dayLabel: string | null;
+  serviceName: string;
+  duration: string;
+  priceCents: number;
+}) {
   return (
     <div className="relative mx-auto w-full max-w-sm py-6">
-      {/* Card principal: próximo horário */}
+      {/* Card principal: próximo horário — vem da agenda real */}
       <div className="glass rounded-3xl p-6 shadow-card">
         <div className="flex items-center justify-between">
           <span className="label text-steel-400">Próximo horário livre</span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-neon/10 px-2.5 py-1 text-[11px] font-semibold text-neon">
-            <span className="h-1.5 w-1.5 rounded-full bg-neon" />
-            Disponível
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+              time ? "bg-neon/10 text-neon" : "bg-amber-400/10 text-amber-300"
+            }`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${time ? "bg-neon" : "bg-amber-400"}`} />
+            {time ? "Disponível" : "Agenda cheia"}
           </span>
         </div>
 
         <div className="mt-5 flex items-end justify-between">
           <div>
             <div className="font-display text-5xl leading-none text-white">
-              15:30
+              {time ?? "—"}
             </div>
-            <div className="mt-2 text-sm text-steel-300">
-              Hoje · Bryan Wesley
+            <div className="mt-2 text-sm capitalize text-steel-300">
+              {dayLabel ?? "Sem vaga nos próximos dias"}
             </div>
           </div>
           <div className="grid h-14 w-14 place-items-center rounded-2xl bg-royal-grad text-white shadow-glow-sm">
@@ -390,9 +432,9 @@ function HeroVisual() {
         </div>
 
         <div className="mt-6 space-y-2.5 rounded-2xl border border-white/6 bg-white/[0.02] p-4">
-          <Row label="Serviço" value="Combo Completo" />
-          <Row label="Duração" value="1h15" />
-          <Row label="Valor" value={formatBRL(15000)} accent />
+          <Row label="Serviço" value={serviceName} />
+          <Row label="Duração" value={duration} />
+          <Row label="Valor" value={formatBRL(priceCents)} accent />
         </div>
 
         <Link

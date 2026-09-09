@@ -12,7 +12,7 @@ const links = [
   { href: "/#contato", label: "Contato" },
 ];
 
-export function Navbar() {
+export function Navbar({ logged = false }: { logged?: boolean }) {
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -53,7 +53,7 @@ export function Navbar() {
             href="/entrar"
             className="text-sm font-semibold text-steel-300 transition-colors hover:text-white"
           >
-            Entrar
+            {logged ? "Minha conta" : "Entrar"}
           </Link>
           <Link
             href="/agendar"
@@ -95,7 +95,7 @@ export function Navbar() {
               onClick={() => setOpen(false)}
               className="rounded-full border border-white/12 py-3.5 text-center text-sm font-semibold text-white"
             >
-              Entrar
+              {logged ? "Minha conta" : "Entrar"}
             </Link>
             <Link
               href="/agendar"

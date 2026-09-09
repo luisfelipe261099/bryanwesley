@@ -42,7 +42,17 @@ Utilitários em [`app/globals.css`](app/globals.css): `.glass`, `.btn-royal`,
 | `/admin/clientes` | `ADMIN` | Clientes, assinaturas e importação em CSV |
 
 O acesso é barrado no [`middleware.ts`](middleware.ts) e reconferido em cada
-Server Action — a proteção não depende da interface.
+Server Action — a proteção não depende da interface. A nav inferior mostra só
+o que cada papel pode abrir.
+
+**Assumir a conta.** Quem agendou sem cadastro cria a senha depois pelo mesmo
+WhatsApp. Se esse número já tem agendamento, o cadastro exige o **código de 6
+letras** de um deles como prova de posse — sem isso, qualquer pessoa com o
+número veria os horários de outra. (Quando o WhatsApp entrar, isso vira OTP.)
+
+**Senhas.** O cliente troca a própria em `/cliente`; o admin redefine a de
+qualquer conta em `/admin/clientes`. O login gasta o mesmo tempo com usuário
+existente ou não, para não denunciar quem tem conta.
 
 ## Como a agenda evita conflito
 
@@ -60,9 +70,15 @@ Mesmo com requisições simultâneas, o Postgres rejeita a segunda. O teste
 `npm run test:agenda` dispara 5 pedidos ao mesmo tempo no mesmo horário e
 confirma que exatamente 1 vence.
 
-A disponibilidade considera: jornada da loja, jornada própria do barbeiro,
+Há uma segunda camada, portável para qualquer banco: a transação de
+agendamento faz `SELECT … FOR UPDATE` numa linha de `booking_locks`
+(barbeiro + dia) antes de conferir o horário. No Postgres é reforço; em
+MySQL/TiDB, que não têm exclusion constraint, passa a ser a própria garantia.
+
+A disponibilidade considera: jornada da loja, **jornada própria do barbeiro**
+(cadastrada em Admin → Equipe; sem linha para o dia da semana = folga),
 agendamentos existentes, bloqueios do admin, dias fechados e antecedência
-mínima. Horários da loja são tratados no fuso `America/São_Paulo`
+mínima. "Mais rápido" nunca escala quem está de folga. Horários da loja são tratados no fuso `America/São_Paulo`
 ([`lib/time.ts`](lib/time.ts)).
 
 ## Comissões
@@ -77,14 +93,21 @@ barbeiro ultrapassa um faturamento no mês — regra global ou individual.
 
 Atendimento de assinante não tem cobrança no balcão, mas gera comissão: a base
 vira o preço de tabela do serviço entregue (ajustável em
-`settings.subscription_commission_base`).
+`settings.subscription_commission_base`). Cada barbeiro tem uma **meta mensal**
+própria (Admin → Equipe) que alimenta a barra do painel dele.
+
+**Assinatura vencida** vira `INADIMPLENTE` no cron e perde os benefícios até o
+admin registrar a renovação em `/admin/clientes` (o ciclo é estendido a partir
+do vencimento, não de hoje). Com o gateway, a renovação passa a ser automática.
 
 ## Check-in por QR Code
 
 Cada agendamento nasce com um `checkin_token`. O cliente abre **Meu QR** em
 `/cliente`; o barbeiro lê com a câmera (cai em `/barbeiro/checkin/<token>`) ou
-digita o código de 6 letras no painel. O check-in valida a chegada e já move o
-atendimento para *em andamento*.
+digita o código de 6 letras no painel. O check-in valida a chegada; se o barbeiro
+estiver livre, já move o atendimento para *em andamento* — senão registra a
+chegada e ele inicia quando terminar o atual. Para assinante, a resposta diz se
+o plano está ativo: é o ponto anti-fraude.
 
 ## Horário fixo do assinante
 
@@ -102,10 +125,21 @@ A aplicação **enfileira**; quem entrega é o worker. Cada agendamento gera
 confirmação imediata e lembretes de 24h e 2h. Cancelar derruba os lembretes
 pendentes.
 
-O despacho roda em `/api/notificacoes/despachar`, acionado pelo Vercel Cron a
-cada 15 minutos ([`vercel.json`](vercel.json)). Sem `WHATSAPP_TOKEN`
-configurado o sistema segue funcionando: as mensagens ficam gravadas na fila
-até o número ser aprovado.
+O despacho roda em `/api/notificacoes/despachar` e também materializa os
+horários fixos e expira assinaturas vencidas. Exige `CRON_SECRET` em produção
+(header `Authorization: Bearer` ou `?token=`); sem ele responde 503 e não
+dispara nada.
+
+> **Plano Hobby da Vercel só permite cron diário**, então o
+> [`vercel.json`](vercel.json) agenda às 09:00 UTC. Os lembretes de 24h e 2h
+> precisam de uma cadência menor: aponte um agendador externo gratuito
+> (ex.: cron-job.org) para `…/api/notificacoes/despachar?token=<CRON_SECRET>`
+> a cada 15 min, ou suba para o plano Pro e troque o `schedule` para
+> `*/15 * * * *`.
+
+Sem `WHATSAPP_TOKEN` configurado o sistema segue funcionando: as mensagens
+ficam gravadas na fila até o número ser aprovado. Horário fixo materializado
+pelo sistema não dispara confirmação (o membro já sabe), só os lembretes.
 
 ## Rodar localmente
 
@@ -130,10 +164,15 @@ Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
 ## Testes
 
 ```bash
-npm test              # 36 verificações
-npm run test:agenda   # 27 — motor de agenda
+npm test              # 43 verificações
+npm run test:agenda   # 34 — motor de agenda, jornada por barbeiro, faixas de meta
 npm run test:fixo     #  9 — horário fixo
 ```
+
+Há ainda um roteiro de navegador (Playwright) com 25 verificações de ponta a
+ponta: agendamento de visitante, login, todas as telas do admin, check-in por
+código, endpoint do cron protegido, tomada de conta com prova por código, nav
+por papel e troca de senha.
 
 Cobrem disponibilidade, bloqueios, antecedência, reserva dupla, corrida de
 concorrência, ciclo de vida do atendimento, fechamento da comissão e a
@@ -141,9 +180,21 @@ materialização idempotente do horário fixo.
 
 ## Deploy
 
-O build aplica as migrações antes de compilar (`npm run build`), então basta
-ter `DATABASE_URL` e `AUTH_SECRET` nas variáveis do projeto. Na Vercel:
-**Storage → Create Database** já injeta a `DATABASE_URL`.
+O build aplica as migrações antes de compilar (`npm run build`) e, se o
+catálogo estiver vazio, roda o seed — o primeiro deploy já sobe com serviços,
+planos e as contas da equipe. Sem `DATABASE_URL` ou `AUTH_SECRET` o build
+**falha de propósito**: melhor que servir 500 em toda rota protegida.
+
+Variáveis do projeto na Vercel:
+
+| Variável | Obrigatória | Para quê |
+|----------|-------------|----------|
+| `DATABASE_URL` | sim | Postgres |
+| `AUTH_SECRET` | sim | Assina o cookie de sessão (≥ 24 caracteres) |
+| `CRON_SECRET` | sim em produção | Protege o endpoint de despacho |
+| `SEED_PASSWORD` | não | Senha inicial da equipe (padrão `bryan2026`) |
+| `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` | não | Entrega das mensagens |
+| `INFINITEPAY_HANDLE` | não | Cobrança avulsa online |
 
 ## Pagamentos
 

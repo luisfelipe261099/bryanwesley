@@ -9,6 +9,7 @@ import {
   CalendarPlus,
   Lock,
   Receipt,
+  MessageCircle,
   type LucideIcon,
 } from "lucide-react";
 import { Background } from "@/components/Background";
@@ -25,6 +26,7 @@ import {
 } from "@/lib/queries";
 import { formatBRL, formatDuration } from "@/lib/money";
 import { formatShopTime, shopToday, addDays, labelWeekday, labelFullDate } from "@/lib/time";
+import { formatPhone } from "@/lib/phone";
 import { AppointmentActions } from "./AgendaActions";
 import { CheckinBox } from "./CheckinBox";
 
@@ -46,13 +48,16 @@ export default async function BarbeiroPanel({
 }) {
   const session = await requireRole(["BARBER", "ADMIN"]);
 
-  // Admin sem cadastro de barbeiro cai no primeiro da equipe.
+  // Barbeiro vê só a própria agenda. Admin sem cadastro de barbeiro cai
+  // no primeiro da equipe — só ele, para nunca expor agenda alheia.
   const barber = session.barberId
     ? await db.query.barbers.findFirst({
         where: eq(barbers.id, session.barberId),
         with: { user: true },
       })
-    : await db.query.barbers.findFirst({ with: { user: true } });
+    : session.role === "ADMIN"
+      ? await db.query.barbers.findFirst({ with: { user: true } })
+      : null;
 
   if (!barber) {
     return (
@@ -65,7 +70,7 @@ export default async function BarbeiroPanel({
             administrador para fazer o vínculo em Admin → Equipe.
           </p>
         </main>
-        <BottomNav active="barbeiro" />
+        <BottomNav active="barbeiro" role={session.role} />
       </>
     );
   }
@@ -82,8 +87,8 @@ export default async function BarbeiroPanel({
     barberTodaySummary(barber.id),
   ]);
 
-  // Meta individual: 100% do que a casa espera desse barbeiro no mês.
-  const metaCents = 700000;
+  // Meta individual, definida pelo admin em Equipe.
+  const metaCents = barber.monthlyGoalCents;
   const metaPct = Math.min(
     100,
     Math.round((mes.barberCents / metaCents) * 100)
@@ -95,6 +100,8 @@ export default async function BarbeiroPanel({
   });
 
   const emAndamento = agenda.find((a) => a.status === "EM_ANDAMENTO");
+  // Iniciar/finalizar só faz sentido no dia (ou para regularizar o passado).
+  const podeAgir = dateKey <= today;
 
   return (
     <>
@@ -286,9 +293,20 @@ export default async function BarbeiroPanel({
                         <p className="truncate text-sm text-steel-400">
                           {a.items.map((i) => i.name).join(" + ")}
                         </p>
-                        {a.checkedInAt && (
-                          <p className="label mt-1 text-neon">Check-in feito</p>
-                        )}
+                        <p className="mt-1 flex flex-wrap items-center gap-2">
+                          <a
+                            href={`https://wa.me/55${a.clientPhone}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-steel-400 transition-colors hover:text-electric"
+                          >
+                            <MessageCircle className="h-3 w-3" />
+                            {formatPhone(a.clientPhone)}
+                          </a>
+                          {a.checkedInAt && (
+                            <span className="label text-neon">Check-in feito</span>
+                          )}
+                        </p>
                       </div>
                       <div className="flex flex-none flex-col items-end gap-1.5">
                         <span className="text-sm font-semibold tabular-nums text-white">
@@ -299,7 +317,9 @@ export default async function BarbeiroPanel({
                         <span className={`label rounded-full px-2.5 py-1.5 ${st.cls}`}>
                           {st.label}
                         </span>
-                        <AppointmentActions id={a.id} status={a.status} />
+                        {podeAgir && (
+                          <AppointmentActions id={a.id} status={a.status} />
+                        )}
                       </div>
                     </li>
                   );
@@ -322,7 +342,7 @@ export default async function BarbeiroPanel({
         </Reveal>
       </main>
 
-      <BottomNav active="barbeiro" />
+      <BottomNav active="barbeiro" role={session.role} />
     </>
   );
 }

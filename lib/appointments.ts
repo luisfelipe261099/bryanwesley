@@ -3,17 +3,19 @@
 // A prevenção de horário duplicado é da constraint de exclusão
 // no banco; aqui traduzimos a violação para uma mensagem humana.
 // ───────────────────────────────────────────────────────────
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, gt, inArray, lt } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointments,
   appointmentServices,
   barbers,
+  bookingLocks,
   services as servicesTable,
   subscriptions,
   users,
   planServices,
 } from "@/db/schema";
+import { sql as rawSql } from "drizzle-orm";
 import { getAvailability, getSettings, generateCode } from "./schedule";
 import { resolveBarberPct, recordCommission } from "./commissions";
 import {
@@ -25,8 +27,9 @@ import { randomBytes } from "node:crypto";
 import { shopTimeToUtc, parseDateKey } from "./time";
 import { normalizePhone } from "./phone";
 
-/** Postgres: violação de constraint de exclusão. */
+/** Postgres: violação de constraint de exclusão / de unicidade. */
 const EXCLUSION_VIOLATION = "23P01";
+const UNIQUE_VIOLATION = "23505";
 
 export class BookingError extends Error {
   constructor(message: string) {
@@ -45,6 +48,11 @@ export type CreateBookingInput = {
   notes?: string;
   /** Sessão do cliente, quando logado. */
   userId?: number | null;
+  /**
+   * Horário fixo materializado pelo sistema: não manda a confirmação
+   * imediata (o membro já sabe), só os lembretes.
+   */
+  fromRecurring?: boolean;
 };
 
 export async function createBooking(input: CreateBookingInput) {
@@ -155,8 +163,41 @@ export async function createBooking(input: CreateBookingInput) {
   // este atendimento mantém a divisão combinada no dia.
   const { pct: barberPct } = await resolveBarberPct(barberId);
 
+  // Poucas tentativas cobrem a colisão rara do código de 6 letras.
+  for (let attempt = 0; attempt < 3; attempt++) {
   try {
     const appt = await db.transaction(async (tx) => {
+      // Trava por (barbeiro, dia): serializa as reservas concorrentes.
+      // Funciona igual em Postgres e MySQL/TiDB.
+      await tx
+        .insert(bookingLocks)
+        .values({ barberId, dateKey: input.dateKey })
+        .onConflictDoNothing();
+      await tx.execute(
+        rawSql`SELECT 1 FROM booking_locks WHERE barber_id = ${barberId} AND date_key = ${input.dateKey} FOR UPDATE`
+      );
+
+      // Reconfere o horário já dentro da trava — quem entrou antes ganhou.
+      const clash = await tx.query.appointments.findFirst({
+        where: and(
+          eq(appointments.barberId, barberId),
+          inArray(appointments.status, [
+            "PENDENTE",
+            "CONFIRMADO",
+            "EM_ANDAMENTO",
+            "CONCLUIDO",
+          ]),
+          // Operadores tipados: o Drizzle serializa o Date pelo tipo da coluna.
+          lt(appointments.startsAt, endsAt),
+          gt(appointments.endsAt, startsAt)
+        ),
+      });
+      if (clash) {
+        throw new BookingError(
+          "Esse horário acabou de ser reservado por outra pessoa. Escolha outro."
+        );
+      }
+
       const [created] = await tx
         .insert(appointments)
         .values({
@@ -194,7 +235,9 @@ export async function createBooking(input: CreateBookingInput) {
     // Confirmação + lembretes. Falha de notificação não derruba o
     // agendamento: o horário já está garantido.
     try {
-      await queueBookingNotifications(appt, barber.shortName);
+      await queueBookingNotifications(appt, barber.shortName, {
+        skipConfirmation: !!input.fromRecurring,
+      });
     } catch (e) {
       console.error("Falha ao enfileirar notificações:", e);
     }
@@ -202,14 +245,20 @@ export async function createBooking(input: CreateBookingInput) {
     return appt;
   } catch (err) {
     const code = (err as { code?: string })?.code;
+    const constraint = (err as { constraint_name?: string })?.constraint_name;
     if (code === EXCLUSION_VIOLATION) {
       // Duas pessoas clicaram no mesmo horário ao mesmo tempo.
       throw new BookingError(
         "Esse horário acabou de ser reservado por outra pessoa. Escolha outro."
       );
     }
+    if (code === UNIQUE_VIOLATION && constraint === "appointments_code_unique") {
+      continue; // colisão do código curto: tenta de novo
+    }
     throw err;
   }
+  }
+  throw new BookingError("Não foi possível gerar o código. Tente novamente.");
 }
 
 /** Transições de estado permitidas, para não pular etapas. */

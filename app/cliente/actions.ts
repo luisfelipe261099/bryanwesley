@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { appointments, recurringSlots, subscriptions } from "@/db/schema";
+import { appointments, recurringSlots, subscriptions, users } from "@/db/schema";
+import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { requireRole } from "@/lib/auth";
 import { transitionAppointment, BookingError } from "@/lib/appointments";
 import { materializeRecurring } from "@/lib/recurring";
@@ -107,9 +108,19 @@ export async function saveRecurringSlot(input: {
   revalidatePath("/admin");
 
   if (report.criados === 0 && report.conflitos.length > 0) {
+    // Nenhuma data coube: não deixa um fixo "fantasma" ativo.
+    await db
+      .update(recurringSlots)
+      .set({ active: false })
+      .where(
+        and(
+          eq(recurringSlots.userId, session.id),
+          eq(recurringSlots.active, true)
+        )
+      );
     return {
       ok: false,
-      error: `Horário salvo, mas os próximos já estavam ocupados: ${report.conflitos[0].motivo}`,
+      error: `Esse horário não está livre: ${report.conflitos[0].motivo} Escolha outro.`,
     };
   }
   return { ok: true };
@@ -127,5 +138,26 @@ export async function cancelRecurringSlot(): Promise<ActionResult> {
       )
     );
   revalidatePath("/cliente");
+  return { ok: true };
+}
+
+// ───────────────────────── Minha conta ─────────────────────────
+
+export async function changeMyPassword(input: {
+  current: string;
+  next: string;
+}): Promise<ActionResult> {
+  const session = await requireRole(["CLIENT", "ADMIN", "BARBER"]);
+  if (input.next.trim().length < 6) {
+    return { ok: false, error: "A nova senha precisa ter ao menos 6 caracteres." };
+  }
+  const user = await db.query.users.findFirst({ where: eq(users.id, session.id) });
+  if (!user?.passwordHash) return { ok: false, error: "Conta sem senha definida." };
+  const ok = await verifyPassword(input.current, user.passwordHash);
+  if (!ok) return { ok: false, error: "Senha atual incorreta." };
+  await db
+    .update(users)
+    .set({ passwordHash: await hashPassword(input.next.trim()) })
+    .where(eq(users.id, session.id));
   return { ok: true };
 }

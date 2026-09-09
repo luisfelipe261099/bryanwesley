@@ -98,6 +98,8 @@ export const barbers = pgTable("barbers", {
   title: text("title").notNull(),
   rating: integer("rating").notNull().default(50), // 50 = 5.0
   commissionPct: integer("commission_pct").notNull().default(40),
+  // Meta de comissão do mês, mostrada na barra do painel do barbeiro.
+  monthlyGoalCents: integer("monthly_goal_cents").notNull().default(700000),
   active: boolean("active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
 });
@@ -251,6 +253,23 @@ export const scheduleBlocks = pgTable(
       .defaultNow(),
   },
   (t) => ({ rangeIdx: index("schedule_blocks_range_idx").on(t.startsAt) })
+);
+
+// ───────────────────────── Trava de reserva ─────────────────────────
+
+// Uma linha por (barbeiro, dia). A transação de agendamento faz
+// SELECT ... FOR UPDATE nela antes de conferir o horário, serializando
+// as reservas daquele barbeiro naquele dia. No Postgres é reforço da
+// constraint de exclusão; em MySQL/TiDB é a própria garantia.
+export const bookingLocks = pgTable(
+  "booking_locks",
+  {
+    barberId: integer("barber_id")
+      .notNull()
+      .references(() => barbers.id, { onDelete: "cascade" }),
+    dateKey: text("date_key").notNull(), // YYYY-MM-DD na loja
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.barberId, t.dateKey] }) })
 );
 
 // ───────────────────────── Configurações ─────────────────────────

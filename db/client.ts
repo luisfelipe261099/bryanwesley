@@ -19,7 +19,9 @@ const globalForDb = globalThis as unknown as {
 const sql =
   globalForDb.__bwSql ??
   postgres(url, {
-    max: 1, // pooling é feito pelo provedor (Neon/Supabase)
+    // Na Vercel cada função é efêmera: 1 conexão e o pool fica no provedor.
+    // Num servidor comum, algumas conexões evitam enfileirar tudo.
+    max: process.env.VERCEL ? 1 : 5,
     idle_timeout: 20,
     connect_timeout: 15,
     prepare: false, // compatível com pgbouncer em modo transaction

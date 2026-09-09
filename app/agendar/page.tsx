@@ -34,8 +34,11 @@ export default async function Agendar() {
     ? plans.find((p) => p.id === subscription.planId) ?? null
     : null;
 
-  const viewer = session
-    ? await db.query.users
+  // Só o cliente logado tem os próprios dados preenchidos; barbeiro ou
+  // admin fazendo um encaixe começam com o formulário vazio.
+  const viewer =
+    session?.role === "CLIENT"
+      ? await db.query.users
         .findFirst({ where: eq(users.id, session.id) })
         .then((u) =>
           u ? { name: u.name, phone: formatPhone(u.phone) } : null
@@ -87,7 +90,7 @@ export default async function Agendar() {
         )}
       </main>
 
-      <BottomNav active="inicio" />
+      <BottomNav active="inicio" role={session?.role ?? null} />
     </>
   );
 }

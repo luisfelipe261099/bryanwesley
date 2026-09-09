@@ -8,6 +8,7 @@ import { db } from "@/db/client";
 import {
   appointments,
   barbers,
+  barberHours,
   scheduleBlocks,
   services as servicesTable,
   settings as settingsTable,
@@ -146,6 +147,45 @@ async function busyIntervals(dateKey: string, barberIds: number[]) {
   return byBarber;
 }
 
+/**
+ * Janela de trabalho de cada barbeiro no dia.
+ * Sem jornada própria cadastrada vale o horário da loja; com jornada
+ * cadastrada e nenhuma linha para este dia da semana, o barbeiro folga.
+ */
+export async function workingWindows(
+  barberIds: number[],
+  weekday: number,
+  s: Settings
+) {
+  const rows = barberIds.length
+    ? await db
+        .select()
+        .from(barberHours)
+        .where(inArray(barberHours.barberId, barberIds))
+    : [];
+
+  const hasOwn = new Set(rows.map((r) => r.barberId));
+  const out = new Map<number, { open: number; close: number } | null>();
+  for (const id of barberIds) {
+    if (!hasOwn.has(id)) {
+      out.set(id, { open: s.openMinute, close: s.closeMinute });
+      continue;
+    }
+    const today = rows.find((r) => r.barberId === id && r.weekday === weekday);
+    out.set(
+      id,
+      today
+        ? {
+            // A jornada própria nunca extrapola a da loja.
+            open: Math.max(today.openMinute, s.openMinute),
+            close: Math.min(today.closeMinute, s.closeMinute),
+          }
+        : null
+    );
+  }
+  return out;
+}
+
 function overlaps(a: Busy, list: Busy[]) {
   return list.some((b) => a.start < b.end && b.start < a.end);
 }
@@ -189,10 +229,17 @@ export async function getAvailability(opts: {
     : team;
   if (pool.length === 0) return { dateKey, closed: true, slots: [] };
 
-  const busy = await busyIntervals(
-    dateKey,
-    pool.map((b) => b.id)
-  );
+  const ids = pool.map((b) => b.id);
+  const weekday = weekdayOf(dateKey);
+  const [busy, windows] = await Promise.all([
+    busyIntervals(dateKey, ids),
+    workingWindows(ids, weekday, s),
+  ]);
+
+  // Barbeiro escolhido folga hoje: dia fechado para ele.
+  if (opts.barberId && windows.get(opts.barberId) === null) {
+    return { dateKey, closed: true, slots: [] };
+  }
 
   const { year, month, day } = parseDateKey(dateKey);
   const earliest = Date.now() + s.minAdvanceHours * 3600_000;
@@ -221,7 +268,12 @@ export async function getAvailability(opts: {
     }
 
     const free = pool
-      .filter((b) => !overlaps(interval, busy.get(b.id) ?? []))
+      .filter((b) => {
+        const w = windows.get(b.id);
+        if (!w) return false; // folga
+        if (m < w.open || m + durationMin > w.close) return false;
+        return !overlaps(interval, busy.get(b.id) ?? []);
+      })
       .map((b) => b.id);
 
     slots.push({

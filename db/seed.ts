@@ -89,7 +89,7 @@ const TEAM = [
   { slug: "matheus", name: "Matheus Fontes", shortName: "Matheus F.", title: "Especialista em Barba", phone: "(11) 99999-0003", email: "matheus@bryanwesley.com.br", rating: 48, commissionPct: 40, admin: false },
 ];
 
-async function main() {
+export async function runSeed() {
   const defaultPassword = process.env.SEED_PASSWORD || "bryan2026";
   const hash = await bcrypt.hash(defaultPassword, 10);
 
@@ -212,8 +212,11 @@ async function main() {
   await sql.end();
 }
 
-main().catch(async (e) => {
-  console.error(e);
-  await sql.end();
-  process.exit(1);
-});
+// `npm run db:seed` executa direto; o migrate importa e chama runSeed().
+if (require.main === module) {
+  runSeed().catch(async (e) => {
+    console.error(e);
+    await sql.end();
+    process.exit(1);
+  });
+}

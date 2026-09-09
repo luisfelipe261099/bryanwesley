@@ -88,7 +88,9 @@ export async function resolveBarberPct(barberId: number, ref = new Date()) {
     )
     .orderBy(
       desc(commissionTiers.minRevenueCents),
-      desc(commissionTiers.barberId)
+      // Em DESC o Postgres põe NULL primeiro — inverteria a prioridade.
+      // Ordena explicitamente: faixa do próprio barbeiro antes da global.
+      drizzleSql`${commissionTiers.barberId} IS NULL`
     );
 
   if (tiers.length > 0) pct = tiers[0].barberPct;

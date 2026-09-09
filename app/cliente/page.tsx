@@ -33,7 +33,8 @@ import { formatBRL, formatDuration } from "@/lib/money";
 import { formatShopTime, utcToShopParts, labelFullDate, shopToday } from "@/lib/time";
 import { checkinQrSvg, publicBaseUrl } from "@/lib/qr";
 import { CheckinQR } from "./CheckinQR";
-import { CancelButton, EmptyState } from "./MeusHorarios";
+import { CancelButton, EmptyState, ChangePassword } from "./MeusHorarios";
+import { KeyRound } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -321,9 +322,14 @@ export default async function ClienteDashboard() {
                           {formatDuration(a.durationMin)}
                         </span>
                       </p>
-                      <p className="mt-1 text-xs text-steel-400">
-                        {a.barber.user.name}
-                      </p>
+                      <div className="mt-1 flex items-center justify-between gap-2">
+                        <p className="text-xs text-steel-400">
+                          {a.barber.user.name}
+                        </p>
+                        {a.id !== proximo?.id && a.status !== "EM_ANDAMENTO" && (
+                          <CancelButton appointmentId={a.id} />
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -451,9 +457,24 @@ export default async function ClienteDashboard() {
             </div>
           </Reveal>
         </div>
+
+        <Reveal delay={0.16}>
+          <div className="glass mt-5 rounded-3xl p-7">
+            <div className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-electric" />
+              <h3 className="font-display text-lg text-white">Minha conta</h3>
+            </div>
+            <p className="mt-1.5 text-sm text-steel-400">
+              Login pelo WhatsApp cadastrado. Aqui você troca a senha.
+            </p>
+            <div className="mt-5 max-w-sm">
+              <ChangePassword />
+            </div>
+          </div>
+        </Reveal>
       </main>
 
-      <BottomNav active="clube" />
+      <BottomNav active="clube" role={session.role} />
     </>
   );
 }

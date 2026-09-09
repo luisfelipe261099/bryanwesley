@@ -22,6 +22,13 @@
       "when": 1788984215878,
       "tag": "0002_comissao_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788996867377,
+      "tag": "0003_trava_e_meta",
+      "breakpoints": true
     }
   ]
 }

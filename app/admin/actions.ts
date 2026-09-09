@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
 import {
@@ -20,6 +20,7 @@ import { hashPassword } from "@/lib/auth/password";
 import { transitionAppointment, BookingError } from "@/lib/appointments";
 import { shopTimeToUtc, parseDateKey } from "@/lib/time";
 import { normalizePhone, isValidPhone } from "@/lib/phone";
+import { nextRenewal } from "@/lib/subscriptions";
 
 export type Result = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -171,6 +172,10 @@ export async function createBarber(
           name: data.name,
           email: data.email.toLowerCase(),
           role: data.isAdmin ? "ADMIN" : "BARBER",
+          // Telefone já existia (ex.: era cliente): a senha informada
+          // passa a valer, senão o barbeiro não consegue entrar.
+          passwordHash: await hashPassword(password),
+          active: true,
         },
       })
       .returning();
@@ -197,6 +202,7 @@ export async function updateBarber(input: {
   shortName: string;
   title: string;
   commissionPct: number;
+  monthlyGoalCents: number;
   active: boolean;
 }): Promise<Result> {
   try {
@@ -207,6 +213,7 @@ export async function updateBarber(input: {
         shortName: input.shortName.trim(),
         title: input.title.trim(),
         commissionPct: Math.max(0, Math.min(100, input.commissionPct)),
+        monthlyGoalCents: Math.max(0, Math.round(input.monthlyGoalCents)),
         active: input.active,
       })
       .where(eq(barbers.id, input.id));
@@ -302,11 +309,16 @@ export async function removeCommissionTier(id: number): Promise<Result> {
 
 // ───────────────────────── Catálogo ─────────────────────────
 
+const money = z
+  .number({ message: "Valor inválido." })
+  .int("Valor inválido.")
+  .min(0, "Valor não pode ser negativo.");
+
 const serviceSchema = z.object({
   id: z.number().int().optional(),
   name: z.string().trim().min(2, "Informe o nome do serviço."),
   description: z.string().trim().max(200).default(""),
-  priceCents: z.number().int().min(0),
+  priceCents: money,
   durationMin: z.number().int().min(5).max(480),
   tag: z.string().trim().max(30).nullable().default(null),
   active: z.boolean().default(true),
@@ -370,8 +382,8 @@ const planSchema = z.object({
   name: z.string().trim().min(2, "Informe o nome do plano."),
   kicker: z.string().trim().max(40).default(""),
   tagline: z.string().trim().max(120).default(""),
-  priceCents: z.number().int().min(0),
-  annualPriceCents: z.number().int().min(0),
+  priceCents: money,
+  annualPriceCents: money,
   features: z.array(z.string().trim().min(1)).max(10),
   highlight: z.boolean().default(false),
   badge: z.string().trim().max(30).nullable().default(null),
@@ -462,8 +474,7 @@ export async function subscribeClient(input: {
 }): Promise<Result> {
   try {
     await admin();
-    const renewsAt = new Date();
-    renewsAt.setMonth(renewsAt.getMonth() + (input.cycle === "ANUAL" ? 12 : 1));
+    const renewsAt = nextRenewal(new Date(), input.cycle);
 
     await db
       .update(subscriptions)
@@ -482,6 +493,52 @@ export async function subscribeClient(input: {
       renewsAt,
     });
     return done("Assinatura ativada.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Registra o pagamento do ciclo e estende a assinatura. */
+export async function renewSubscription(userId: number): Promise<Result> {
+  try {
+    await admin();
+    const current = await db.query.subscriptions.findFirst({
+      where: and(
+        eq(subscriptions.userId, userId),
+        inArray(subscriptions.status, ["ATIVA", "INADIMPLENTE"])
+      ),
+      orderBy: (s, { desc }) => [desc(s.startedAt)],
+    });
+    if (!current) return { ok: false, error: "Esse cliente não tem assinatura." };
+    await db
+      .update(subscriptions)
+      .set({
+        status: "ATIVA",
+        renewsAt: nextRenewal(current.renewsAt, current.cycle),
+        canceledAt: null,
+      })
+      .where(eq(subscriptions.id, current.id));
+    return done("Renovação registrada.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Admin define uma nova senha para qualquer conta (cliente ou equipe). */
+export async function resetUserPassword(input: {
+  userId: number;
+  password: string;
+}): Promise<Result> {
+  try {
+    await admin();
+    if (input.password.trim().length < 6) {
+      return { ok: false, error: "A senha precisa ter ao menos 6 caracteres." };
+    }
+    await db
+      .update(users)
+      .set({ passwordHash: await hashPassword(input.password.trim()) })
+      .where(eq(users.id, input.userId));
+    return done("Senha redefinida.");
   } catch (e) {
     return fail(e);
   }

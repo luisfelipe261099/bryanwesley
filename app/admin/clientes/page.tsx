@@ -14,6 +14,9 @@ export default async function AdminClientes() {
         lastVisit: c.lastVisit
           ? labelDayMonth(utcToShopParts(c.lastVisit).dateKey)
           : null,
+        renewsAt: c.renewsAt
+          ? labelDayMonth(utcToShopParts(c.renewsAt).dateKey)
+          : null,
       }))}
       plans={plans.map((p) => ({ id: p.id, name: p.name }))}
     />

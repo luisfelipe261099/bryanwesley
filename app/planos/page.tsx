@@ -5,6 +5,7 @@ import { Footer } from "@/components/Footer";
 import { Reveal } from "@/components/Reveal";
 import { PlanCard } from "@/components/PlanCard";
 import { listPlans } from "@/lib/queries";
+import { getSession } from "@/lib/auth";
 import { PlanosGrid } from "./PlanosGrid";
 
 const comparison = [
@@ -45,15 +46,15 @@ function Cell({ value }: { value: string | boolean }) {
   return <span className="text-sm text-steel-200">{value}</span>;
 }
 
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 export default async function Planos() {
-  const plans = await listPlans();
+  const [plans, session] = await Promise.all([listPlans(), getSession()]);
 
   return (
     <>
       <Background />
-      <Navbar />
+      <Navbar logged={!!session} />
 
       <main className="mx-auto max-w-7xl px-5 pb-10 pt-28 lg:px-8 lg:pt-36">
         <Reveal>

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { appointments } from "@/db/schema";
+import { appointments, subscriptions } from "@/db/schema";
 import { requireRole } from "@/lib/auth";
 import { transitionAppointment, BookingError } from "@/lib/appointments";
 
@@ -91,14 +91,45 @@ export async function checkIn(input: {
     .set({ checkedInAt: appt.checkedInAt ?? new Date() })
     .where(eq(appointments.id, appt.id));
 
+  // Assinante: confere se o plano ainda vale — é o ponto anti-fraude.
+  let planoInfo = "";
+  if (appt.kind === "ASSINANTE") {
+    const sub = appt.clientUserId
+      ? await db.query.subscriptions.findFirst({
+          where: and(
+            eq(subscriptions.userId, appt.clientUserId),
+            eq(subscriptions.status, "ATIVA")
+          ),
+          with: { plan: true },
+        })
+      : null;
+    planoInfo = sub
+      ? ` Plano ${sub.plan.name.replace("Plano ", "")} ativo.`
+      : " ATENÇÃO: sem plano ativo — cobrar avulso.";
+  }
+
+  // Só inicia automaticamente se o barbeiro estiver livre; senão
+  // registra a chegada e ele inicia quando terminar o atual.
+  let started = false;
   if (appt.status === "CONFIRMADO" || appt.status === "PENDENTE") {
-    await transitionAppointment(appt.id, "EM_ANDAMENTO");
+    const busy = await db.query.appointments.findFirst({
+      where: and(
+        eq(appointments.barberId, appt.barberId),
+        eq(appointments.status, "EM_ANDAMENTO")
+      ),
+    });
+    if (!busy) {
+      await transitionAppointment(appt.id, "EM_ANDAMENTO");
+      started = true;
+    }
   }
 
   revalidateAll();
   return {
     ok: true,
-    message: `Check-in de ${appt.clientName} confirmado.`,
+    message: `Check-in de ${appt.clientName} confirmado.${planoInfo}${
+      started ? "" : " Chegada registrada — inicie quando liberar a cadeira."
+    }`,
     appointmentId: appt.id,
   };
 }

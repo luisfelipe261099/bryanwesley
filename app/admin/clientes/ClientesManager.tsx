@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Crown, Loader2, Phone, Upload, UserCheck, X } from "lucide-react";
+import { Crown, KeyRound, Loader2, Phone, RefreshCw, Upload, UserCheck, X } from "lucide-react";
 import {
   Card,
   Feedback,
@@ -9,13 +9,21 @@ import {
   type Msg,
 } from "@/components/admin/Feedback";
 import { formatPhone } from "@/lib/phone";
-import { importClients, subscribeClient, cancelSubscription } from "../actions";
+import {
+  importClients,
+  subscribeClient,
+  cancelSubscription,
+  renewSubscription,
+  resetUserPassword,
+} from "../actions";
 
 type ClientRow = {
   id: number;
   name: string;
   phone: string;
   plan: string | null;
+  overduePlan: string | null;
+  renewsAt: string | null;
   visits: number;
   lastVisit: string | null;
   hasAccount: boolean;
@@ -101,6 +109,36 @@ function ClientRowItem({
     });
   }
 
+  function renovar() {
+    setMsg(null);
+    start(async () => {
+      const res = await renewSubscription(client.id);
+      setMsg(
+        res.ok
+          ? { ok: true, text: res.message ?? "Renovada." }
+          : { ok: false, text: res.error }
+      );
+    });
+  }
+
+  const [pwOpen, setPwOpen] = useState(false);
+  const [pw, setPw] = useState("");
+  function redefinir() {
+    setMsg(null);
+    start(async () => {
+      const res = await resetUserPassword({ userId: client.id, password: pw });
+      setMsg(
+        res.ok
+          ? { ok: true, text: res.message ?? "Senha redefinida." }
+          : { ok: false, text: res.error }
+      );
+      if (res.ok) {
+        setPw("");
+        setPwOpen(false);
+      }
+    });
+  }
+
   return (
     <li className="rounded-2xl border border-white/6 bg-white/[0.02] p-3.5">
       <div className="flex items-start gap-3">
@@ -129,6 +167,14 @@ function ClientRowItem({
               <span className="label inline-flex items-center gap-1 rounded-full bg-electric/10 px-2.5 py-1.5 text-electric">
                 <Crown className="h-3 w-3" />
                 {client.plan.replace("Plano ", "")}
+                {client.renewsAt && (
+                  <span className="text-electric/70"> · renova {client.renewsAt}</span>
+                )}
+              </span>
+            ) : client.overduePlan ? (
+              <span className="label inline-flex items-center gap-1 rounded-full bg-amber-400/10 px-2.5 py-1.5 text-amber-300">
+                <Crown className="h-3 w-3" />
+                {client.overduePlan.replace("Plano ", "")} · vencido
               </span>
             ) : (
               <span className="label rounded-full bg-white/5 px-2.5 py-1.5 text-steel-300">
@@ -142,19 +188,44 @@ function ClientRowItem({
           </div>
         </div>
         <div className="flex flex-none flex-col items-end gap-1.5">
-          {client.plan ? (
-            <button
-              type="button"
-              onClick={cancelar}
-              disabled={pending}
-              className="label rounded-full border border-white/12 px-3 py-2 text-steel-300 transition-colors hover:border-red-400/50 hover:text-red-200 disabled:opacity-50"
-            >
-              {pending ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                "Cancelar plano"
+          <button
+            type="button"
+            onClick={() => setPwOpen((v) => !v)}
+            aria-label="Redefinir senha"
+            title="Redefinir senha"
+            className="grid h-8 w-8 place-items-center rounded-full border border-white/12 text-steel-400 transition-colors hover:border-electric/40 hover:text-electric"
+          >
+            <KeyRound className="h-3.5 w-3.5" />
+          </button>
+          {client.plan || client.overduePlan ? (
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={renovar}
+                disabled={pending}
+                title="Registrar pagamento e renovar"
+                className="label inline-flex items-center gap-1 rounded-full border border-electric/40 bg-electric/10 px-3 py-2 text-electric disabled:opacity-50"
+              >
+                {pending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3 w-3" />
+                )}
+                Renovar
+              </button>
+              {client.plan && (
+                <button
+                  type="button"
+                  onClick={cancelar}
+                  disabled={pending}
+                  aria-label="Cancelar plano"
+                  title="Cancelar plano"
+                  className="grid h-8 w-8 place-items-center rounded-full border border-white/12 text-steel-400 transition-colors hover:border-red-400/50 hover:text-red-200 disabled:opacity-50"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
               )}
-            </button>
+            </div>
           ) : (
             <button
               type="button"
@@ -166,6 +237,27 @@ function ClientRowItem({
           )}
         </div>
       </div>
+
+      {pwOpen && (
+        <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-white/8 pt-3">
+          <input
+            type="text"
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            placeholder="Nova senha (mínimo 6)"
+            aria-label="Nova senha"
+            className="min-w-0 flex-1 rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none placeholder:text-steel-400/60 focus:border-electric/60"
+          />
+          <button
+            type="button"
+            onClick={redefinir}
+            disabled={pending || pw.trim().length < 6}
+            className="btn-royal label rounded-xl px-4 py-3 text-white disabled:opacity-40"
+          >
+            Definir senha
+          </button>
+        </div>
+      )}
 
       {open && (
         <div className="mt-3 grid gap-3 border-t border-white/8 pt-3 sm:grid-cols-3">

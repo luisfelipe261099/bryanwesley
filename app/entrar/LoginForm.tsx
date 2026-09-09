@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import Link from "next/link";
 import { AlertCircle, ArrowRight, CalendarPlus, Loader2 } from "lucide-react";
-import { login, signup, type AuthState } from "./actions";
+import { login, signup, type AuthState, type SignupState } from "./actions";
 
 type Tab = "entrar" | "criar";
 
@@ -91,7 +91,8 @@ function SignInForm({ proximo }: { proximo: string }) {
 }
 
 function SignUpForm() {
-  const [state, action] = useFormState<AuthState, FormData>(signup, undefined);
+  const [state, action] = useFormState<SignupState, FormData>(signup, undefined);
+  const needsCode = !!state?.needsCode;
   return (
     <form action={action} className="space-y-4">
       <Field
@@ -114,7 +115,23 @@ function SignUpForm() {
         placeholder="Mínimo 6 caracteres"
         autoComplete="new-password"
       />
-      <ErrorLine state={state} />
+      {needsCode && (
+        <div className="rounded-xl border border-electric/30 bg-electric/[0.06] p-4">
+          <p className="text-sm text-steel-200">
+            Esse WhatsApp já tem agendamento. Para confirmar que é você,
+            informe o código de 6 letras que aparece na confirmação.
+          </p>
+          <div className="mt-3">
+            <Field
+              label="Código do agendamento"
+              name="code"
+              placeholder="Ex.: K7QM2P"
+              autoComplete="off"
+            />
+          </div>
+        </div>
+      )}
+      <ErrorLine state={state?.error ? { error: state.error } : undefined} />
       <SubmitButton>Criar minha conta</SubmitButton>
     </form>
   );

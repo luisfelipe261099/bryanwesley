@@ -8,7 +8,11 @@ import {
   notifications,
   services as servicesTable,
   scheduleBlocks,
+  barberHours,
+  commissionTiers,
+  bookingLocks,
 } from "../db/schema";
+import { resolveBarberPct } from "../lib/commissions";
 import { getAvailability, getSettings, getActiveBarbers } from "../lib/schedule";
 import { createBooking, transitionAppointment, BookingError } from "../lib/appointments";
 import { shopToday, addDays, weekdayOf, shopTimeToUtc, parseDateKey } from "../lib/time";
@@ -39,6 +43,9 @@ async function main() {
   await db.delete(appointmentServices);
   await db.delete(appointments);
   await db.delete(scheduleBlocks);
+  await db.delete(barberHours);
+  await db.delete(commissionTiers);
+  await db.delete(bookingLocks);
 
   // Um dia aberto bem no futuro, longe da regra de antecedência.
   let dateKey = addDays(shopToday(), 7);
@@ -214,6 +221,44 @@ async function main() {
     "horário volta a ficar livre após cancelar",
     av4.slots.find((s) => s.time === "10:00")!.available
   );
+
+  console.log("\n11. Jornada própria do barbeiro");
+  const wd = weekdayOf(dateKey);
+  // Barbeiro 2 só trabalha à tarde neste dia da semana
+  await db.insert(barberHours).values({
+    barberId: team[1].id, weekday: wd, openMinute: 14 * 60, closeMinute: 18 * 60,
+  });
+  const avJornada = await getAvailability({
+    dateKey, durationMin: 30, barberId: team[1].id,
+  });
+  check("manhã fechada para quem entra à tarde",
+    !avJornada.slots.find((s) => s.time === "10:00")!.available);
+  check("tarde aberta dentro da jornada",
+    avJornada.slots.find((s) => s.time === "15:00")!.available);
+  // 17:30 + 30min = 18:00 ainda cabe; 18:00 + 30min já não.
+  check("não passa do fim da jornada",
+    !avJornada.slots.find((s) => s.time === "18:00")!.available);
+  // Outro dia da semana sem linha → folga
+  let outroDia = addDays(dateKey, 1);
+  while (settings.closedWeekdays.includes(weekdayOf(outroDia)) || weekdayOf(outroDia) === wd)
+    outroDia = addDays(outroDia, 1);
+  const avFolga = await getAvailability({
+    dateKey: outroDia, durationMin: 30, barberId: team[1].id,
+  });
+  check("dia sem jornada cadastrada = folga", avFolga.closed);
+  const avTodos = await getAvailability({ dateKey: outroDia, durationMin: 30 });
+  check("'mais rápido' não escala quem está de folga",
+    avTodos.slots.every((s) => !s.barberIds.includes(team[1].id)));
+
+  console.log("\n12. Faixas de meta: específica vence a global");
+  await db.insert(commissionTiers).values([
+    { barberId: null, minRevenueCents: 0, barberPct: 55, label: "Global" },
+    { barberId: team[0].id, minRevenueCents: 0, barberPct: 60, label: "Própria" },
+  ]);
+  const { pct } = await resolveBarberPct(team[0].id);
+  check("faixa do próprio barbeiro prevalece (60 > 55)", pct === 60, `(veio ${pct})`);
+  const { pct: pctOutro } = await resolveBarberPct(team[2].id);
+  check("quem não tem faixa própria usa a global", pctOutro === 55, `(veio ${pctOutro})`);
 
   console.log(`\n${passes} passaram · ${fails} falharam\n`);
   await sql.end();

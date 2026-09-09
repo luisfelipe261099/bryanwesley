@@ -21,6 +21,7 @@ export default async function AdminEquipe() {
         shortName: p.barber.shortName,
         title: p.barber.title,
         commissionPct: p.barber.commissionPct,
+        monthlyGoalCents: p.barber.monthlyGoalCents,
         active: p.barber.active,
         baseCents: p.baseCents,
         barberCents: p.barberCents,

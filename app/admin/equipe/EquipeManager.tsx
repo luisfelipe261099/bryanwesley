@@ -11,6 +11,7 @@ import {
   type Msg,
 } from "@/components/admin/Feedback";
 import { formatBRL } from "@/lib/money";
+import { resetUserPassword } from "../actions";
 import {
   createBarber,
   updateBarber,
@@ -27,6 +28,7 @@ type BarberRow = {
   shortName: string;
   title: string;
   commissionPct: number;
+  monthlyGoalCents: number;
   active: boolean;
   baseCents: number;
   barberCents: number;
@@ -68,6 +70,9 @@ export function EquipeManager({
 
 function BarberCard({ barber }: { barber: BarberRow }) {
   const [form, setForm] = useState(barber);
+  const [goal, setGoal] = useState(
+    (barber.monthlyGoalCents / 100).toFixed(2).replace(".", ",")
+  );
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, start] = useTransition();
 
@@ -79,6 +84,7 @@ function BarberCard({ barber }: { barber: BarberRow }) {
         shortName: form.shortName,
         title: form.title,
         commissionPct: form.commissionPct,
+        monthlyGoalCents: Math.round(Number(goal.replace(/\./g, "").replace(",", ".")) * 100) || 0,
         active: form.active,
       });
       setMsg(
@@ -91,7 +97,7 @@ function BarberCard({ barber }: { barber: BarberRow }) {
 
   return (
     <Card title={barber.name} desc={`${barber.atendimentos} atendimento(s) no mês`}>
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <TextInput
           label="Nome curto"
           value={form.shortName}
@@ -111,6 +117,12 @@ function BarberCard({ barber }: { barber: BarberRow }) {
           onChange={(e) =>
             setForm({ ...form, commissionPct: Number(e.target.value) })
           }
+        />
+        <TextInput
+          label="Meta de comissão no mês (R$)"
+          inputMode="decimal"
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
         />
       </div>
 

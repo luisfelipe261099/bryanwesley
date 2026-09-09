@@ -6,6 +6,7 @@ import {
 } from "@/lib/notifications";
 import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
 import { materializeRecurring } from "@/lib/recurring";
+import { expireOverdueSubscriptions } from "@/lib/subscriptions";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -16,13 +17,26 @@ export const maxDuration = 60;
  * a Vercel envia o header Authorization automaticamente.
  */
 async function handler(req: Request) {
+  // Em produção o segredo é obrigatório: sem ele qualquer um dispararia
+  // envios (que custam dinheiro) à vontade. Aceita header ou ?token=
+  // para os agendadores externos que não enviam Authorization.
   const secret = process.env.CRON_SECRET;
+  if (process.env.NODE_ENV === "production" && !secret) {
+    return NextResponse.json(
+      { error: "CRON_SECRET não configurado" },
+      { status: 503 }
+    );
+  }
   if (secret) {
     const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
+    const token = new URL(req.url).searchParams.get("token");
+    if (auth !== `Bearer ${secret}` && token !== secret) {
       return NextResponse.json({ error: "não autorizado" }, { status: 401 });
     }
   }
+
+  // Assinaturas vencidas perdem o benefício até a renovação ser registrada.
+  const expiradas = await expireOverdueSubscriptions();
 
   // Garante os horários fixos das próximas semanas antes de notificar,
   // para que a confirmação deles também saia nesta rodada.
@@ -37,6 +51,7 @@ async function handler(req: Request) {
       configurado: false,
       pendentes: fila.length,
       horariosFixos: fixos,
+      assinaturasExpiradas: expiradas,
       mensagem:
         "Provedor de WhatsApp não configurado. As mensagens ficam na fila.",
     });
@@ -61,6 +76,7 @@ async function handler(req: Request) {
     enviadas,
     falhas,
     horariosFixos: fixos,
+    assinaturasExpiradas: expiradas,
   });
 }
 

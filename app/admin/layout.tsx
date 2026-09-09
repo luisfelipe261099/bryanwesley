@@ -21,7 +21,7 @@ export default async function AdminLayout({
         <AdminNav />
         {children}
       </main>
-      <BottomNav active="admin" />
+      <BottomNav active="admin" role={session.role} />
     </>
   );
 }

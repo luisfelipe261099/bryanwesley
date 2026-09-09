@@ -1,5 +1,5 @@
 // Leituras usadas pelas telas. Tudo vem do banco — nada de mock.
-import { and, asc, desc, eq, gte, lt, inArray, sum, count } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt, or, inArray, sum, count } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointments,
@@ -77,7 +77,8 @@ export async function upcomingForUser(userId: number, limit = 10) {
   return db.query.appointments.findMany({
     where: and(
       eq(appointments.clientUserId, userId),
-      gte(appointments.startsAt, new Date()),
+      // Pelo fim, não pelo início: o atendimento em curso continua aqui.
+      gte(appointments.endsAt, new Date()),
       inArray(appointments.status, ["PENDENTE", "CONFIRMADO", "EM_ANDAMENTO"])
     ),
     with: { barber: { with: { user: true } }, items: true },
@@ -90,7 +91,11 @@ export async function historyForUser(userId: number, limit = 12) {
   return db.query.appointments.findMany({
     where: and(
       eq(appointments.clientUserId, userId),
-      inArray(appointments.status, ["CONCLUIDO", "CANCELADO", "NO_SHOW"])
+      or(
+        inArray(appointments.status, ["CONCLUIDO", "CANCELADO", "NO_SHOW"]),
+        // Passou e ninguém deu baixa: não pode sumir da vista do cliente.
+        lt(appointments.endsAt, new Date())
+      )
     ),
     with: { barber: { with: { user: true } }, items: true },
     orderBy: [desc(appointments.startsAt)],
@@ -190,11 +195,14 @@ export async function listClients(limit = 50) {
       (a, b) => b.startsAt.getTime() - a.startsAt.getTime()
     )[0];
     const sub = u.subscriptions.find((s) => s.status === "ATIVA");
+    const overdue = u.subscriptions.find((s) => s.status === "INADIMPLENTE");
     return {
       id: u.id,
       name: u.name,
       phone: u.phone,
       plan: sub?.plan?.name ?? null,
+      overduePlan: !sub && overdue ? overdue.plan?.name ?? null : null,
+      renewsAt: sub?.renewsAt ?? null,
       visits: done.length,
       lastVisit: last?.startsAt ?? null,
       hasAccount: !!u.passwordHash,

@@ -1,17 +1,56 @@
 "use client";
 
 import Link from "next/link";
-import { Scissors, Gem, UserRound, BarChart3 } from "lucide-react";
+import {
+  Scissors,
+  Gem,
+  UserRound,
+  BarChart3,
+  CalendarDays,
+  type LucideIcon,
+} from "lucide-react";
+import type { Role } from "@/lib/auth/session";
 
-// Barra de navegação inferior do app — presente em todas as telas logadas.
-const items = [
-  { href: "/agendar", label: "Início", icon: Scissors, key: "inicio" },
-  { href: "/planos", label: "Clube VIP", icon: Gem, key: "clube" },
-  { href: "/barbeiro", label: "Barbeiro", icon: UserRound, key: "barbeiro" },
-  { href: "/admin", label: "Admin", icon: BarChart3, key: "admin" },
-];
+type Item = { href: string; label: string; icon: LucideIcon; key: string };
 
-export function BottomNav({ active }: { active: string }) {
+// Cada papel vê só o que pode abrir — nada de aba que leva a "sem permissão".
+function itemsFor(role: Role | null): Item[] {
+  if (role === "ADMIN") {
+    return [
+      { href: "/agendar", label: "Agendar", icon: Scissors, key: "inicio" },
+      { href: "/barbeiro", label: "Barbeiro", icon: UserRound, key: "barbeiro" },
+      { href: "/admin", label: "Admin", icon: BarChart3, key: "admin" },
+      { href: "/planos", label: "Clube VIP", icon: Gem, key: "clube" },
+    ];
+  }
+  if (role === "BARBER") {
+    return [
+      { href: "/barbeiro", label: "Agenda", icon: CalendarDays, key: "barbeiro" },
+      { href: "/agendar", label: "Encaixe", icon: Scissors, key: "inicio" },
+    ];
+  }
+  if (role === "CLIENT") {
+    return [
+      { href: "/agendar", label: "Agendar", icon: Scissors, key: "inicio" },
+      { href: "/cliente", label: "Meus horários", icon: CalendarDays, key: "clube" },
+      { href: "/planos", label: "Clube VIP", icon: Gem, key: "planos" },
+    ];
+  }
+  return [
+    { href: "/agendar", label: "Agendar", icon: Scissors, key: "inicio" },
+    { href: "/planos", label: "Clube VIP", icon: Gem, key: "clube" },
+    { href: "/entrar", label: "Entrar", icon: UserRound, key: "entrar" },
+  ];
+}
+
+export function BottomNav({
+  active,
+  role,
+}: {
+  active: string;
+  role: Role | null;
+}) {
+  const items = itemsFor(role);
   return (
     <nav
       aria-label="Navegação principal"

@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
-import { users, barbers } from "@/db/schema";
+import { users, barbers, appointments } from "@/db/schema";
 import { verifyPassword, hashPassword } from "@/lib/auth/password";
 import {
   SESSION_COOKIE,
@@ -15,6 +15,11 @@ import {
 import { normalizePhone, isValidPhone } from "@/lib/phone";
 
 export type AuthState = { error?: string } | undefined;
+
+// Hash de uma senha aleatória: usado quando o usuário não existe, para o
+// bcrypt gastar o mesmo tempo e não denunciar quem tem conta.
+const DUMMY_HASH =
+  "$2b$10$H/6ulv31oIqfcLrAFOFz.erhql8DPlDXj6fZbts7cHhu5XnCfe.vK";
 
 const loginSchema = z.object({
   identifier: z.string().trim().min(3, "Informe seu e-mail ou telefone."),
@@ -52,12 +57,11 @@ export async function login(
     ),
   });
 
-  // Mensagem genérica: não revela se o usuário existe.
+  // Mensagem genérica e tempo parecido: não revela se o usuário existe.
   const genericError = { error: "E-mail/telefone ou senha inválidos." };
-  if (!user || !user.passwordHash || !user.active) return genericError;
-
-  const ok = await verifyPassword(password, user.passwordHash);
-  if (!ok) return genericError;
+  const hash = user?.passwordHash ?? DUMMY_HASH;
+  const ok = await verifyPassword(password, hash);
+  if (!user || !user.passwordHash || !user.active || !ok) return genericError;
 
   const barber =
     user.role === "BARBER" || user.role === "ADMIN"
@@ -80,20 +84,28 @@ const signupSchema = z.object({
   name: z.string().trim().min(3, "Informe seu nome completo."),
   phone: z.string().refine(isValidPhone, "Informe um WhatsApp válido com DDD."),
   password: z.string().min(6, "A senha precisa ter ao menos 6 caracteres."),
+  // Código de um agendamento feito com esse telefone — prova de posse
+  // enquanto não há confirmação por WhatsApp.
+  code: z.string().trim().toUpperCase().optional(),
 });
 
+export type SignupState =
+  | { error?: string; needsCode?: boolean }
+  | undefined;
+
 export async function signup(
-  _prev: AuthState,
+  _prev: SignupState,
   formData: FormData
-): Promise<AuthState> {
+): Promise<SignupState> {
   const parsed = signupSchema.safeParse({
     name: formData.get("name"),
     phone: formData.get("phone"),
     password: formData.get("password"),
+    code: formData.get("code") || undefined,
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
-  const { name, password } = parsed.data;
+  const { name, password, code } = parsed.data;
   const phone = normalizePhone(parsed.data.phone);
 
   const existing = await db.query.users.findFirst({
@@ -107,6 +119,26 @@ export async function signup(
     // definindo uma senha pela primeira vez.
     if (existing.passwordHash) {
       return { error: "Já existe uma conta com esse WhatsApp. Faça login." };
+    }
+
+    // Se esse telefone já tem agendamento, quem assume a conta precisa
+    // provar que é o dono: informar o código de um deles. Sem isso,
+    // qualquer pessoa com o número veria os horários de outra.
+    const owned = await db.query.appointments.findMany({
+      where: eq(appointments.clientPhone, phone),
+      columns: { code: true },
+      limit: 50,
+    });
+    if (owned.length > 0) {
+      if (!code) return { needsCode: true };
+      if (!owned.some((a) => a.code === code)) {
+        // Mantém o campo visível junto do erro, senão ele some da tela.
+        return {
+          needsCode: true,
+          error:
+            "Código não confere. Ele está na confirmação do seu agendamento.",
+        };
+      }
     }
     const [updated] = await db
       .update(users)
