@@ -5,6 +5,7 @@ import {
   markFailed,
 } from "@/lib/notifications";
 import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
+import { materializeRecurring } from "@/lib/recurring";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -23,6 +24,10 @@ async function handler(req: Request) {
     }
   }
 
+  // Garante os horários fixos das próximas semanas antes de notificar,
+  // para que a confirmação deles também saia nesta rodada.
+  const fixos = await materializeRecurring();
+
   const fila = await pendingNotifications(50);
 
   if (!isWhatsappConfigured()) {
@@ -31,6 +36,7 @@ async function handler(req: Request) {
     return NextResponse.json({
       configurado: false,
       pendentes: fila.length,
+      horariosFixos: fixos,
       mensagem:
         "Provedor de WhatsApp não configurado. As mensagens ficam na fila.",
     });
@@ -50,7 +56,12 @@ async function handler(req: Request) {
     }
   }
 
-  return NextResponse.json({ configurado: true, enviadas, falhas });
+  return NextResponse.json({
+    configurado: true,
+    enviadas,
+    falhas,
+    horariosFixos: fixos,
+  });
 }
 
 export const GET = handler;

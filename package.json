@@ -10,7 +10,9 @@
     "db:migrate": "tsx db/migrate.ts",
     "db:seed": "tsx db/seed.ts",
     "db:generate": "drizzle-kit generate",
-    "test:agenda": "tsx scripts/test-agenda.ts"
+    "test:agenda": "tsx scripts/test-agenda.ts",
+    "test:fixo": "tsx scripts/test-fixo.ts",
+    "test": "tsx scripts/test-agenda.ts && tsx scripts/test-fixo.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

@@ -86,6 +86,16 @@ Cada agendamento nasce com um `checkin_token`. O cliente abre **Meu QR** em
 digita o código de 6 letras no painel. O check-in valida a chegada e já move o
 atendimento para *em andamento*.
 
+## Horário fixo do assinante
+
+O membro reserva o mesmo dia e hora **toda semana** ou **todo mês** em
+`/cliente`. O sistema materializa os agendamentos 5 semanas à frente, e
+ter o fixo **não impede** marcar horários avulsos — são agendamentos comuns,
+sujeitos às mesmas regras. Se um horário fixo esbarrar em alguém que já
+estava lá, o fixo cede e o caso é reportado em vez de quebrar a rodada.
+
+A materialização é idempotente e roda junto do cron.
+
 ## Notificações
 
 A aplicação **enfileira**; quem entrega é o worker. Cada agendamento gera
@@ -120,11 +130,14 @@ Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
 ## Testes
 
 ```bash
-npm run test:agenda   # 27 verificações do motor de agenda
+npm test              # 36 verificações
+npm run test:agenda   # 27 — motor de agenda
+npm run test:fixo     #  9 — horário fixo
 ```
 
-Cobre disponibilidade, bloqueios, antecedência, reserva dupla, corrida de
-concorrência, ciclo de vida do atendimento e fechamento da comissão.
+Cobrem disponibilidade, bloqueios, antecedência, reserva dupla, corrida de
+concorrência, ciclo de vida do atendimento, fechamento da comissão e a
+materialização idempotente do horário fixo.
 
 ## Deploy
 
@@ -132,10 +145,23 @@ O build aplica as migrações antes de compilar (`npm run build`), então basta
 ter `DATABASE_URL` e `AUTH_SECRET` nas variáveis do projeto. Na Vercel:
 **Storage → Create Database** já injeta a `DATABASE_URL`.
 
+## Pagamentos
+
+O adaptador da **InfinitePay** está pronto em
+[`lib/providers/infinitepay.ts`](lib/providers/infinitepay.ts) (criação de
+link de pagamento e reconferência via `payment_check`), inerte até
+`INFINITEPAY_HANDLE` ser configurado.
+
+> **Limite da API:** o Checkout da InfinitePay cobre apenas **cobrança
+> avulsa** — não existe assinatura recorrente nativa. Para a mensalidade do
+> Clube VIP, ou se gera um link novo a cada renovação (com baixa por webhook),
+> ou se usa um gateway com recorrência nativa só para as assinaturas.
+
+Enquanto isso, a assinatura é ativada pelo admin em `/admin/clientes`, o que
+já cobre a operação do dia a dia.
+
 ## O que ainda depende de credencial externa
 
-- **Pagamento recorrente** — a assinatura hoje é ativada pelo admin em
-  `/admin/clientes`. Falta plugar o gateway (InfinityPay) para cobrança
-  automática e baixa de inadimplência.
 - **Entrega das mensagens** — a fila está pronta; falta o número aprovado na
-  Cloud API do WhatsApp.
+  Cloud API do WhatsApp (`WHATSAPP_TOKEN`).
+- **Cobrança online** — falta o handle da InfinitePay (`INFINITEPAY_HANDLE`).

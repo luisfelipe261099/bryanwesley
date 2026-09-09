@@ -1,11 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { appointments } from "@/db/schema";
+import { appointments, recurringSlots, subscriptions } from "@/db/schema";
 import { requireRole } from "@/lib/auth";
 import { transitionAppointment, BookingError } from "@/lib/appointments";
+import { materializeRecurring } from "@/lib/recurring";
+import { shopToday } from "@/lib/time";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -46,5 +48,84 @@ export async function cancelMyAppointment(
   revalidatePath("/cliente");
   revalidatePath("/barbeiro");
   revalidatePath("/admin");
+  return { ok: true };
+}
+
+// ───────────────────────── Horário fixo ─────────────────────────
+
+/** O membro reserva o mesmo dia/hora toda semana ou todo mês. */
+export async function saveRecurringSlot(input: {
+  barberId: number;
+  frequency: "SEMANAL" | "MENSAL";
+  weekday: number | null;
+  dayOfMonth: number | null;
+  minutesOfDay: number;
+  serviceIds: number[];
+}): Promise<ActionResult> {
+  const session = await requireRole(["CLIENT", "ADMIN"]);
+
+  const sub = await db.query.subscriptions.findFirst({
+    where: and(
+      eq(subscriptions.userId, session.id),
+      eq(subscriptions.status, "ATIVA")
+    ),
+  });
+  if (!sub) {
+    return { ok: false, error: "O horário fixo é um benefício de quem assina." };
+  }
+  if (input.serviceIds.length === 0) {
+    return { ok: false, error: "Escolha ao menos um serviço." };
+  }
+
+  // Um fixo por membro: salvar substitui o anterior.
+  await db
+    .update(recurringSlots)
+    .set({ active: false })
+    .where(
+      and(
+        eq(recurringSlots.userId, session.id),
+        eq(recurringSlots.active, true)
+      )
+    );
+
+  await db.insert(recurringSlots).values({
+    userId: session.id,
+    barberId: input.barberId,
+    frequency: input.frequency,
+    weekday: input.frequency === "SEMANAL" ? input.weekday : null,
+    dayOfMonth: input.frequency === "MENSAL" ? input.dayOfMonth : null,
+    minutesOfDay: input.minutesOfDay,
+    serviceIds: input.serviceIds,
+    startsOn: shopToday(),
+  });
+
+  // Já deixa os próximos horários garantidos na agenda.
+  const report = await materializeRecurring();
+
+  revalidatePath("/cliente");
+  revalidatePath("/barbeiro");
+  revalidatePath("/admin");
+
+  if (report.criados === 0 && report.conflitos.length > 0) {
+    return {
+      ok: false,
+      error: `Horário salvo, mas os próximos já estavam ocupados: ${report.conflitos[0].motivo}`,
+    };
+  }
+  return { ok: true };
+}
+
+export async function cancelRecurringSlot(): Promise<ActionResult> {
+  const session = await requireRole(["CLIENT", "ADMIN"]);
+  await db
+    .update(recurringSlots)
+    .set({ active: false })
+    .where(
+      and(
+        eq(recurringSlots.userId, session.id),
+        eq(recurringSlots.active, true)
+      )
+    );
+  revalidatePath("/cliente");
   return { ok: true };
 }

@@ -17,6 +17,12 @@ import { AppHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
 import { Reveal } from "@/components/Reveal";
 import { requireRole } from "@/lib/auth";
+import { db } from "@/db/client";
+import { recurringSlots, planServices } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
+import { getSettings } from "@/lib/schedule";
+import { listTeam, listServices } from "@/lib/queries";
+import { HorarioFixo } from "./HorarioFixo";
 import {
   activeSubscription,
   upcomingForUser,
@@ -51,15 +57,34 @@ function countdown(date: Date) {
 export default async function ClienteDashboard() {
   const session = await requireRole(["CLIENT", "ADMIN"]);
 
-  const [subscription, upcoming, history, totalVisits] = await Promise.all([
-    activeSubscription(session.id),
-    upcomingForUser(session.id),
-    historyForUser(session.id),
-    countForUser(session.id),
-  ]);
+  const [subscription, upcoming, history, totalVisits, fixo, team, services, settings] =
+    await Promise.all([
+      activeSubscription(session.id),
+      upcomingForUser(session.id),
+      historyForUser(session.id),
+      countForUser(session.id),
+      db.query.recurringSlots.findFirst({
+        where: and(
+          eq(recurringSlots.userId, session.id),
+          eq(recurringSlots.active, true)
+        ),
+      }),
+      listTeam(),
+      listServices(),
+      getSettings(),
+    ]);
 
   const proximo = upcoming[0];
   const plan = subscription?.plan;
+
+  // Serviços que o plano cobre — o horário fixo só pode usar esses.
+  const covered = plan
+    ? (
+        await db.query.planServices.findMany({
+          where: eq(planServices.planId, plan.id),
+        })
+      ).map((ps) => ps.serviceId)
+    : [];
 
   // Ciclo de cobrança: quanto já passou desde a última renovação.
   let cicloPct = 0;
@@ -313,6 +338,33 @@ export default async function ClienteDashboard() {
             </div>
           </Reveal>
         </div>
+
+        {/* Horário fixo — benefício de assinante */}
+        {plan && (
+          <Reveal delay={0.12}>
+            <div className="mt-5">
+              <HorarioFixo
+                team={team.map((b) => ({ id: b.id, name: b.user.name }))}
+                services={services
+                  .filter((s) => covered.includes(s.id))
+                  .map((s) => ({ id: s.id, name: s.name }))}
+                existing={
+                  fixo
+                    ? {
+                        frequency: fixo.frequency,
+                        weekday: fixo.weekday,
+                        dayOfMonth: fixo.dayOfMonth,
+                        minutesOfDay: fixo.minutesOfDay,
+                        barberId: fixo.barberId,
+                        serviceIds: fixo.serviceIds ?? [],
+                      }
+                    : null
+                }
+                closedWeekdays={settings.closedWeekdays}
+              />
+            </div>
+          </Reveal>
+        )}
 
         <div className="mt-5 grid gap-5 lg:grid-cols-2">
           {/* Benefícios */}
