@@ -144,13 +144,19 @@ function ClientRowItem({
 
   return (
     <li className="rounded-2xl border border-white/6 bg-white/[0.02] p-3.5">
-      <div className="flex items-start gap-3">
+      {/* No celular as ações vão para baixo: lado a lado elas espremiam
+          o nome do cliente até ele sumir. */}
+      <div className="flex flex-wrap items-start gap-3">
         <span className="grid h-10 w-10 flex-none place-items-center rounded-full bg-royal-grad font-display text-base text-white">
           {client.name.charAt(0)}
         </span>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-[60%]">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate font-medium text-white">{client.name}</span>
+            {/* O nome ocupa a linha inteira no celular: com os selos ao lado
+                ele encolheria a zero e o admin não saberia de quem é o card. */}
+            <span className="w-full truncate font-medium text-white sm:w-auto">
+              {client.name}
+            </span>
             {client.hasFixedSlot && (
               <span
                 className="label inline-flex items-center gap-1 rounded-full bg-electric/10 px-2 py-1 text-electric"
@@ -179,9 +185,6 @@ function ClientRowItem({
               <span className="label inline-flex items-center gap-1 rounded-full bg-electric/10 px-2.5 py-1.5 text-electric">
                 <Crown className="h-3 w-3" />
                 {client.plan.replace("Plano ", "")}
-                {client.renewsAt && (
-                  <span className="text-electric/70"> · renova {client.renewsAt}</span>
-                )}
               </span>
             ) : client.overduePlan ? (
               <span className="label inline-flex items-center gap-1 rounded-full bg-amber-400/10 px-2.5 py-1.5 text-amber-300">
@@ -196,10 +199,11 @@ function ClientRowItem({
             <span className="text-xs text-steel-400">
               {client.visits} visita(s)
               {client.lastVisit ? ` · última em ${client.lastVisit}` : ""}
+              {client.renewsAt ? ` · renova ${client.renewsAt}` : ""}
             </span>
           </div>
         </div>
-        <div className="flex flex-none flex-col items-end gap-1.5">
+        <div className="flex w-full flex-row flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:flex-none sm:flex-col sm:items-end">
           <button
             type="button"
             onClick={() => setPwOpen((v) => !v)}

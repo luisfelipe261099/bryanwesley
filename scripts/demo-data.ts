@@ -20,9 +20,9 @@ async function main() {
   const at = (min: number) => shopTimeToUtc(year, month, day, min);
 
   // Um assinante de verdade para o "Plano" aparecer na agenda
-  const [{ id: memberId }] = await db.insert(users).values({ name: NOMES[0], phone: "11988001100", role: "CLIENT" })
+  const [{ id: memberId }] = await db.insert(users).values({ name: NOMES[0], phone: "41988110001", role: "CLIENT" })
     .onDuplicateKeyUpdate({ set: { name: NOMES[0] } }).$returningId();
-  const member = (await db.select().from(users).where(eq(users.phone, "11988001100")))[0];
+  const member = (await db.select().from(users).where(eq(users.phone, "41988110001")))[0];
   const hasSub = (await db.select().from(subscriptions).where(eq(subscriptions.userId, member.id)))[0];
   let subId = hasSub?.id;
   if (!hasSub) {
