@@ -1,34 +1,47 @@
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+import { drizzle } from "drizzle-orm/mysql2";
+import mysql from "mysql2/promise";
 import * as schema from "./schema";
 
 const url = process.env.DATABASE_URL;
-
 if (!url) {
   throw new Error(
-    "DATABASE_URL não definida. Configure a variável de ambiente com a string de conexão do Postgres."
+    "DATABASE_URL não definida. Configure a string de conexão do MySQL/TiDB."
   );
 }
 
-// Em serverless cada invocação pode criar um cliente novo; o cache global
-// evita estourar o limite de conexões durante o hot-reload do dev.
-const globalForDb = globalThis as unknown as {
-  __bwSql?: ReturnType<typeof postgres>;
-};
+/**
+ * TiDB Cloud exige TLS. Ligamos por padrão e só desligamos para
+ * localhost ou quando DATABASE_SSL=false (ex.: MariaDB de teste).
+ */
+function poolConfig(connectionString: string): mysql.PoolOptions {
+  const u = new URL(connectionString);
+  const local = ["localhost", "127.0.0.1"].includes(u.hostname);
+  const sslOff = process.env.DATABASE_SSL === "false" || local;
+  return {
+    host: u.hostname,
+    port: Number(u.port || 3306),
+    user: decodeURIComponent(u.username),
+    password: decodeURIComponent(u.password),
+    database: u.pathname.replace(/^\//, ""),
+    ssl: sslOff ? undefined : { minVersion: "TLSv1.2", rejectUnauthorized: true },
+    // Datas trafegam em UTC: o que gravamos é o que lemos, em qualquer fuso.
+    timezone: "Z",
+    dateStrings: false,
+    supportBigNumbers: true,
+    // Na Vercel cada função é efêmera: 1 conexão. Num servidor comum, mais.
+    connectionLimit: process.env.VERCEL ? 1 : 5,
+    waitForConnections: true,
+    enableKeepAlive: true,
+  };
+}
 
-const sql =
-  globalForDb.__bwSql ??
-  postgres(url, {
-    // Na Vercel cada função é efêmera: 1 conexão e o pool fica no provedor.
-    // Num servidor comum, algumas conexões evitam enfileirar tudo.
-    max: process.env.VERCEL ? 1 : 5,
-    idle_timeout: 20,
-    connect_timeout: 15,
-    prepare: false, // compatível com pgbouncer em modo transaction
-  });
+// Cache global evita estourar conexões no hot-reload do dev.
+const globalForDb = globalThis as unknown as { __bwPool?: mysql.Pool };
+const pool = globalForDb.__bwPool ?? mysql.createPool(poolConfig(url));
+if (process.env.NODE_ENV !== "production") globalForDb.__bwPool = pool;
 
-if (process.env.NODE_ENV !== "production") globalForDb.__bwSql = sql;
-
-export const db = drizzle(sql, { schema });
-export { sql };
+// Modo "planetscale": as consultas relacionais (db.query.*.with) não usam
+// LEFT JOIN LATERAL, que TiDB e MariaDB não suportam. Vale para MySQL também.
+export const db = drizzle(pool, { schema, mode: "planetscale" });
+export { pool };
 export * from "./schema";

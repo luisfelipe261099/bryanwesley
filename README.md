@@ -7,7 +7,7 @@ login, agenda real com prevenção de conflito, comissões e notificações.
 ## Stack
 
 - **Next.js 14** (App Router, Server Actions) + **React 18** + **TypeScript**
-- **PostgreSQL** + **Drizzle ORM** (migrações versionadas em `db/migrations`)
+- **MySQL / TiDB** + **Drizzle ORM** (`mysql-core`, driver `mysql2`, migrações versionadas em `db/migrations`)
 - **Tailwind CSS** com o design system **Modern Electric Precision**
 - Sessão em cookie httpOnly assinado (**jose**), senhas com **bcrypt**
 - Deploy na **Vercel** (cron nativo para as notificações)
@@ -56,24 +56,27 @@ existente ou não, para não denunciar quem tem conta.
 
 ## Como a agenda evita conflito
 
-A garantia de que dois clientes não ocupam o mesmo barbeiro no mesmo horário
-**não está na aplicação, está no banco**:
+O banco é TiDB (compatível com MySQL), que **não tem exclusion constraint**.
+A garantia contra reserva dupla é uma trava pessimista dentro da transação de
+agendamento ([`lib/appointments.ts`](lib/appointments.ts)):
 
-```sql
-EXCLUDE USING gist (
-  barber_id WITH =,
-  tstzrange(starts_at, ends_at, '[)') WITH &&
-) WHERE (status <> 'CANCELADO' AND status <> 'NO_SHOW')
-```
+1. `INSERT … ON DUPLICATE KEY UPDATE` garante a linha `(barbeiro, dia)` em
+   `booking_locks`;
+2. `SELECT … FOR UPDATE` nessa linha serializa quem está reservando aquele
+   barbeiro naquele dia;
+3. já dentro da trava, reconfere sobreposição e só então insere.
 
-Mesmo com requisições simultâneas, o Postgres rejeita a segunda. O teste
-`npm run test:agenda` dispara 5 pedidos ao mesmo tempo no mesmo horário e
-confirma que exatamente 1 vence.
+Requisições simultâneas ficam em fila na trava e a segunda vê o horário
+ocupado. O teste `npm run test:agenda` dispara 5 pedidos ao mesmo tempo no
+mesmo horário e confirma que exatamente 1 vence.
 
-Há uma segunda camada, portável para qualquer banco: a transação de
-agendamento faz `SELECT … FOR UPDATE` numa linha de `booking_locks`
-(barbeiro + dia) antes de conferir o horário. No Postgres é reforço; em
-MySQL/TiDB, que não têm exclusion constraint, passa a ser a própria garantia.
+> **Compatibilidade TiDB.** O TiDB só *parseia* `LATERAL` — não executa
+> ([docs](https://docs.pingcap.com/tidb/stable/lateral-derived-tables/)) — e o
+> Drizzle implementa relações (`db.query.*.with`) exatamente com isso. Por esse
+> motivo **nenhuma consulta usa `with:`**: relações são joins explícitos ou uma
+> segunda consulta por lote ([`lib/queries.ts`](lib/queries.ts)). Ao criar
+> consultas novas, siga o mesmo padrão. O cliente está em modo `planetscale`
+> como segunda barreira.
 
 A disponibilidade considera: jornada da loja, **jornada própria do barbeiro**
 (cadastrada em Admin → Equipe; sem linha para o dia da semana = folga),
@@ -146,10 +149,13 @@ pelo sistema não dispara confirmação (o membro já sabe), só os lembretes.
 ```bash
 npm install
 cp .env.example .env.local     # preencha DATABASE_URL e AUTH_SECRET
-npm run db:migrate             # cria as tabelas
-npm run db:seed                # catálogo + contas da equipe
+npm run db:migrate             # cria as tabelas (e semeia se estiver vazio)
 npm run dev                    # http://localhost:3000
 ```
+
+Para testar sem TiDB, um MariaDB/MySQL local serve
+(`DATABASE_URL=mysql://user:pass@127.0.0.1:3306/bryanwesley` e
+`DATABASE_SSL=false`). O `mysql2` fala com os três.
 
 Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
 
@@ -185,11 +191,17 @@ catálogo estiver vazio, roda o seed — o primeiro deploy já sobe com serviço
 planos e as contas da equipe. Sem `DATABASE_URL` ou `AUTH_SECRET` o build
 **falha de propósito**: melhor que servir 500 em toda rota protegida.
 
+TLS fica ligado por padrão (o TiDB Cloud exige) e só é desligado para
+`localhost` ou com `DATABASE_SSL=false`. Datas trafegam em UTC
+(`timezone: "Z"` no driver) e as colunas são `DATETIME(3)`; a conversão para o
+horário da loja é toda em [`lib/time.ts`](lib/time.ts).
+
 Variáveis do projeto na Vercel:
 
 | Variável | Obrigatória | Para quê |
 |----------|-------------|----------|
-| `DATABASE_URL` | sim | Postgres |
+| `DATABASE_URL` | sim | `mysql://usuario:senha@host:4000/banco` (TiDB Cloud) |
+| `DATABASE_SSL` | não | `false` desliga TLS (só para MySQL local de teste) |
 | `AUTH_SECRET` | sim | Assina o cookie de sessão (≥ 24 caracteres) |
 | `CRON_SECRET` | sim em produção | Protege o endpoint de despacho |
 | `SEED_PASSWORD` | não | Senha inicial da equipe (padrão `bryan2026`) |

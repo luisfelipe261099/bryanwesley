@@ -140,14 +140,13 @@ export async function signup(
         };
       }
     }
-    const [updated] = await db
+    await db
       .update(users)
       .set({ name, passwordHash: await hashPassword(password) })
-      .where(eq(users.id, existing.id))
-      .returning();
-    userId = updated.id;
+      .where(eq(users.id, existing.id));
+    userId = existing.id;
   } else {
-    const [created] = await db
+    const [{ id }] = await db
       .insert(users)
       .values({
         name,
@@ -155,8 +154,8 @@ export async function signup(
         passwordHash: await hashPassword(password),
         role: "CLIENT",
       })
-      .returning();
-    userId = created.id;
+      .$returningId();
+    userId = id;
   }
 
   const token = await signSession({ id: userId, name, role: "CLIENT" });

@@ -131,9 +131,12 @@ export function splitCommission(
 export async function recordCommission(appointmentId: number) {
   const appt = await db.query.appointments.findFirst({
     where: eq(appointments.id, appointmentId),
-    with: { items: true },
   });
   if (!appt) return null;
+  const items = await db
+    .select()
+    .from(appointmentServices)
+    .where(eq(appointmentServices.appointmentId, appointmentId));
 
   const existing = await db.query.appointmentCommissions.findFirst({
     where: eq(appointmentCommissions.appointmentId, appointmentId),
@@ -151,7 +154,7 @@ export async function recordCommission(appointmentId: number) {
     fromSubscription &&
     settings.subscriptionCommissionBase === "PRECO_TABELA"
   ) {
-    const ids = appt.items
+    const ids = items
       .map((i) => i.serviceId)
       .filter((id): id is number => id !== null);
     const catalog = ids.length
@@ -164,7 +167,7 @@ export async function recordCommission(appointmentId: number) {
           .where(inArray(servicesTable.id, ids))
       : [];
     const priceById = new Map(catalog.map((c) => [c.id, c.priceCents]));
-    baseCents = appt.items.reduce(
+    baseCents = items.reduce(
       (acc, i) =>
         acc +
         (i.priceCents > 0
@@ -178,9 +181,10 @@ export async function recordCommission(appointmentId: number) {
     appt.barberPctSnapshot ?? (await resolveBarberPct(appt.barberId)).pct;
   const split = splitCommission(baseCents, pct);
 
-  const [row] = await db
-    .insert(appointmentCommissions)
-    .values({
+  // Índice único por atendimento: uma corrida aqui vira ER_DUP_ENTRY,
+  // e nesse caso a linha que já existe é a resposta certa.
+  try {
+    await db.insert(appointmentCommissions).values({
       appointmentId,
       barberId: appt.barberId,
       baseCents: split.baseCents,
@@ -188,9 +192,13 @@ export async function recordCommission(appointmentId: number) {
       barberCents: split.barberCents,
       shopCents: split.shopCents,
       fromSubscription,
-    })
-    .onConflictDoNothing()
-    .returning();
-
-  return row ?? null;
+    });
+  } catch (e) {
+    if ((e as { code?: string })?.code !== "ER_DUP_ENTRY") throw e;
+  }
+  return (
+    (await db.query.appointmentCommissions.findFirst({
+      where: eq(appointmentCommissions.appointmentId, appointmentId),
+    })) ?? null
+  );
 }

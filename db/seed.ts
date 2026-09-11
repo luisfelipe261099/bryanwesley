@@ -1,18 +1,11 @@
 // Popula o banco com o catálogo da barbearia e as contas iniciais.
-// Idempotente: pode rodar de novo sem duplicar nada.
+// Idempotente: pode rodar de novo sem duplicar nada (upsert por slug/telefone).
 import "./load-env";
 
 import bcrypt from "bcryptjs";
-import { db, sql } from "./client";
-import {
-  users,
-  barbers,
-  services,
-  plans,
-  planServices,
-  settings,
-} from "./schema";
 import { eq } from "drizzle-orm";
+import { db, pool } from "./client";
+import { users, barbers, services, plans, planServices, settings } from "./schema";
 import { normalizePhone } from "../lib/phone";
 
 const SERVICES = [
@@ -27,60 +20,15 @@ const SERVICES = [
 ];
 
 const PLANS = [
-  {
-    slug: "silver",
-    name: "Plano Silver",
-    kicker: "Entrada exclusiva",
-    tagline: "Pra quem mantém o cabelo sempre em dia.",
-    priceCents: 13900,
-    annualPriceCents: 11600,
-    highlight: false,
-    badge: null,
-    sortOrder: 1,
-    features: [
-      "2 cortes de cabelo por mês",
-      "Pézinho liberado entre os cortes",
-      "10% OFF em produtos e cosméticos",
-      "Barber Bar com café espresso & chopp",
-    ],
-    covers: ["corte", "pezinho"],
-  },
-  {
-    slug: "gold",
-    name: "Plano Gold Black",
-    kicker: "Experiência insígnia",
-    tagline: "Cabelo e barba impecáveis o mês inteiro.",
-    priceCents: 22900,
-    annualPriceCents: 19100,
-    highlight: true,
-    badge: "Mais escolhido",
-    sortOrder: 2,
-    features: [
-      "Cortes ilimitados durante todo o mês",
-      "Barboterapia semanal inclusa",
-      "Prioridade máxima na agenda VIP",
-      "Bar liberado & 20% OFF em produtos",
-    ],
-    covers: ["corte", "barba", "sobrancelha", "lavagem"],
-  },
-  {
-    slug: "diamond",
-    name: "Diamond Royalty",
-    kicker: "Nível soberano",
-    tagline: "A experiência completa, sem limites.",
-    priceCents: 31900,
-    annualPriceCents: 26600,
-    highlight: false,
-    badge: "Top",
-    sortOrder: 3,
-    features: [
-      "Cortes & barba ilimitados + toalha quente",
-      "Acesso privativo ao Lounge VIP",
-      "1 convidado mensal grátis",
-      "Spa capilar e 25% OFF em coloração",
-    ],
-    covers: ["corte", "barba", "sobrancelha", "lavagem", "hidratacao"],
-  },
+  { slug: "silver", name: "Plano Silver", kicker: "Entrada exclusiva", tagline: "Pra quem mantém o cabelo sempre em dia.", priceCents: 13900, annualPriceCents: 11600, highlight: false, badge: null, sortOrder: 1,
+    features: ["2 cortes de cabelo por mês", "Pézinho liberado entre os cortes", "10% OFF em produtos e cosméticos", "Barber Bar com café espresso & chopp"],
+    covers: ["corte", "pezinho"] },
+  { slug: "gold", name: "Plano Gold Black", kicker: "Experiência insígnia", tagline: "Cabelo e barba impecáveis o mês inteiro.", priceCents: 22900, annualPriceCents: 19100, highlight: true, badge: "Mais escolhido", sortOrder: 2,
+    features: ["Cortes ilimitados durante todo o mês", "Barboterapia semanal inclusa", "Prioridade máxima na agenda VIP", "Bar liberado & 20% OFF em produtos"],
+    covers: ["corte", "barba", "sobrancelha", "lavagem"] },
+  { slug: "diamond", name: "Diamond Royalty", kicker: "Nível soberano", tagline: "A experiência completa, sem limites.", priceCents: 31900, annualPriceCents: 26600, highlight: false, badge: "Top", sortOrder: 3,
+    features: ["Cortes & barba ilimitados + toalha quente", "Acesso privativo ao Lounge VIP", "1 convidado mensal grátis", "Spa capilar e 25% OFF em coloração"],
+    covers: ["corte", "barba", "sobrancelha", "lavagem", "hidratacao"] },
 ];
 
 const TEAM = [
@@ -94,72 +42,35 @@ export async function runSeed() {
   const hash = await bcrypt.hash(defaultPassword, 10);
 
   // ── Configurações (linha única) ──
-  await db
-    .insert(settings)
-    .values({ id: 1 })
-    .onConflictDoNothing({ target: settings.id });
+  const cfg = await db.query.settings.findFirst({ where: eq(settings.id, 1) });
+  if (!cfg) await db.insert(settings).values({ id: 1, closedWeekdays: [0, 1] });
 
   // ── Serviços ──
   for (const s of SERVICES) {
-    await db
-      .insert(services)
-      .values(s)
-      .onConflictDoUpdate({
-        target: services.slug,
-        set: {
-          name: s.name,
-          description: s.description,
-          priceCents: s.priceCents,
-          durationMin: s.durationMin,
-          tag: s.tag,
-          sortOrder: s.sortOrder,
-        },
-      });
+    const cur = await db.query.services.findFirst({ where: eq(services.slug, s.slug) });
+    const data = { name: s.name, description: s.description, priceCents: s.priceCents, durationMin: s.durationMin, tag: s.tag, sortOrder: s.sortOrder };
+    if (cur) await db.update(services).set(data).where(eq(services.id, cur.id));
+    else await db.insert(services).values({ slug: s.slug, ...data });
   }
   console.log(`✓ ${SERVICES.length} serviços`);
 
   // ── Planos + cobertura ──
   for (const p of PLANS) {
-    const [row] = await db
-      .insert(plans)
-      .values({
-        slug: p.slug,
-        name: p.name,
-        kicker: p.kicker,
-        tagline: p.tagline,
-        priceCents: p.priceCents,
-        annualPriceCents: p.annualPriceCents,
-        features: p.features,
-        highlight: p.highlight,
-        badge: p.badge,
-        sortOrder: p.sortOrder,
-      })
-      .onConflictDoUpdate({
-        target: plans.slug,
-        set: {
-          name: p.name,
-          kicker: p.kicker,
-          tagline: p.tagline,
-          priceCents: p.priceCents,
-          annualPriceCents: p.annualPriceCents,
-          features: p.features,
-          highlight: p.highlight,
-          badge: p.badge,
-          sortOrder: p.sortOrder,
-        },
-      })
-      .returning();
+    const data = { name: p.name, kicker: p.kicker, tagline: p.tagline, priceCents: p.priceCents, annualPriceCents: p.annualPriceCents, features: p.features, highlight: p.highlight, badge: p.badge, sortOrder: p.sortOrder };
+    let planId: number;
+    const cur = await db.query.plans.findFirst({ where: eq(plans.slug, p.slug) });
+    if (cur) {
+      await db.update(plans).set(data).where(eq(plans.id, cur.id));
+      planId = cur.id;
+    } else {
+      const [{ id }] = await db.insert(plans).values({ slug: p.slug, ...data }).$returningId();
+      planId = id;
+    }
 
-    await db.delete(planServices).where(eq(planServices.planId, row.id));
+    await db.delete(planServices).where(eq(planServices.planId, planId));
     for (const slug of p.covers) {
-      const svc = await db.query.services.findFirst({
-        where: eq(services.slug, slug),
-      });
-      if (svc)
-        await db
-          .insert(planServices)
-          .values({ planId: row.id, serviceId: svc.id })
-          .onConflictDoNothing();
+      const svc = await db.query.services.findFirst({ where: eq(services.slug, slug) });
+      if (svc) await db.insert(planServices).values({ planId, serviceId: svc.id });
     }
   }
   console.log(`✓ ${PLANS.length} planos`);
@@ -167,56 +78,38 @@ export async function runSeed() {
   // ── Equipe (usuário + barbeiro) ──
   for (let i = 0; i < TEAM.length; i++) {
     const t = TEAM[i];
-    const [user] = await db
-      .insert(users)
-      .values({
-        name: t.name,
-        phone: normalizePhone(t.phone),
-        email: t.email,
-        passwordHash: hash,
-        role: t.admin ? "ADMIN" : "BARBER",
-      })
-      .onConflictDoUpdate({
-        target: users.phone,
-        set: { name: t.name, email: t.email, role: t.admin ? "ADMIN" : "BARBER" },
-      })
-      .returning();
+    const phone = normalizePhone(t.phone);
+    const role = t.admin ? "ADMIN" : "BARBER";
+    let userId: number;
+    const cur = await db.query.users.findFirst({ where: eq(users.phone, phone) });
+    if (cur) {
+      await db.update(users).set({ name: t.name, email: t.email, role }).where(eq(users.id, cur.id));
+      userId = cur.id;
+    } else {
+      const [{ id }] = await db
+        .insert(users)
+        .values({ name: t.name, phone, email: t.email, passwordHash: hash, role })
+        .$returningId();
+      userId = id;
+    }
 
-    await db
-      .insert(barbers)
-      .values({
-        userId: user.id,
-        slug: t.slug,
-        shortName: t.shortName,
-        title: t.title,
-        rating: t.rating,
-        commissionPct: t.commissionPct,
-        sortOrder: i + 1,
-      })
-      .onConflictDoUpdate({
-        target: barbers.slug,
-        set: {
-          userId: user.id,
-          shortName: t.shortName,
-          title: t.title,
-          rating: t.rating,
-          commissionPct: t.commissionPct,
-          sortOrder: i + 1,
-        },
-      });
+    const bdata = { userId, shortName: t.shortName, title: t.title, rating: t.rating, commissionPct: t.commissionPct, sortOrder: i + 1 };
+    const curB = await db.query.barbers.findFirst({ where: eq(barbers.slug, t.slug) });
+    if (curB) await db.update(barbers).set(bdata).where(eq(barbers.id, curB.id));
+    else await db.insert(barbers).values({ slug: t.slug, ...bdata });
   }
   console.log(`✓ ${TEAM.length} membros da equipe`);
   console.log(`\nLogin inicial — senha: ${defaultPassword}`);
   for (const t of TEAM) console.log(`  ${t.email}  (${t.admin ? "ADMIN" : "BARBEIRO"})`);
 
-  await sql.end();
+  await pool.end();
 }
 
 // `npm run db:seed` executa direto; o migrate importa e chama runSeed().
 if (require.main === module) {
   runSeed().catch(async (e) => {
     console.error(e);
-    await sql.end();
+    await pool.end();
     process.exit(1);
   });
 }

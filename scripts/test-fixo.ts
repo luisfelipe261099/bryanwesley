@@ -1,5 +1,5 @@
 import "../db/load-env";
-import { db, sql } from "../db/client";
+import { db, pool } from "../db/client";
 import {
   appointments, appointmentServices, appointmentCommissions,
   notifications, recurringSlots, subscriptions, users, plans, services as sv,
@@ -24,9 +24,10 @@ async function main() {
   const barbeiro = (await db.query.barbers.findFirst())!;
 
   // Cliente com assinatura ativa
-  const [cliente] = await db.insert(users).values({
+  await db.insert(users).values({
     name: "Membro Fixo", phone: "11970001111", role: "CLIENT",
-  }).onConflictDoUpdate({ target: users.phone, set: { name: "Membro Fixo" } }).returning();
+  }).onDuplicateKeyUpdate({ set: { name: "Membro Fixo" } });
+  const cliente = (await db.query.users.findFirst({ where: eq(users.phone, "11970001111") }))!;
 
   const renova = new Date(); renova.setMonth(renova.getMonth() + 1);
   await db.delete(subscriptions).where(eq(subscriptions.userId, cliente.id));
@@ -103,7 +104,7 @@ async function main() {
   ok("membro com fixo ainda agenda avulso", !!extra);
 
   console.log(`\n${p} passaram · ${f} falharam\n`);
-  await sql.end();
+  await pool.end();
   process.exit(f > 0 ? 1 : 0);
 }
-main().catch(async (e) => { console.error(e); await sql.end(); process.exit(1); });
+main().catch(async (e) => { console.error(e); await pool.end(); process.exit(1); });

@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { appointments, subscriptions } from "@/db/schema";
+import { appointments } from "@/db/schema";
+import { activeSubscription } from "@/lib/queries";
 import { requireRole } from "@/lib/auth";
 import { transitionAppointment, BookingError } from "@/lib/appointments";
 
@@ -95,14 +96,8 @@ export async function checkIn(input: {
   let planoInfo = "";
   if (appt.kind === "ASSINANTE") {
     const sub = appt.clientUserId
-      ? await db.query.subscriptions.findFirst({
-          where: and(
-            eq(subscriptions.userId, appt.clientUserId),
-            eq(subscriptions.status, "ATIVA")
-          ),
-          with: { plan: true },
-        })
-      : null;
+      ? await activeSubscription(appt.clientUserId)
+      : undefined;
     planoInfo = sub
       ? ` Plano ${sub.plan.name.replace("Plano ", "")} ativo.`
       : " ATENÇÃO: sem plano ativo — cobrar avulso.";

@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { eq } from "drizzle-orm";
 import {
   Coffee,
   Star,
@@ -16,13 +15,12 @@ import { Background } from "@/components/Background";
 import { AppHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
 import { Reveal } from "@/components/Reveal";
-import { db } from "@/db/client";
-import { barbers } from "@/db/schema";
 import { requireRole } from "@/lib/auth";
 import {
   appointmentsOfDay,
   barberMonthSummary,
   barberTodaySummary,
+  getBarberWithUser,
 } from "@/lib/queries";
 import { formatBRL, formatDuration } from "@/lib/money";
 import { formatShopTime, shopToday, addDays, labelWeekday, labelFullDate } from "@/lib/time";
@@ -51,12 +49,9 @@ export default async function BarbeiroPanel({
   // Barbeiro vê só a própria agenda. Admin sem cadastro de barbeiro cai
   // no primeiro da equipe — só ele, para nunca expor agenda alheia.
   const barber = session.barberId
-    ? await db.query.barbers.findFirst({
-        where: eq(barbers.id, session.barberId),
-        with: { user: true },
-      })
+    ? await getBarberWithUser(session.barberId)
     : session.role === "ADMIN"
-      ? await db.query.barbers.findFirst({ with: { user: true } })
+      ? await getBarberWithUser(null)
       : null;
 
   if (!barber) {

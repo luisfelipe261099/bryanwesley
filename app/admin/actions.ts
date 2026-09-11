@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql as rawSql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
 import {
@@ -157,39 +157,41 @@ export async function createBarber(
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/(^-|-$)/g, "");
 
-    const [user] = await db
-      .insert(users)
-      .values({
-        name: data.name,
-        phone,
-        email: data.email.toLowerCase(),
-        passwordHash: await hashPassword(password),
-        role: data.isAdmin ? "ADMIN" : "BARBER",
-      })
-      .onConflictDoUpdate({
-        target: users.phone,
-        set: {
-          name: data.name,
-          email: data.email.toLowerCase(),
-          role: data.isAdmin ? "ADMIN" : "BARBER",
-          // Telefone já existia (ex.: era cliente): a senha informada
-          // passa a valer, senão o barbeiro não consegue entrar.
-          passwordHash: await hashPassword(password),
-          active: true,
-        },
-      })
-      .returning();
+    const role = data.isAdmin ? "ADMIN" : "BARBER";
+    const passwordHash = await hashPassword(password);
+    const userData = {
+      name: data.name,
+      email: data.email.toLowerCase(),
+      role,
+      // Telefone já existia (ex.: era cliente): a senha informada passa a
+      // valer, senão o barbeiro não consegue entrar.
+      passwordHash,
+      active: true,
+    } as const;
 
-    await db
-      .insert(barbers)
-      .values({
-        userId: user.id,
-        slug: `${slug}-${user.id}`,
+    let userId: number;
+    const existing = await db.query.users.findFirst({ where: eq(users.phone, phone) });
+    if (existing) {
+      await db.update(users).set(userData).where(eq(users.id, existing.id));
+      userId = existing.id;
+    } else {
+      const [{ id }] = await db
+        .insert(users)
+        .values({ phone, ...userData })
+        .$returningId();
+      userId = id;
+    }
+
+    const already = await db.query.barbers.findFirst({ where: eq(barbers.userId, userId) });
+    if (!already) {
+      await db.insert(barbers).values({
+        userId,
+        slug: `${slug}-${userId}`,
         shortName: data.shortName,
         title: data.title,
         commissionPct: data.commissionPct,
-      })
-      .onConflictDoNothing();
+      });
+    }
 
     return done("Barbeiro cadastrado.");
   } catch (e) {
@@ -254,8 +256,7 @@ export async function setBarberHours(input: {
         openMinute: input.openMinute,
         closeMinute: input.closeMinute,
       })
-      .onConflictDoUpdate({
-        target: [barberHours.barberId, barberHours.weekday],
+      .onDuplicateKeyUpdate({
         set: { openMinute: input.openMinute, closeMinute: input.closeMinute },
       });
     return done("Jornada salva.");
@@ -422,7 +423,7 @@ export async function savePlan(
           .replace(/[̀-ͯ]/g, "")
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/(^-|-$)/g, "") || `plano-${Date.now()}`;
-      const [created] = await db
+      const [{ id }] = await db
         .insert(plans)
         .values({
           slug,
@@ -437,8 +438,8 @@ export async function savePlan(
           active: data.active,
           sortOrder: 99,
         })
-        .returning();
-      planId = created.id;
+        .$returningId();
+      planId = id;
     }
 
     // Só um plano pode ser o destaque da vitrine.
@@ -455,7 +456,7 @@ export async function savePlan(
       await db
         .insert(planServices)
         .values(data.serviceIds.map((sid) => ({ planId: planId!, serviceId: sid })))
-        .onConflictDoNothing();
+        .onDuplicateKeyUpdate({ set: { planId: rawSql`${planServices.planId}` } });
     }
 
     return done("Plano salvo.");
@@ -604,10 +605,7 @@ export async function importClients(csv: string): Promise<
           email: email && email.includes("@") ? email.toLowerCase() : null,
           role: "CLIENT",
         })
-        .onConflictDoUpdate({
-          target: users.phone,
-          set: { name },
-        });
+        .onDuplicateKeyUpdate({ set: { name } });
       imported++;
     }
 

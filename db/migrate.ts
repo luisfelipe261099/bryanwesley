@@ -1,6 +1,6 @@
 // Aplica as migrações. Roda no build da Vercel e localmente.
 import "./load-env";
-import postgres from "postgres";
+import mysql from "mysql2/promise";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -21,19 +21,35 @@ if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 24) {
 }
 
 const dir = join(process.cwd(), "db", "migrations");
-const sql = postgres(url, { max: 1, prepare: false });
+
+function connOptions(connectionString: string): mysql.ConnectionOptions {
+  const u = new URL(connectionString);
+  const local = ["localhost", "127.0.0.1"].includes(u.hostname);
+  const sslOff = process.env.DATABASE_SSL === "false" || local;
+  return {
+    host: u.hostname,
+    port: Number(u.port || 3306),
+    user: decodeURIComponent(u.username),
+    password: decodeURIComponent(u.password),
+    database: u.pathname.replace(/^\//, ""),
+    ssl: sslOff ? undefined : { minVersion: "TLSv1.2", rejectUnauthorized: true },
+    timezone: "Z",
+    multipleStatements: false,
+  };
+}
 
 async function main() {
-  await sql`CREATE TABLE IF NOT EXISTS __migrations (
-    name text PRIMARY KEY,
-    applied_at timestamptz NOT NULL DEFAULT now()
-  )`;
+  const conn = await mysql.createConnection(connOptions(url!));
 
-  const applied = new Set(
-    (await sql<{ name: string }[]>`SELECT name FROM __migrations`).map(
-      (r) => r.name
-    )
+  await conn.query(`CREATE TABLE IF NOT EXISTS __migrations (
+    name VARCHAR(190) PRIMARY KEY,
+    applied_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+  )`);
+
+  const [rows] = await conn.query<mysql.RowDataPacket[]>(
+    "SELECT name FROM __migrations"
   );
+  const applied = new Set(rows.map((r) => r.name as string));
 
   const files = readdirSync(dir)
     .filter((f) => f.endsWith(".sql"))
@@ -50,9 +66,9 @@ async function main() {
 
     console.log(`▶ aplicando ${file} (${statements.length} statement(s))`);
     for (const statement of statements) {
-      await sql.unsafe(statement);
+      await conn.query(statement);
     }
-    await sql`INSERT INTO __migrations (name) VALUES (${file})`;
+    await conn.query("INSERT INTO __migrations (name) VALUES (?)", [file]);
     console.log(`✓ ${file}`);
   }
 
@@ -60,8 +76,10 @@ async function main() {
 
   // Primeiro deploy: sem catálogo a vitrine fica vazia e ninguém consegue
   // entrar. O seed é idempotente, então só roda quando não há serviços.
-  const [{ n }] = await sql<{ n: string }[]>`SELECT count(*)::text AS n FROM services`;
-  await sql.end();
+  const [[{ n }]] = await conn.query<mysql.RowDataPacket[]>(
+    "SELECT COUNT(*) AS n FROM services"
+  );
+  await conn.end();
   if (Number(n) === 0) {
     console.log("Catálogo vazio — rodando o seed inicial.");
     const { runSeed } = await import("./seed");
@@ -69,8 +87,7 @@ async function main() {
   }
 }
 
-main().catch(async (err) => {
+main().catch((err) => {
   console.error("Falha na migração:", err);
-  await sql.end();
   process.exit(1);
 });

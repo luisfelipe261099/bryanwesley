@@ -1,6 +1,6 @@
 // Teste de fumaça do motor de agenda contra o Postgres local.
 import "../db/load-env";
-import { db, sql } from "../db/client";
+import { db, pool } from "../db/client";
 import {
   appointments,
   appointmentServices,
@@ -261,12 +261,12 @@ async function main() {
   check("quem não tem faixa própria usa a global", pctOutro === 55, `(veio ${pctOutro})`);
 
   console.log(`\n${passes} passaram · ${fails} falharam\n`);
-  await sql.end();
+  await pool.end();
   process.exit(fails > 0 ? 1 : 0);
 }
 
 main().catch(async (e) => {
   console.error(e);
-  await sql.end();
+  await pool.end();
   process.exit(1);
 });

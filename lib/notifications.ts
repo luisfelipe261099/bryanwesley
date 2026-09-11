@@ -60,7 +60,7 @@ export async function queueNotification(opts: {
   const body = await renderTemplate(opts.kind, opts.appointment, {
     barberName: opts.barberName,
   });
-  const [row] = await db
+  const [{ id }] = await db
     .insert(notifications)
     .values({
       userId: opts.appointment.clientUserId,
@@ -70,8 +70,8 @@ export async function queueNotification(opts: {
       body,
       scheduledFor: opts.scheduledFor ?? new Date(),
     })
-    .returning();
-  return row;
+    .$returningId();
+  return db.query.notifications.findFirst({ where: eq(notifications.id, id) });
 }
 
 /**

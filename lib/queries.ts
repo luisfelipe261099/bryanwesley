@@ -1,15 +1,28 @@
+// ───────────────────────────────────────────────────────────
 // Leituras usadas pelas telas. Tudo vem do banco — nada de mock.
+//
+// Sem `db.query.*.with`: o Drizzle implementa relações com LATERAL /
+// subquery correlacionada, que o TiDB não executa. Aqui as relações são
+// joins explícitos ou uma segunda consulta por lote — portável.
+// ───────────────────────────────────────────────────────────
 import { and, asc, desc, eq, gte, lt, or, inArray, sum, count } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointments,
   appointmentCommissions,
+  appointmentServices,
   barbers,
   plans,
   planServices,
   services,
   subscriptions,
   users,
+  type Appointment,
+  type Barber,
+  type Plan,
+  type Service,
+  type Subscription,
+  type User,
 } from "@/db/schema";
 import { BLOCKING_STATUSES } from "./schedule";
 import {
@@ -21,31 +34,98 @@ import {
 } from "./time";
 import { monthStart, nextMonthStart } from "./commissions";
 
+export type BarberWithUser = Barber & { user: User };
+export type AppointmentItem = typeof appointmentServices.$inferSelect;
+export type AppointmentFull = Appointment & {
+  barber: BarberWithUser;
+  items: AppointmentItem[];
+};
+export type PlanWithCovers = Plan & { covers: Service[] };
+
+// ───────────────────────── Catálogo ─────────────────────────
+
 export async function listServices() {
-  return db.query.services.findMany({
-    where: eq(services.active, true),
-    orderBy: [asc(services.sortOrder)],
-  });
+  return db
+    .select()
+    .from(services)
+    .where(eq(services.active, true))
+    .orderBy(asc(services.sortOrder));
 }
 
-export async function listPlans() {
-  const rows = await db.query.plans.findMany({
-    where: eq(plans.active, true),
-    orderBy: [asc(plans.sortOrder)],
-    with: { planServices: { with: { service: true } } },
-  });
+export async function listPlans(): Promise<PlanWithCovers[]> {
+  const rows = await db
+    .select()
+    .from(plans)
+    .where(eq(plans.active, true))
+    .orderBy(asc(plans.sortOrder));
+  if (rows.length === 0) return [];
+
+  const covers = await db
+    .select({ planId: planServices.planId, service: services })
+    .from(planServices)
+    .innerJoin(services, eq(services.id, planServices.serviceId))
+    .where(inArray(planServices.planId, rows.map((p) => p.id)));
+
   return rows.map((p) => ({
     ...p,
-    covers: p.planServices.map((ps) => ps.service).filter(Boolean),
+    covers: covers.filter((c) => c.planId === p.id).map((c) => c.service),
   }));
 }
 
-export async function listTeam() {
-  return db.query.barbers.findMany({
-    where: eq(barbers.active, true),
-    with: { user: true },
-    orderBy: [asc(barbers.sortOrder)],
-  });
+/** Barbeiros ativos com o usuário anexado. */
+export async function listTeam(): Promise<BarberWithUser[]> {
+  const rows = await db
+    .select({ barber: barbers, user: users })
+    .from(barbers)
+    .innerJoin(users, eq(users.id, barbers.userId))
+    .where(eq(barbers.active, true))
+    .orderBy(asc(barbers.sortOrder));
+  return rows.map((r) => ({ ...r.barber, user: r.user }));
+}
+
+/** Um barbeiro pelo id, ou o primeiro da equipe quando id é nulo. */
+export async function getBarberWithUser(
+  id: number | null | undefined
+): Promise<BarberWithUser | null> {
+  const rows = await db
+    .select({ barber: barbers, user: users })
+    .from(barbers)
+    .innerJoin(users, eq(users.id, barbers.userId))
+    .where(id ? eq(barbers.id, id) : undefined)
+    .orderBy(asc(barbers.sortOrder))
+    .limit(1);
+  return rows[0] ? { ...rows[0].barber, user: rows[0].user } : null;
+}
+
+// ───────────────────────── Agendamentos ─────────────────────────
+
+/** Anexa barbeiro (com usuário) e itens a uma lista de agendamentos. */
+export async function attachDetails(
+  rows: Appointment[]
+): Promise<AppointmentFull[]> {
+  if (rows.length === 0) return [];
+  const ids = rows.map((a) => a.id);
+  const barberIds = Array.from(new Set(rows.map((a) => a.barberId)));
+
+  const [team, items] = await Promise.all([
+    db
+      .select({ barber: barbers, user: users })
+      .from(barbers)
+      .innerJoin(users, eq(users.id, barbers.userId))
+      .where(inArray(barbers.id, barberIds)),
+    db
+      .select()
+      .from(appointmentServices)
+      .where(inArray(appointmentServices.appointmentId, ids))
+      .orderBy(asc(appointmentServices.id)),
+  ]);
+
+  const byBarber = new Map(team.map((t) => [t.barber.id, { ...t.barber, user: t.user }]));
+  return rows.map((a) => ({
+    ...a,
+    barber: byBarber.get(a.barberId)!,
+    items: items.filter((i) => i.appointmentId === a.id),
+  }));
 }
 
 /** Limites do dia (na loja) como instantes UTC. */
@@ -62,45 +142,54 @@ export async function appointmentsOfDay(
   barberId?: number | null
 ) {
   const { start, end } = dayBounds(dateKey);
-  return db.query.appointments.findMany({
-    where: and(
-      gte(appointments.startsAt, start),
-      lt(appointments.startsAt, end),
-      barberId ? eq(appointments.barberId, barberId) : undefined
-    ),
-    with: { barber: { with: { user: true } }, items: true },
-    orderBy: [asc(appointments.startsAt)],
-  });
+  const rows = await db
+    .select()
+    .from(appointments)
+    .where(
+      and(
+        gte(appointments.startsAt, start),
+        lt(appointments.startsAt, end),
+        barberId ? eq(appointments.barberId, barberId) : undefined
+      )
+    )
+    .orderBy(asc(appointments.startsAt));
+  return attachDetails(rows);
 }
 
 export async function upcomingForUser(userId: number, limit = 10) {
-  return db.query.appointments.findMany({
-    where: and(
-      eq(appointments.clientUserId, userId),
-      // Pelo fim, não pelo início: o atendimento em curso continua aqui.
-      gte(appointments.endsAt, new Date()),
-      inArray(appointments.status, ["PENDENTE", "CONFIRMADO", "EM_ANDAMENTO"])
-    ),
-    with: { barber: { with: { user: true } }, items: true },
-    orderBy: [asc(appointments.startsAt)],
-    limit,
-  });
+  const rows = await db
+    .select()
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.clientUserId, userId),
+        // Pelo fim, não pelo início: o atendimento em curso continua aqui.
+        gte(appointments.endsAt, new Date()),
+        inArray(appointments.status, ["PENDENTE", "CONFIRMADO", "EM_ANDAMENTO"])
+      )
+    )
+    .orderBy(asc(appointments.startsAt))
+    .limit(limit);
+  return attachDetails(rows);
 }
 
 export async function historyForUser(userId: number, limit = 12) {
-  return db.query.appointments.findMany({
-    where: and(
-      eq(appointments.clientUserId, userId),
-      or(
-        inArray(appointments.status, ["CONCLUIDO", "CANCELADO", "NO_SHOW"]),
-        // Passou e ninguém deu baixa: não pode sumir da vista do cliente.
-        lt(appointments.endsAt, new Date())
+  const rows = await db
+    .select()
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.clientUserId, userId),
+        or(
+          inArray(appointments.status, ["CONCLUIDO", "CANCELADO", "NO_SHOW"]),
+          // Passou e ninguém deu baixa: não pode sumir da vista do cliente.
+          lt(appointments.endsAt, new Date())
+        )
       )
-    ),
-    with: { barber: { with: { user: true } }, items: true },
-    orderBy: [desc(appointments.startsAt)],
-    limit,
-  });
+    )
+    .orderBy(desc(appointments.startsAt))
+    .limit(limit);
+  return attachDetails(rows);
 }
 
 export async function countForUser(userId: number) {
@@ -116,15 +205,23 @@ export async function countForUser(userId: number) {
   return Number(row?.total ?? 0);
 }
 
-export async function activeSubscription(userId: number) {
-  return db.query.subscriptions.findFirst({
-    where: and(
-      eq(subscriptions.userId, userId),
-      eq(subscriptions.status, "ATIVA")
-    ),
-    with: { plan: true },
-  });
+// ───────────────────────── Assinaturas ─────────────────────────
+
+export async function activeSubscription(
+  userId: number
+): Promise<(Subscription & { plan: Plan }) | undefined> {
+  const rows = await db
+    .select({ sub: subscriptions, plan: plans })
+    .from(subscriptions)
+    .innerJoin(plans, eq(plans.id, subscriptions.planId))
+    .where(
+      and(eq(subscriptions.userId, userId), eq(subscriptions.status, "ATIVA"))
+    )
+    .limit(1);
+  return rows[0] ? { ...rows[0].sub, plan: rows[0].plan } : undefined;
 }
+
+// ───────────────────────── Barbeiro ─────────────────────────
 
 /** Comissão do barbeiro no mês corrente. */
 export async function barberMonthSummary(barberId: number, ref = new Date()) {
@@ -155,10 +252,7 @@ export async function barberMonthSummary(barberId: number, ref = new Date()) {
 export async function barberTodaySummary(barberId: number) {
   const { start, end } = dayBounds(shopToday());
   const rows = await db
-    .select({
-      status: appointments.status,
-      totalCents: appointments.totalCents,
-    })
+    .select({ status: appointments.status, totalCents: appointments.totalCents })
     .from(appointments)
     .where(
       and(
@@ -179,36 +273,57 @@ export async function barberTodaySummary(barberId: number) {
   };
 }
 
+// ───────────────────────── Clientes ─────────────────────────
+
 export async function listClients(limit = 50) {
-  const rows = await db.query.users.findMany({
-    where: eq(users.role, "CLIENT"),
-    orderBy: [desc(users.createdAt)],
-    limit,
-    with: {
-      subscriptions: { with: { plan: true } },
-      appointments: { columns: { id: true, startsAt: true, status: true } },
-    },
-  });
+  const rows = await db
+    .select()
+    .from(users)
+    .where(eq(users.role, "CLIENT"))
+    .orderBy(desc(users.createdAt))
+    .limit(limit);
+  if (rows.length === 0) return [];
+  const ids = rows.map((u) => u.id);
+
+  const [subs, appts] = await Promise.all([
+    db
+      .select({ sub: subscriptions, plan: plans })
+      .from(subscriptions)
+      .innerJoin(plans, eq(plans.id, subscriptions.planId))
+      .where(inArray(subscriptions.userId, ids)),
+    db
+      .select({
+        id: appointments.id,
+        clientUserId: appointments.clientUserId,
+        startsAt: appointments.startsAt,
+        status: appointments.status,
+      })
+      .from(appointments)
+      .where(inArray(appointments.clientUserId, ids)),
+  ]);
+
   return rows.map((u) => {
-    const done = u.appointments.filter((a) => a.status === "CONCLUIDO");
-    const last = done.sort(
-      (a, b) => b.startsAt.getTime() - a.startsAt.getTime()
-    )[0];
-    const sub = u.subscriptions.find((s) => s.status === "ATIVA");
-    const overdue = u.subscriptions.find((s) => s.status === "INADIMPLENTE");
+    const mine = appts.filter((a) => a.clientUserId === u.id);
+    const done = mine.filter((a) => a.status === "CONCLUIDO");
+    const last = done.sort((a, b) => b.startsAt.getTime() - a.startsAt.getTime())[0];
+    const mySubs = subs.filter((s) => s.sub.userId === u.id);
+    const active = mySubs.find((s) => s.sub.status === "ATIVA");
+    const overdue = mySubs.find((s) => s.sub.status === "INADIMPLENTE");
     return {
       id: u.id,
       name: u.name,
       phone: u.phone,
-      plan: sub?.plan?.name ?? null,
-      overduePlan: !sub && overdue ? overdue.plan?.name ?? null : null,
-      renewsAt: sub?.renewsAt ?? null,
+      plan: active?.plan.name ?? null,
+      overduePlan: !active && overdue ? overdue.plan.name : null,
+      renewsAt: active?.sub.renewsAt ?? null,
       visits: done.length,
       lastVisit: last?.startsAt ?? null,
       hasAccount: !!u.passwordHash,
     };
   });
 }
+
+// ───────────────────────── Admin ─────────────────────────
 
 /** KPIs do dashboard, todos calculados do banco. */
 export async function adminOverview() {
@@ -279,11 +394,7 @@ export async function weeklyRevenue() {
           eq(appointments.status, "CONCLUIDO")
         )
       );
-    out.push({
-      day: weekdayLabel(dateKey),
-      dateKey,
-      cents: Number(row?.total ?? 0),
-    });
+    out.push({ day: weekdayLabel(dateKey), dateKey, cents: Number(row?.total ?? 0) });
   }
   return out;
 }
@@ -292,9 +403,6 @@ export async function weeklyRevenue() {
 export async function teamPerformance() {
   const team = await listTeam();
   return Promise.all(
-    team.map(async (b) => ({
-      barber: b,
-      ...(await barberMonthSummary(b.id)),
-    }))
+    team.map(async (b) => ({ barber: b, ...(await barberMonthSummary(b.id)) }))
   );
 }

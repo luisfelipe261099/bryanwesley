@@ -9,7 +9,7 @@ import { db } from "@/db/client";
 import { subscriptions } from "@/db/schema";
 
 export async function expireOverdueSubscriptions() {
-  const rows = await db
+  const [res] = await db
     .update(subscriptions)
     .set({ status: "INADIMPLENTE" })
     .where(
@@ -17,9 +17,8 @@ export async function expireOverdueSubscriptions() {
         eq(subscriptions.status, "ATIVA"),
         lt(subscriptions.renewsAt, new Date())
       )
-    )
-    .returning({ id: subscriptions.id });
-  return rows.length;
+    );
+  return res.affectedRows;
 }
 
 /** Estende o ciclo a partir do vencimento (não da data de hoje). */

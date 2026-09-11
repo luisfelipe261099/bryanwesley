@@ -1,48 +1,177 @@
 {
-  "id": "88c03608-c784-47c3-a0ed-b5f1a333b5cf",
+  "version": "5",
+  "dialect": "mysql",
+  "id": "fbdcaad3-f55b-4c3c-ac70-279de77e007a",
   "prevId": "00000000-0000-0000-0000-000000000000",
-  "version": "7",
-  "dialect": "postgresql",
   "tables": {
-    "public.appointment_services": {
-      "name": "appointment_services",
-      "schema": "",
+    "appointment_commissions": {
+      "name": "appointment_commissions",
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
         },
         "appointment_id": {
           "name": "appointment_id",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
+        },
+        "barber_id": {
+          "name": "barber_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "base_cents": {
+          "name": "base_cents",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "barber_pct": {
+          "name": "barber_pct",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "barber_cents": {
+          "name": "barber_cents",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "shop_cents": {
+          "name": "shop_cents",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "from_subscription": {
+          "name": "from_subscription",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(3)"
+        }
+      },
+      "indexes": {
+        "appointment_commissions_appt_idx": {
+          "name": "appointment_commissions_appt_idx",
+          "columns": [
+            "appointment_id"
+          ],
+          "isUnique": true
+        },
+        "appointment_commissions_barber_idx": {
+          "name": "appointment_commissions_barber_idx",
+          "columns": [
+            "barber_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "appointment_commissions_appointment_id_appointments_id_fk": {
+          "name": "appointment_commissions_appointment_id_appointments_id_fk",
+          "tableFrom": "appointment_commissions",
+          "tableTo": "appointments",
+          "columnsFrom": [
+            "appointment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "appointment_commissions_barber_id_barbers_id_fk": {
+          "name": "appointment_commissions_barber_id_barbers_id_fk",
+          "tableFrom": "appointment_commissions",
+          "tableTo": "barbers",
+          "columnsFrom": [
+            "barber_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "appointment_commissions_id": {
+          "name": "appointment_commissions_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "appointment_services": {
+      "name": "appointment_services",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "appointment_id": {
+          "name": "appointment_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
         },
         "service_id": {
           "name": "service_id",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "autoincrement": false
         },
         "name": {
           "name": "name",
-          "type": "text",
+          "type": "varchar(120)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "price_cents": {
           "name": "price_cents",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "duration_min": {
           "name": "duration_min",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         }
       },
       "indexes": {},
@@ -74,176 +203,201 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "appointment_services_id": {
+          "name": "appointment_services_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
+      "checkConstraint": {}
     },
-    "public.appointments": {
+    "appointments": {
       "name": "appointments",
-      "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
         },
         "code": {
           "name": "code",
-          "type": "text",
+          "type": "varchar(8)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "client_user_id": {
           "name": "client_user_id",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "autoincrement": false
         },
         "client_name": {
           "name": "client_name",
-          "type": "text",
+          "type": "varchar(120)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "client_phone": {
           "name": "client_phone",
-          "type": "text",
+          "type": "varchar(20)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "barber_id": {
           "name": "barber_id",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "starts_at": {
           "name": "starts_at",
-          "type": "timestamp with time zone",
+          "type": "datetime(3)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "ends_at": {
           "name": "ends_at",
-          "type": "timestamp with time zone",
+          "type": "datetime(3)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "duration_min": {
           "name": "duration_min",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "total_cents": {
           "name": "total_cents",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": 0
         },
         "status": {
           "name": "status",
-          "type": "appt_status",
-          "typeSchema": "public",
+          "type": "enum('PENDENTE','CONFIRMADO','EM_ANDAMENTO','CONCLUIDO','CANCELADO','NO_SHOW')",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": "'CONFIRMADO'"
         },
         "kind": {
           "name": "kind",
-          "type": "appt_kind",
-          "typeSchema": "public",
+          "type": "enum('AVULSO','ASSINANTE')",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": "'AVULSO'"
         },
         "subscription_id": {
           "name": "subscription_id",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "autoincrement": false
         },
         "notes": {
           "name": "notes",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "autoincrement": false
+        },
+        "checkin_token": {
+          "name": "checkin_token",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "checked_in_at": {
+          "name": "checked_in_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "barber_pct_snapshot": {
+          "name": "barber_pct_snapshot",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "started_at": {
           "name": "started_at",
-          "type": "timestamp with time zone",
+          "type": "datetime(3)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "autoincrement": false
         },
         "finished_at": {
           "name": "finished_at",
-          "type": "timestamp with time zone",
+          "type": "datetime(3)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "autoincrement": false
         },
         "created_at": {
           "name": "created_at",
-          "type": "timestamp with time zone",
+          "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
-          "default": "now()"
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(3)"
         }
       },
       "indexes": {
+        "appointments_code_unique": {
+          "name": "appointments_code_unique",
+          "columns": [
+            "code"
+          ],
+          "isUnique": true
+        },
+        "appointments_checkin_token_idx": {
+          "name": "appointments_checkin_token_idx",
+          "columns": [
+            "checkin_token"
+          ],
+          "isUnique": true
+        },
         "appointments_barber_start_idx": {
           "name": "appointments_barber_start_idx",
           "columns": [
-            {
-              "expression": "barber_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "starts_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
+            "barber_id",
+            "starts_at"
           ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
+          "isUnique": false
         },
         "appointments_client_idx": {
           "name": "appointments_client_idx",
           "columns": [
-            {
-              "expression": "client_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
+            "client_user_id"
           ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
+          "isUnique": false
         },
         "appointments_phone_idx": {
           "name": "appointments_phone_idx",
           "columns": [
-            {
-              "expression": "client_phone",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
+            "client_phone"
           ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -287,84 +441,180 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "appointments_code_unique": {
-          "name": "appointments_code_unique",
-          "nullsNotDistinct": false,
+      "compositePrimaryKeys": {
+        "appointments_id": {
+          "name": "appointments_id",
           "columns": [
-            "code"
+            "id"
           ]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
-    "public.barbers": {
-      "name": "barbers",
-      "schema": "",
+    "barber_hours": {
+      "name": "barber_hours",
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "barber_id": {
+          "name": "barber_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "weekday": {
+          "name": "weekday",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "open_minute": {
+          "name": "open_minute",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "close_minute": {
+          "name": "close_minute",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "barber_hours_barber_weekday_idx": {
+          "name": "barber_hours_barber_weekday_idx",
+          "columns": [
+            "barber_id",
+            "weekday"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "barber_hours_barber_id_barbers_id_fk": {
+          "name": "barber_hours_barber_id_barbers_id_fk",
+          "tableFrom": "barber_hours",
+          "tableTo": "barbers",
+          "columnsFrom": [
+            "barber_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "barber_hours_id": {
+          "name": "barber_hours_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "barbers": {
+      "name": "barbers",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
         },
         "user_id": {
           "name": "user_id",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "slug": {
           "name": "slug",
-          "type": "text",
+          "type": "varchar(80)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "short_name": {
           "name": "short_name",
-          "type": "text",
+          "type": "varchar(60)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "title": {
           "name": "title",
-          "type": "text",
+          "type": "varchar(120)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "rating": {
           "name": "rating",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": 50
         },
         "commission_pct": {
           "name": "commission_pct",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": 40
+        },
+        "monthly_goal_cents": {
+          "name": "monthly_goal_cents",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 700000
         },
         "active": {
           "name": "active",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": true
         },
         "sort_order": {
           "name": "sort_order",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": 0
         }
       },
-      "indexes": {},
+      "indexes": {
+        "barbers_slug_idx": {
+          "name": "barbers_slug_idx",
+          "columns": [
+            "slug"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {
         "barbers_user_id_users_id_fk": {
           "name": "barbers_user_id_users_id_fk",
@@ -380,35 +630,295 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "barbers_slug_unique": {
-          "name": "barbers_slug_unique",
-          "nullsNotDistinct": false,
+      "compositePrimaryKeys": {
+        "barbers_id": {
+          "name": "barbers_id",
           "columns": [
-            "slug"
+            "id"
           ]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
-    "public.plan_services": {
+    "booking_locks": {
+      "name": "booking_locks",
+      "columns": {
+        "barber_id": {
+          "name": "barber_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "date_key": {
+          "name": "date_key",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "booking_locks_barber_id_barbers_id_fk": {
+          "name": "booking_locks_barber_id_barbers_id_fk",
+          "tableFrom": "booking_locks",
+          "tableTo": "barbers",
+          "columnsFrom": [
+            "barber_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "booking_locks_barber_id_date_key_pk": {
+          "name": "booking_locks_barber_id_date_key_pk",
+          "columns": [
+            "barber_id",
+            "date_key"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "commission_tiers": {
+      "name": "commission_tiers",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "barber_id": {
+          "name": "barber_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "min_revenue_cents": {
+          "name": "min_revenue_cents",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "barber_pct": {
+          "name": "barber_pct",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "label": {
+          "name": "label",
+          "type": "varchar(60)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "commission_tiers_barber_id_barbers_id_fk": {
+          "name": "commission_tiers_barber_id_barbers_id_fk",
+          "tableFrom": "commission_tiers",
+          "tableTo": "barbers",
+          "columnsFrom": [
+            "barber_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "commission_tiers_id": {
+          "name": "commission_tiers_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "notifications": {
+      "name": "notifications",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "appointment_id": {
+          "name": "appointment_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "phone": {
+          "name": "phone",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "enum('AGENDAMENTO_CRIADO','LEMBRETE_24H','LEMBRETE_2H','AGENDAMENTO_CANCELADO','AGENDAMENTO_REMARCADO','ASSINATURA_RENOVADA','ASSINATURA_FALHOU')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "channel": {
+          "name": "channel",
+          "type": "enum('WHATSAPP','SMS','EMAIL')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'WHATSAPP'"
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "enum('PENDENTE','ENVIADA','ERRO','CANCELADA')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'PENDENTE'"
+        },
+        "scheduled_for": {
+          "name": "scheduled_for",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(3)"
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "error": {
+          "name": "error",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(3)"
+        }
+      },
+      "indexes": {
+        "notifications_pending_idx": {
+          "name": "notifications_pending_idx",
+          "columns": [
+            "status",
+            "scheduled_for"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "notifications_user_id_users_id_fk": {
+          "name": "notifications_user_id_users_id_fk",
+          "tableFrom": "notifications",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "notifications_appointment_id_appointments_id_fk": {
+          "name": "notifications_appointment_id_appointments_id_fk",
+          "tableFrom": "notifications",
+          "tableTo": "appointments",
+          "columnsFrom": [
+            "appointment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "notifications_id": {
+          "name": "notifications_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "plan_services": {
       "name": "plan_services",
-      "schema": "",
       "columns": {
         "plan_id": {
           "name": "plan_id",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "service_id": {
           "name": "service_id",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         }
       },
       "indexes": {},
@@ -450,166 +960,315 @@
         }
       },
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
+      "checkConstraint": {}
     },
-    "public.plans": {
+    "plans": {
       "name": "plans",
-      "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
         },
         "slug": {
           "name": "slug",
-          "type": "text",
+          "type": "varchar(80)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "name": {
           "name": "name",
-          "type": "text",
+          "type": "varchar(120)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "kicker": {
           "name": "kicker",
-          "type": "text",
+          "type": "varchar(60)",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": "''"
         },
         "tagline": {
           "name": "tagline",
-          "type": "text",
+          "type": "varchar(160)",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": "''"
         },
         "price_cents": {
           "name": "price_cents",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "annual_price_cents": {
           "name": "annual_price_cents",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "features": {
           "name": "features",
-          "type": "jsonb",
+          "type": "json",
           "primaryKey": false,
           "notNull": true,
-          "default": "'[]'::jsonb"
+          "autoincrement": false
         },
         "highlight": {
           "name": "highlight",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": false
         },
         "badge": {
           "name": "badge",
-          "type": "text",
+          "type": "varchar(40)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "autoincrement": false
         },
         "active": {
           "name": "active",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": true
         },
         "sort_order": {
           "name": "sort_order",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": 0
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "plans_slug_unique": {
-          "name": "plans_slug_unique",
-          "nullsNotDistinct": false,
+      "indexes": {
+        "plans_slug_idx": {
+          "name": "plans_slug_idx",
           "columns": [
             "slug"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "plans_id": {
+          "name": "plans_id",
+          "columns": [
+            "id"
           ]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
-    "public.schedule_blocks": {
-      "name": "schedule_blocks",
-      "schema": "",
+    "recurring_slots": {
+      "name": "recurring_slots",
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
         },
         "barber_id": {
           "name": "barber_id",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "autoincrement": false
         },
-        "starts_at": {
-          "name": "starts_at",
-          "type": "timestamp with time zone",
+        "frequency": {
+          "name": "frequency",
+          "type": "varchar(10)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'SEMANAL'"
         },
-        "ends_at": {
-          "name": "ends_at",
-          "type": "timestamp with time zone",
+        "weekday": {
+          "name": "weekday",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false,
+          "autoincrement": false
         },
-        "reason": {
-          "name": "reason",
-          "type": "text",
+        "day_of_month": {
+          "name": "day_of_month",
+          "type": "int",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "autoincrement": false
+        },
+        "minutes_of_day": {
+          "name": "minutes_of_day",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "service_ids": {
+          "name": "service_ids",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "starts_on": {
+          "name": "starts_on",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ends_on": {
+          "name": "ends_on",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "created_at": {
           "name": "created_at",
-          "type": "timestamp with time zone",
+          "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
-          "default": "now()"
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(3)"
+        }
+      },
+      "indexes": {
+        "recurring_slots_user_idx": {
+          "name": "recurring_slots_user_idx",
+          "columns": [
+            "user_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "recurring_slots_user_id_users_id_fk": {
+          "name": "recurring_slots_user_id_users_id_fk",
+          "tableFrom": "recurring_slots",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "recurring_slots_barber_id_barbers_id_fk": {
+          "name": "recurring_slots_barber_id_barbers_id_fk",
+          "tableFrom": "recurring_slots",
+          "tableTo": "barbers",
+          "columnsFrom": [
+            "barber_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "recurring_slots_id": {
+          "name": "recurring_slots_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "schedule_blocks": {
+      "name": "schedule_blocks",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "barber_id": {
+          "name": "barber_id",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "starts_at": {
+          "name": "starts_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ends_at": {
+          "name": "ends_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "varchar(160)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(3)"
         }
       },
       "indexes": {
         "schedule_blocks_range_idx": {
           "name": "schedule_blocks_range_idx",
           "columns": [
-            {
-              "expression": "starts_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
+            "starts_at"
           ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -627,99 +1286,117 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "schedule_blocks_id": {
+          "name": "schedule_blocks_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
+      "checkConstraint": {}
     },
-    "public.services": {
+    "services": {
       "name": "services",
-      "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
         },
         "slug": {
           "name": "slug",
-          "type": "text",
+          "type": "varchar(80)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "name": {
           "name": "name",
-          "type": "text",
+          "type": "varchar(120)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "description": {
           "name": "description",
-          "type": "text",
+          "type": "varchar(255)",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": "''"
         },
         "price_cents": {
           "name": "price_cents",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "duration_min": {
           "name": "duration_min",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "tag": {
           "name": "tag",
-          "type": "text",
+          "type": "varchar(40)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "autoincrement": false
         },
         "active": {
           "name": "active",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": true
         },
         "sort_order": {
           "name": "sort_order",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": 0
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "services_slug_unique": {
-          "name": "services_slug_unique",
-          "nullsNotDistinct": false,
+      "indexes": {
+        "services_slug_idx": {
+          "name": "services_slug_idx",
           "columns": [
             "slug"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "services_id": {
+          "name": "services_id",
+          "columns": [
+            "id"
           ]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
+      "uniqueConstraints": {},
+      "checkConstraint": {}
     },
-    "public.settings": {
+    "settings": {
       "name": "settings",
-      "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "integer",
-          "primaryKey": true,
+          "type": "int",
+          "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": 1
         },
         "accepting_bookings": {
@@ -727,132 +1404,172 @@
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": true
         },
         "min_advance_hours": {
           "name": "min_advance_hours",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": 2
         },
         "slot_minutes": {
           "name": "slot_minutes",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": 30
         },
         "open_minute": {
           "name": "open_minute",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": 540
         },
         "close_minute": {
           "name": "close_minute",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": 1200
         },
         "closed_weekdays": {
           "name": "closed_weekdays",
-          "type": "jsonb",
+          "type": "json",
           "primaryKey": false,
           "notNull": true,
-          "default": "'[0,1]'::jsonb"
+          "autoincrement": false
         },
         "max_advance_days": {
           "name": "max_advance_days",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": 60
+        },
+        "default_barber_pct": {
+          "name": "default_barber_pct",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 50
+        },
+        "subscription_commission_base": {
+          "name": "subscription_commission_base",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'PRECO_TABELA'"
+        },
+        "shop_name": {
+          "name": "shop_name",
+          "type": "varchar(120)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'Bryan Wesley Barbearia'"
+        },
+        "shop_phone": {
+          "name": "shop_phone",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
         }
       },
       "indexes": {},
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "settings_id": {
+          "name": "settings_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
+      "checkConstraint": {}
     },
-    "public.subscriptions": {
+    "subscriptions": {
       "name": "subscriptions",
-      "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
         },
         "user_id": {
           "name": "user_id",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "plan_id": {
           "name": "plan_id",
-          "type": "integer",
+          "type": "int",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "status": {
           "name": "status",
-          "type": "sub_status",
-          "typeSchema": "public",
+          "type": "enum('ATIVA','CANCELADA','INADIMPLENTE')",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": "'ATIVA'"
         },
         "cycle": {
           "name": "cycle",
-          "type": "sub_cycle",
-          "typeSchema": "public",
+          "type": "enum('MENSAL','ANUAL')",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": "'MENSAL'"
         },
         "started_at": {
           "name": "started_at",
-          "type": "timestamp with time zone",
+          "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
-          "default": "now()"
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(3)"
         },
         "renews_at": {
           "name": "renews_at",
-          "type": "timestamp with time zone",
+          "type": "datetime(3)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "canceled_at": {
           "name": "canceled_at",
-          "type": "timestamp with time zone",
+          "type": "datetime(3)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
         "subscriptions_user_idx": {
           "name": "subscriptions_user_idx",
           "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
+            "user_id"
           ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -883,52 +1600,61 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "subscriptions_id": {
+          "name": "subscriptions_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
+      "checkConstraint": {}
     },
-    "public.users": {
+    "users": {
       "name": "users",
-      "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": true
         },
         "name": {
           "name": "name",
-          "type": "text",
+          "type": "varchar(120)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "phone": {
           "name": "phone",
-          "type": "text",
+          "type": "varchar(20)",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "autoincrement": false
         },
         "email": {
           "name": "email",
-          "type": "text",
+          "type": "varchar(190)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "autoincrement": false
         },
         "password_hash": {
           "name": "password_hash",
-          "type": "text",
+          "type": "varchar(100)",
           "primaryKey": false,
-          "notNull": false
+          "notNull": false,
+          "autoincrement": false
         },
         "role": {
           "name": "role",
-          "type": "role",
-          "typeSchema": "public",
+          "type": "enum('ADMIN','BARBER','CLIENT')",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": "'CLIENT'"
         },
         "active": {
@@ -936,112 +1662,55 @@
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false,
           "default": true
         },
         "created_at": {
           "name": "created_at",
-          "type": "timestamp with time zone",
+          "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
-          "default": "now()"
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP(3)"
         }
       },
       "indexes": {
         "users_phone_idx": {
           "name": "users_phone_idx",
           "columns": [
-            {
-              "expression": "phone",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
+            "phone"
           ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
+          "isUnique": true
         },
         "users_email_idx": {
           "name": "users_email_idx",
           "columns": [
-            {
-              "expression": "email",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
+            "email"
           ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
+          "isUnique": true
         }
       },
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "users_id": {
+          "name": "users_id",
+          "columns": [
+            "id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
+      "checkConstraint": {}
     }
   },
-  "enums": {
-    "public.appt_kind": {
-      "name": "appt_kind",
-      "schema": "public",
-      "values": [
-        "AVULSO",
-        "ASSINANTE"
-      ]
-    },
-    "public.appt_status": {
-      "name": "appt_status",
-      "schema": "public",
-      "values": [
-        "PENDENTE",
-        "CONFIRMADO",
-        "EM_ANDAMENTO",
-        "CONCLUIDO",
-        "CANCELADO",
-        "NO_SHOW"
-      ]
-    },
-    "public.role": {
-      "name": "role",
-      "schema": "public",
-      "values": [
-        "ADMIN",
-        "BARBER",
-        "CLIENT"
-      ]
-    },
-    "public.sub_cycle": {
-      "name": "sub_cycle",
-      "schema": "public",
-      "values": [
-        "MENSAL",
-        "ANUAL"
-      ]
-    },
-    "public.sub_status": {
-      "name": "sub_status",
-      "schema": "public",
-      "values": [
-        "ATIVA",
-        "CANCELADA",
-        "INADIMPLENTE"
-      ]
-    }
-  },
-  "schemas": {},
-  "sequences": {},
-  "roles": {},
-  "policies": {},
   "views": {},
   "_meta": {
-    "columns": {},
     "schemas": {},
-    "tables": {}
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "tables": {},
+    "indexes": {}
   }
 }

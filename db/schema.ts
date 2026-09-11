@@ -1,59 +1,55 @@
 // ───────────────────────────────────────────────────────────
-// Esquema do banco (Postgres + Drizzle).
-// A regra de ouro fica no banco, não na aplicação: a constraint
-// de exclusão em `appointments` torna impossível gravar dois
-// atendimentos sobrepostos para o mesmo barbeiro.
+// Esquema do banco — MySQL / TiDB (Drizzle mysql-core).
+//
+// A garantia contra reserva dupla NÃO é uma constraint aqui (MySQL não
+// tem exclusion constraint): é a trava `booking_locks` + SELECT FOR UPDATE
+// dentro da transação de agendamento (lib/appointments.ts).
 // ───────────────────────────────────────────────────────────
 import {
-  pgTable,
-  pgEnum,
-  serial,
+  mysqlTable,
+  mysqlEnum,
+  int,
+  varchar,
   text,
-  integer,
   boolean,
-  timestamp,
-  jsonb,
+  datetime,
+  customType,
   uniqueIndex,
   index,
   primaryKey,
-} from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+} from "drizzle-orm/mysql-core";
+import { relations, sql } from "drizzle-orm";
 
-export const roleEnum = pgEnum("role", ["ADMIN", "BARBER", "CLIENT"]);
+/** Coluna JSON que devolve objeto mesmo quando o driver entrega string. */
+function jsonCol<T>(name: string) {
+  return customType<{ data: T; driverData: string | T }>({
+    dataType: () => "json",
+    toDriver: (value) => JSON.stringify(value),
+    fromDriver: (value) =>
+      typeof value === "string" ? (JSON.parse(value) as T) : (value as T),
+  })(name);
+}
 
-export const apptStatusEnum = pgEnum("appt_status", [
+/** datetime(3) em UTC; o driver está fixado em timezone "Z". */
+const ts = (name: string) => datetime(name, { mode: "date", fsp: 3 });
+const tsNow = (name: string) =>
+  ts(name).notNull().default(sql`CURRENT_TIMESTAMP(3)`);
+
+export const ROLES = ["ADMIN", "BARBER", "CLIENT"] as const;
+export const APPT_STATUSES = [
   "PENDENTE",
   "CONFIRMADO",
   "EM_ANDAMENTO",
   "CONCLUIDO",
   "CANCELADO",
   "NO_SHOW",
-]);
-
-export const apptKindEnum = pgEnum("appt_kind", ["AVULSO", "ASSINANTE"]);
-
-export const subStatusEnum = pgEnum("sub_status", [
-  "ATIVA",
-  "CANCELADA",
-  "INADIMPLENTE",
-]);
-
-export const subCycleEnum = pgEnum("sub_cycle", ["MENSAL", "ANUAL"]);
-
-export const notifStatusEnum = pgEnum("notif_status", [
-  "PENDENTE",
-  "ENVIADA",
-  "ERRO",
-  "CANCELADA",
-]);
-
-export const notifChannelEnum = pgEnum("notif_channel", [
-  "WHATSAPP",
-  "SMS",
-  "EMAIL",
-]);
-
-export const notifKindEnum = pgEnum("notif_kind", [
+] as const;
+export const APPT_KINDS = ["AVULSO", "ASSINANTE"] as const;
+export const SUB_STATUSES = ["ATIVA", "CANCELADA", "INADIMPLENTE"] as const;
+export const SUB_CYCLES = ["MENSAL", "ANUAL"] as const;
+export const NOTIF_STATUSES = ["PENDENTE", "ENVIADA", "ERRO", "CANCELADA"] as const;
+export const NOTIF_CHANNELS = ["WHATSAPP", "SMS", "EMAIL"] as const;
+export const NOTIF_KINDS = [
   "AGENDAMENTO_CRIADO",
   "LEMBRETE_24H",
   "LEMBRETE_2H",
@@ -61,24 +57,22 @@ export const notifKindEnum = pgEnum("notif_kind", [
   "AGENDAMENTO_REMARCADO",
   "ASSINATURA_RENOVADA",
   "ASSINATURA_FALHOU",
-]);
+] as const;
 
 // ───────────────────────── Usuários ─────────────────────────
 
-export const users = pgTable(
+export const users = mysqlTable(
   "users",
   {
-    id: serial("id").primaryKey(),
-    name: text("name").notNull(),
+    id: int("id").autoincrement().primaryKey(),
+    name: varchar("name", { length: 120 }).notNull(),
     // Telefone é o login do cliente; normalizado só com dígitos.
-    phone: text("phone").notNull(),
-    email: text("email"),
-    passwordHash: text("password_hash"),
-    role: roleEnum("role").notNull().default("CLIENT"),
+    phone: varchar("phone", { length: 20 }).notNull(),
+    email: varchar("email", { length: 190 }),
+    passwordHash: varchar("password_hash", { length: 100 }),
+    role: mysqlEnum("role", ROLES).notNull().default("CLIENT"),
     active: boolean("active").notNull().default(true),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    createdAt: tsNow("created_at"),
   },
   (t) => ({
     phoneIdx: uniqueIndex("users_phone_idx").on(t.phone),
@@ -88,61 +82,73 @@ export const users = pgTable(
 
 // ───────────────────────── Barbeiros ─────────────────────────
 
-export const barbers = pgTable("barbers", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  slug: text("slug").notNull().unique(),
-  shortName: text("short_name").notNull(),
-  title: text("title").notNull(),
-  rating: integer("rating").notNull().default(50), // 50 = 5.0
-  commissionPct: integer("commission_pct").notNull().default(40),
-  // Meta de comissão do mês, mostrada na barra do painel do barbeiro.
-  monthlyGoalCents: integer("monthly_goal_cents").notNull().default(700000),
-  active: boolean("active").notNull().default(true),
-  sortOrder: integer("sort_order").notNull().default(0),
-});
+export const barbers = mysqlTable(
+  "barbers",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    slug: varchar("slug", { length: 80 }).notNull(),
+    shortName: varchar("short_name", { length: 60 }).notNull(),
+    title: varchar("title", { length: 120 }).notNull(),
+    rating: int("rating").notNull().default(50), // 50 = 5.0
+    commissionPct: int("commission_pct").notNull().default(40),
+    // Meta de comissão do mês, mostrada na barra do painel do barbeiro.
+    monthlyGoalCents: int("monthly_goal_cents").notNull().default(700000),
+    active: boolean("active").notNull().default(true),
+    sortOrder: int("sort_order").notNull().default(0),
+  },
+  (t) => ({ slugIdx: uniqueIndex("barbers_slug_idx").on(t.slug) })
+);
 
 // ───────────────────────── Serviços ─────────────────────────
 
-export const services = pgTable("services", {
-  id: serial("id").primaryKey(),
-  slug: text("slug").notNull().unique(),
-  name: text("name").notNull(),
-  description: text("description").notNull().default(""),
-  priceCents: integer("price_cents").notNull(),
-  durationMin: integer("duration_min").notNull(),
-  tag: text("tag"),
-  active: boolean("active").notNull().default(true),
-  sortOrder: integer("sort_order").notNull().default(0),
-});
+export const services = mysqlTable(
+  "services",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    slug: varchar("slug", { length: 80 }).notNull(),
+    name: varchar("name", { length: 120 }).notNull(),
+    description: varchar("description", { length: 255 }).notNull().default(""),
+    priceCents: int("price_cents").notNull(),
+    durationMin: int("duration_min").notNull(),
+    tag: varchar("tag", { length: 40 }),
+    active: boolean("active").notNull().default(true),
+    sortOrder: int("sort_order").notNull().default(0),
+  },
+  (t) => ({ slugIdx: uniqueIndex("services_slug_idx").on(t.slug) })
+);
 
 // ───────────────────────── Planos ─────────────────────────
 
-export const plans = pgTable("plans", {
-  id: serial("id").primaryKey(),
-  slug: text("slug").notNull().unique(),
-  name: text("name").notNull(),
-  kicker: text("kicker").notNull().default(""),
-  tagline: text("tagline").notNull().default(""),
-  priceCents: integer("price_cents").notNull(),
-  annualPriceCents: integer("annual_price_cents").notNull(),
-  features: jsonb("features").$type<string[]>().notNull().default([]),
-  highlight: boolean("highlight").notNull().default(false),
-  badge: text("badge"),
-  active: boolean("active").notNull().default(true),
-  sortOrder: integer("sort_order").notNull().default(0),
-});
+export const plans = mysqlTable(
+  "plans",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    slug: varchar("slug", { length: 80 }).notNull(),
+    name: varchar("name", { length: 120 }).notNull(),
+    kicker: varchar("kicker", { length: 60 }).notNull().default(""),
+    tagline: varchar("tagline", { length: 160 }).notNull().default(""),
+    priceCents: int("price_cents").notNull(),
+    annualPriceCents: int("annual_price_cents").notNull(),
+    features: jsonCol<string[]>("features").notNull(),
+    highlight: boolean("highlight").notNull().default(false),
+    badge: varchar("badge", { length: 40 }),
+    active: boolean("active").notNull().default(true),
+    sortOrder: int("sort_order").notNull().default(0),
+  },
+  (t) => ({ slugIdx: uniqueIndex("plans_slug_idx").on(t.slug) })
+);
 
 // Quais serviços cada plano cobre (o assinante agenda sem pagar).
-export const planServices = pgTable(
+export const planServices = mysqlTable(
   "plan_services",
   {
-    planId: integer("plan_id")
+    planId: int("plan_id")
       .notNull()
       .references(() => plans.id, { onDelete: "cascade" }),
-    serviceId: integer("service_id")
+    serviceId: int("service_id")
       .notNull()
       .references(() => services.id, { onDelete: "cascade" }),
   },
@@ -151,70 +157,64 @@ export const planServices = pgTable(
 
 // ───────────────────────── Assinaturas ─────────────────────────
 
-export const subscriptions = pgTable(
+export const subscriptions = mysqlTable(
   "subscriptions",
   {
-    id: serial("id").primaryKey(),
-    userId: integer("user_id")
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    planId: integer("plan_id")
+    planId: int("plan_id")
       .notNull()
       .references(() => plans.id),
-    status: subStatusEnum("status").notNull().default("ATIVA"),
-    cycle: subCycleEnum("cycle").notNull().default("MENSAL"),
-    startedAt: timestamp("started_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    renewsAt: timestamp("renews_at", { withTimezone: true }).notNull(),
-    canceledAt: timestamp("canceled_at", { withTimezone: true }),
+    status: mysqlEnum("status", SUB_STATUSES).notNull().default("ATIVA"),
+    cycle: mysqlEnum("cycle", SUB_CYCLES).notNull().default("MENSAL"),
+    startedAt: tsNow("started_at"),
+    renewsAt: ts("renews_at").notNull(),
+    canceledAt: ts("canceled_at"),
   },
   (t) => ({ userIdx: index("subscriptions_user_idx").on(t.userId) })
 );
 
 // ───────────────────────── Agendamentos ─────────────────────────
 
-export const appointments = pgTable(
+export const appointments = mysqlTable(
   "appointments",
   {
-    id: serial("id").primaryKey(),
-    code: text("code").notNull().unique(), // código curto p/ o cliente
+    id: int("id").autoincrement().primaryKey(),
+    code: varchar("code", { length: 8 }).notNull(), // código curto p/ o cliente
     // Cliente pode não ter conta (agendamento avulso "sem cadastro").
-    clientUserId: integer("client_user_id").references(() => users.id, {
+    clientUserId: int("client_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
-    clientName: text("client_name").notNull(),
-    clientPhone: text("client_phone").notNull(),
-    barberId: integer("barber_id")
+    clientName: varchar("client_name", { length: 120 }).notNull(),
+    clientPhone: varchar("client_phone", { length: 20 }).notNull(),
+    barberId: int("barber_id")
       .notNull()
       .references(() => barbers.id),
-    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
-    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
-    durationMin: integer("duration_min").notNull(),
-    totalCents: integer("total_cents").notNull().default(0),
-    status: apptStatusEnum("status").notNull().default("CONFIRMADO"),
-    kind: apptKindEnum("kind").notNull().default("AVULSO"),
-    subscriptionId: integer("subscription_id").references(
-      () => subscriptions.id,
-      { onDelete: "set null" }
-    ),
+    startsAt: ts("starts_at").notNull(),
+    endsAt: ts("ends_at").notNull(),
+    durationMin: int("duration_min").notNull(),
+    totalCents: int("total_cents").notNull().default(0),
+    status: mysqlEnum("status", APPT_STATUSES).notNull().default("CONFIRMADO"),
+    kind: mysqlEnum("kind", APPT_KINDS).notNull().default("AVULSO"),
+    subscriptionId: int("subscription_id").references(() => subscriptions.id, {
+      onDelete: "set null",
+    }),
     notes: text("notes"),
     // Token do QR que o cliente apresenta para o barbeiro validar a chegada.
-    checkinToken: text("checkin_token"),
-    checkedInAt: timestamp("checked_in_at", { withTimezone: true }),
+    checkinToken: varchar("checkin_token", { length: 40 }),
+    checkedInAt: ts("checked_in_at"),
     // Percentual do barbeiro congelado no momento do atendimento.
-    barberPctSnapshot: integer("barber_pct_snapshot"),
-    startedAt: timestamp("started_at", { withTimezone: true }),
-    finishedAt: timestamp("finished_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    barberPctSnapshot: int("barber_pct_snapshot"),
+    startedAt: ts("started_at"),
+    finishedAt: ts("finished_at"),
+    createdAt: tsNow("created_at"),
   },
   (t) => ({
-    barberStartIdx: index("appointments_barber_start_idx").on(
-      t.barberId,
-      t.startsAt
-    ),
+    codeIdx: uniqueIndex("appointments_code_unique").on(t.code),
+    tokenIdx: uniqueIndex("appointments_checkin_token_idx").on(t.checkinToken),
+    barberStartIdx: index("appointments_barber_start_idx").on(t.barberId, t.startsAt),
     clientIdx: index("appointments_client_idx").on(t.clientUserId),
     phoneIdx: index("appointments_phone_idx").on(t.clientPhone),
   })
@@ -222,94 +222,51 @@ export const appointments = pgTable(
 
 // Snapshot dos serviços no momento do agendamento — preço não muda
 // retroativamente se o admin reajustar a tabela depois.
-export const appointmentServices = pgTable("appointment_services", {
-  id: serial("id").primaryKey(),
-  appointmentId: integer("appointment_id")
+export const appointmentServices = mysqlTable("appointment_services", {
+  id: int("id").autoincrement().primaryKey(),
+  appointmentId: int("appointment_id")
     .notNull()
     .references(() => appointments.id, { onDelete: "cascade" }),
-  serviceId: integer("service_id").references(() => services.id, {
+  serviceId: int("service_id").references(() => services.id, {
     onDelete: "set null",
   }),
-  name: text("name").notNull(),
-  priceCents: integer("price_cents").notNull(),
-  durationMin: integer("duration_min").notNull(),
+  name: varchar("name", { length: 120 }).notNull(),
+  priceCents: int("price_cents").notNull(),
+  durationMin: int("duration_min").notNull(),
 });
 
 // ───────────────────────── Bloqueios de agenda ─────────────────────────
 
 // barberId nulo = bloqueio da barbearia inteira (feriado, folga coletiva).
-export const scheduleBlocks = pgTable(
+export const scheduleBlocks = mysqlTable(
   "schedule_blocks",
   {
-    id: serial("id").primaryKey(),
-    barberId: integer("barber_id").references(() => barbers.id, {
+    id: int("id").autoincrement().primaryKey(),
+    barberId: int("barber_id").references(() => barbers.id, {
       onDelete: "cascade",
     }),
-    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
-    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
-    reason: text("reason"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    startsAt: ts("starts_at").notNull(),
+    endsAt: ts("ends_at").notNull(),
+    reason: varchar("reason", { length: 160 }),
+    createdAt: tsNow("created_at"),
   },
   (t) => ({ rangeIdx: index("schedule_blocks_range_idx").on(t.startsAt) })
 );
-
-// ───────────────────────── Trava de reserva ─────────────────────────
-
-// Uma linha por (barbeiro, dia). A transação de agendamento faz
-// SELECT ... FOR UPDATE nela antes de conferir o horário, serializando
-// as reservas daquele barbeiro naquele dia. No Postgres é reforço da
-// constraint de exclusão; em MySQL/TiDB é a própria garantia.
-export const bookingLocks = pgTable(
-  "booking_locks",
-  {
-    barberId: integer("barber_id")
-      .notNull()
-      .references(() => barbers.id, { onDelete: "cascade" }),
-    dateKey: text("date_key").notNull(), // YYYY-MM-DD na loja
-  },
-  (t) => ({ pk: primaryKey({ columns: [t.barberId, t.dateKey] }) })
-);
-
-// ───────────────────────── Configurações ─────────────────────────
-
-// Linha única (id = 1) com as regras da operação.
-export const settings = pgTable("settings", {
-  id: integer("id").primaryKey().default(1),
-  acceptingBookings: boolean("accepting_bookings").notNull().default(true),
-  minAdvanceHours: integer("min_advance_hours").notNull().default(2),
-  slotMinutes: integer("slot_minutes").notNull().default(30),
-  openMinute: integer("open_minute").notNull().default(9 * 60), // 09:00
-  closeMinute: integer("close_minute").notNull().default(20 * 60), // 20:00
-  closedWeekdays: jsonb("closed_weekdays").$type<number[]>().notNull().default([0, 1]),
-  maxAdvanceDays: integer("max_advance_days").notNull().default(60),
-  // Divisão padrão: metade do barbeiro, metade da barbearia.
-  defaultBarberPct: integer("default_barber_pct").notNull().default(50),
-  // Base de comissão no atendimento de assinante: o preço de tabela do
-  // serviço entregue ("PRECO_TABELA") ou o rateio da mensalidade ("RATEIO").
-  subscriptionCommissionBase: text("subscription_commission_base")
-    .notNull()
-    .default("PRECO_TABELA"),
-  // Nome/telefone que assinam as mensagens enviadas ao cliente.
-  shopName: text("shop_name").notNull().default("Bryan Wesley Barbearia"),
-  shopPhone: text("shop_phone").notNull().default(""),
-});
 
 // ───────────────────────── Jornada por barbeiro ─────────────────────────
 
 // Cada barbeiro pode ter a própria agenda semanal. Sem linhas aqui,
 // vale o horário geral da loja em `settings`.
-export const barberHours = pgTable(
+export const barberHours = mysqlTable(
   "barber_hours",
   {
-    id: serial("id").primaryKey(),
-    barberId: integer("barber_id")
+    id: int("id").autoincrement().primaryKey(),
+    barberId: int("barber_id")
       .notNull()
       .references(() => barbers.id, { onDelete: "cascade" }),
-    weekday: integer("weekday").notNull(), // 0 = domingo
-    openMinute: integer("open_minute").notNull(),
-    closeMinute: integer("close_minute").notNull(),
+    weekday: int("weekday").notNull(), // 0 = domingo
+    openMinute: int("open_minute").notNull(),
+    closeMinute: int("close_minute").notNull(),
   },
   (t) => ({
     barberWeekdayIdx: uniqueIndex("barber_hours_barber_weekday_idx").on(
@@ -323,37 +280,35 @@ export const barberHours = pgTable(
 
 // Faixas de comissão: quando o barbeiro passa de `minRevenueCents` no mês,
 // o percentual dele sobe. barberId nulo = regra vale para todos.
-export const commissionTiers = pgTable("commission_tiers", {
-  id: serial("id").primaryKey(),
-  barberId: integer("barber_id").references(() => barbers.id, {
+export const commissionTiers = mysqlTable("commission_tiers", {
+  id: int("id").autoincrement().primaryKey(),
+  barberId: int("barber_id").references(() => barbers.id, {
     onDelete: "cascade",
   }),
-  minRevenueCents: integer("min_revenue_cents").notNull().default(0),
-  barberPct: integer("barber_pct").notNull(),
-  label: text("label"),
+  minRevenueCents: int("min_revenue_cents").notNull().default(0),
+  barberPct: int("barber_pct").notNull(),
+  label: varchar("label", { length: 60 }),
 });
 
 // Razão de comissão por atendimento. Como o cliente pode passar por
 // barbeiros diferentes, a divisão é gravada atendimento a atendimento.
-export const appointmentCommissions = pgTable(
+export const appointmentCommissions = mysqlTable(
   "appointment_commissions",
   {
-    id: serial("id").primaryKey(),
-    appointmentId: integer("appointment_id")
+    id: int("id").autoincrement().primaryKey(),
+    appointmentId: int("appointment_id")
       .notNull()
       .references(() => appointments.id, { onDelete: "cascade" }),
-    barberId: integer("barber_id")
+    barberId: int("barber_id")
       .notNull()
       .references(() => barbers.id, { onDelete: "cascade" }),
     // Base de cálculo: valor do avulso ou o rateio da assinatura.
-    baseCents: integer("base_cents").notNull(),
-    barberPct: integer("barber_pct").notNull(),
-    barberCents: integer("barber_cents").notNull(),
-    shopCents: integer("shop_cents").notNull(),
+    baseCents: int("base_cents").notNull(),
+    barberPct: int("barber_pct").notNull(),
+    barberCents: int("barber_cents").notNull(),
+    shopCents: int("shop_cents").notNull(),
     fromSubscription: boolean("from_subscription").notNull().default(false),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    createdAt: tsNow("created_at"),
   },
   (t) => ({
     apptIdx: uniqueIndex("appointment_commissions_appt_idx").on(t.appointmentId),
@@ -365,28 +320,26 @@ export const appointmentCommissions = pgTable(
 
 // O assinante reserva o mesmo dia/hora toda semana ou todo mês.
 // Ter o fixo não impede agendar horários avulsos além dele.
-export const recurringSlots = pgTable(
+export const recurringSlots = mysqlTable(
   "recurring_slots",
   {
-    id: serial("id").primaryKey(),
-    userId: integer("user_id")
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    barberId: integer("barber_id")
+    barberId: int("barber_id")
       .notNull()
       .references(() => barbers.id, { onDelete: "cascade" }),
     // "SEMANAL" usa weekday; "MENSAL" usa dayOfMonth.
-    frequency: text("frequency").notNull().default("SEMANAL"),
-    weekday: integer("weekday"),
-    dayOfMonth: integer("day_of_month"),
-    minutesOfDay: integer("minutes_of_day").notNull(),
-    serviceIds: jsonb("service_ids").$type<number[]>().notNull().default([]),
+    frequency: varchar("frequency", { length: 10 }).notNull().default("SEMANAL"),
+    weekday: int("weekday"),
+    dayOfMonth: int("day_of_month"),
+    minutesOfDay: int("minutes_of_day").notNull(),
+    serviceIds: jsonCol<number[]>("service_ids").notNull(),
     active: boolean("active").notNull().default(true),
-    startsOn: text("starts_on").notNull(), // YYYY-MM-DD
-    endsOn: text("ends_on"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    startsOn: varchar("starts_on", { length: 10 }).notNull(), // YYYY-MM-DD
+    endsOn: varchar("ends_on", { length: 10 }),
+    createdAt: tsNow("created_at"),
   },
   (t) => ({ userIdx: index("recurring_slots_user_idx").on(t.userId) })
 );
@@ -394,39 +347,73 @@ export const recurringSlots = pgTable(
 // ───────────────────────── Notificações ─────────────────────────
 
 // Caixa de saída: a aplicação só enfileira; quem entrega é o worker.
-// Assim trocar de provedor (WhatsApp, SMS) não mexe nas regras de negócio.
-export const notifications = pgTable(
+export const notifications = mysqlTable(
   "notifications",
   {
-    id: serial("id").primaryKey(),
-    userId: integer("user_id").references(() => users.id, {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id").references(() => users.id, { onDelete: "cascade" }),
+    appointmentId: int("appointment_id").references(() => appointments.id, {
       onDelete: "cascade",
     }),
-    appointmentId: integer("appointment_id").references(() => appointments.id, {
-      onDelete: "cascade",
-    }),
-    phone: text("phone").notNull(),
-    kind: notifKindEnum("kind").notNull(),
-    channel: notifChannelEnum("channel").notNull().default("WHATSAPP"),
+    phone: varchar("phone", { length: 20 }).notNull(),
+    kind: mysqlEnum("kind", NOTIF_KINDS).notNull(),
+    channel: mysqlEnum("channel", NOTIF_CHANNELS).notNull().default("WHATSAPP"),
     body: text("body").notNull(),
-    status: notifStatusEnum("status").notNull().default("PENDENTE"),
-    scheduledFor: timestamp("scheduled_for", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    sentAt: timestamp("sent_at", { withTimezone: true }),
-    attempts: integer("attempts").notNull().default(0),
-    error: text("error"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    status: mysqlEnum("status", NOTIF_STATUSES).notNull().default("PENDENTE"),
+    scheduledFor: tsNow("scheduled_for"),
+    sentAt: ts("sent_at"),
+    attempts: int("attempts").notNull().default(0),
+    error: varchar("error", { length: 500 }),
+    createdAt: tsNow("created_at"),
   },
   (t) => ({
-    pendingIdx: index("notifications_pending_idx").on(
-      t.status,
-      t.scheduledFor
-    ),
+    pendingIdx: index("notifications_pending_idx").on(t.status, t.scheduledFor),
   })
 );
+
+// ───────────────────────── Trava de reserva ─────────────────────────
+
+// Uma linha por (barbeiro, dia). A transação de agendamento faz
+// SELECT ... FOR UPDATE nela antes de conferir o horário, serializando
+// as reservas daquele barbeiro naquele dia. Em MySQL/TiDB é a garantia
+// contra reserva dupla.
+export const bookingLocks = mysqlTable(
+  "booking_locks",
+  {
+    barberId: int("barber_id")
+      .notNull()
+      .references(() => barbers.id, { onDelete: "cascade" }),
+    dateKey: varchar("date_key", { length: 10 }).notNull(), // YYYY-MM-DD na loja
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.barberId, t.dateKey] }) })
+);
+
+// ───────────────────────── Configurações ─────────────────────────
+
+// Linha única (id = 1) com as regras da operação. A aplicação sempre lê
+// e grava o id 1 — sem CHECK, que o TiDB não garante em todas as versões.
+export const settings = mysqlTable("settings", {
+  id: int("id").primaryKey().default(1),
+  acceptingBookings: boolean("accepting_bookings").notNull().default(true),
+  minAdvanceHours: int("min_advance_hours").notNull().default(2),
+  slotMinutes: int("slot_minutes").notNull().default(30),
+  openMinute: int("open_minute").notNull().default(9 * 60), // 09:00
+  closeMinute: int("close_minute").notNull().default(20 * 60), // 20:00
+  closedWeekdays: jsonCol<number[]>("closed_weekdays").notNull(),
+  maxAdvanceDays: int("max_advance_days").notNull().default(60),
+  // Divisão padrão: metade do barbeiro, metade da barbearia.
+  defaultBarberPct: int("default_barber_pct").notNull().default(50),
+  // Base de comissão no atendimento de assinante: preço de tabela do
+  // serviço entregue ("PRECO_TABELA") ou rateio da mensalidade ("RATEIO").
+  subscriptionCommissionBase: varchar("subscription_commission_base", { length: 20 })
+    .notNull()
+    .default("PRECO_TABELA"),
+  // Nome/telefone que assinam as mensagens enviadas ao cliente.
+  shopName: varchar("shop_name", { length: 120 })
+    .notNull()
+    .default("Bryan Wesley Barbearia"),
+  shopPhone: varchar("shop_phone", { length: 20 }).notNull().default(""),
+});
 
 // ───────────────────────── Relações ─────────────────────────
 
@@ -459,20 +446,17 @@ export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
   plan: one(plans, { fields: [subscriptions.planId], references: [plans.id] }),
 }));
 
-export const appointmentsRelations = relations(
-  appointments,
-  ({ one, many }) => ({
-    barber: one(barbers, {
-      fields: [appointments.barberId],
-      references: [barbers.id],
-    }),
-    client: one(users, {
-      fields: [appointments.clientUserId],
-      references: [users.id],
-    }),
-    items: many(appointmentServices),
-  })
-);
+export const appointmentsRelations = relations(appointments, ({ one, many }) => ({
+  barber: one(barbers, {
+    fields: [appointments.barberId],
+    references: [barbers.id],
+  }),
+  client: one(users, {
+    fields: [appointments.clientUserId],
+    references: [users.id],
+  }),
+  items: many(appointmentServices),
+}));
 
 export const appointmentServicesRelations = relations(
   appointmentServices,

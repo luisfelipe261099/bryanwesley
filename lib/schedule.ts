@@ -3,7 +3,7 @@
 // Toda a disponibilidade sai do banco — jornada da loja, agendamentos
 // já gravados, bloqueios do admin e antecedência mínima.
 // ───────────────────────────────────────────────────────────
-import { and, eq, gte, lt, lte, ne, or, isNull, inArray, asc } from "drizzle-orm";
+import { and, eq, gte, lt, inArray, asc, sql as rawSql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointments,
@@ -12,6 +12,7 @@ import {
   scheduleBlocks,
   services as servicesTable,
   settings as settingsTable,
+  users,
   type Settings,
 } from "@/db/schema";
 import {
@@ -38,23 +39,23 @@ export async function getSettings(): Promise<Settings> {
     where: eq(settingsTable.id, 1),
   });
   if (row) return row;
-  const [created] = await db
+  // Primeira leitura de um banco vazio: cria a linha única com os padrões.
+  await db
     .insert(settingsTable)
-    .values({ id: 1 })
-    .onConflictDoNothing()
-    .returning();
-  return (
-    created ??
-    (await db.query.settings.findFirst({ where: eq(settingsTable.id, 1) }))!
-  );
+    .values({ id: 1, closedWeekdays: [0, 1] })
+    .onDuplicateKeyUpdate({ set: { id: rawSql`${settingsTable.id}` } });
+  return (await db.query.settings.findFirst({ where: eq(settingsTable.id, 1) }))!;
 }
 
 export async function getActiveBarbers() {
-  return db.query.barbers.findMany({
-    where: eq(barbers.active, true),
-    with: { user: true },
-    orderBy: [asc(barbers.sortOrder)],
-  });
+  // Join explícito: `with` relacional vira LATERAL, que o TiDB não executa.
+  const rows = await db
+    .select({ barber: barbers, user: users })
+    .from(barbers)
+    .innerJoin(users, eq(users.id, barbers.userId))
+    .where(eq(barbers.active, true))
+    .orderBy(asc(barbers.sortOrder));
+  return rows.map((r) => ({ ...r.barber, user: r.user }));
 }
 
 export async function getActiveServices() {

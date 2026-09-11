@@ -27,9 +27,8 @@ import { randomBytes } from "node:crypto";
 import { shopTimeToUtc, parseDateKey } from "./time";
 import { normalizePhone } from "./phone";
 
-/** Postgres: violação de constraint de exclusão / de unicidade. */
-const EXCLUSION_VIOLATION = "23P01";
-const UNIQUE_VIOLATION = "23505";
+/** MySQL: chave duplicada (unicidade). */
+const DUP_ENTRY = "ER_DUP_ENTRY";
 
 export class BookingError extends Error {
   constructor(message: string) {
@@ -151,11 +150,11 @@ export async function createBooking(input: CreateBookingInput) {
     if (existing) {
       clientUserId = existing.id;
     } else {
-      const [created] = await db
+      const [{ id }] = await db
         .insert(users)
         .values({ name: input.clientName.trim(), phone, role: "CLIENT" })
-        .returning();
-      clientUserId = created.id;
+        .$returningId();
+      clientUserId = id;
     }
   }
 
@@ -169,10 +168,11 @@ export async function createBooking(input: CreateBookingInput) {
     const appt = await db.transaction(async (tx) => {
       // Trava por (barbeiro, dia): serializa as reservas concorrentes.
       // Funciona igual em Postgres e MySQL/TiDB.
+      // INSERT ... ON DUPLICATE KEY UPDATE sem efeito = "cria se não existir".
       await tx
         .insert(bookingLocks)
         .values({ barberId, dateKey: input.dateKey })
-        .onConflictDoNothing();
+        .onDuplicateKeyUpdate({ set: { dateKey: rawSql`${bookingLocks.dateKey}` } });
       await tx.execute(
         rawSql`SELECT 1 FROM booking_locks WHERE barber_id = ${barberId} AND date_key = ${input.dateKey} FOR UPDATE`
       );
@@ -198,7 +198,7 @@ export async function createBooking(input: CreateBookingInput) {
         );
       }
 
-      const [created] = await tx
+      const [{ id: createdId }] = await tx
         .insert(appointments)
         .values({
           code: generateCode(),
@@ -217,11 +217,11 @@ export async function createBooking(input: CreateBookingInput) {
           barberPctSnapshot: barberPct,
           notes: input.notes?.trim() || null,
         })
-        .returning();
+        .$returningId();
 
       await tx.insert(appointmentServices).values(
         chosen.map((s) => ({
-          appointmentId: created.id,
+          appointmentId: createdId,
           serviceId: s.id,
           name: s.name,
           priceCents: coveredIds.has(s.id) ? 0 : s.priceCents,
@@ -229,6 +229,10 @@ export async function createBooking(input: CreateBookingInput) {
         }))
       );
 
+      const created = await tx.query.appointments.findFirst({
+        where: eq(appointments.id, createdId),
+      });
+      if (!created) throw new Error("Agendamento gravado mas não relido.");
       return created;
     });
 
@@ -245,14 +249,8 @@ export async function createBooking(input: CreateBookingInput) {
     return appt;
   } catch (err) {
     const code = (err as { code?: string })?.code;
-    const constraint = (err as { constraint_name?: string })?.constraint_name;
-    if (code === EXCLUSION_VIOLATION) {
-      // Duas pessoas clicaram no mesmo horário ao mesmo tempo.
-      throw new BookingError(
-        "Esse horário acabou de ser reservado por outra pessoa. Escolha outro."
-      );
-    }
-    if (code === UNIQUE_VIOLATION && constraint === "appointments_code_unique") {
+    const message = (err as { message?: string })?.message ?? "";
+    if (code === DUP_ENTRY && message.includes("appointments_code_unique")) {
       continue; // colisão do código curto: tenta de novo
     }
     throw err;
@@ -293,11 +291,10 @@ export async function transitionAppointment(
   if (next === "EM_ANDAMENTO") patch.startedAt = new Date();
   if (next === "CONCLUIDO") patch.finishedAt = new Date();
 
-  const [updated] = await db
-    .update(appointments)
-    .set(patch)
-    .where(eq(appointments.id, id))
-    .returning();
+  await db.update(appointments).set(patch).where(eq(appointments.id, id));
+  const updated = (await db.query.appointments.findFirst({
+    where: eq(appointments.id, id),
+  }))!;
 
   // Efeitos colaterais do novo estado.
   if (next === "CONCLUIDO") {
