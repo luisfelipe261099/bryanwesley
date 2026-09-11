@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Loader2, Plus, Save, Target, UserPlus, X } from "lucide-react";
 import {
   Card,
+  notify,
   Feedback,
   SelectInput,
   TextInput,
@@ -87,11 +88,7 @@ function BarberCard({ barber }: { barber: BarberRow }) {
         monthlyGoalCents: Math.round(Number(goal.replace(/\./g, "").replace(",", ".")) * 100) || 0,
         active: form.active,
       });
-      setMsg(
-        res.ok
-          ? { ok: true, text: res.message ?? "Salvo." }
-          : { ok: false, text: res.error }
-      );
+      setMsg(notify(res, "Salvo."));
     });
   }
 
@@ -197,11 +194,7 @@ function BarberHours({
         openMinute: clear ? null : toMin(open),
         closeMinute: clear ? null : toMin(close),
       });
-      setMsg(
-        res.ok
-          ? { ok: true, text: res.message ?? "Salvo." }
-          : { ok: false, text: res.error }
-      );
+      setMsg(notify(res, "Salvo."));
     });
   }
 
@@ -274,11 +267,7 @@ function NewBarber() {
     setMsg(null);
     start(async () => {
       const res = await createBarber(f);
-      setMsg(
-        res.ok
-          ? { ok: true, text: res.message ?? "Cadastrado." }
-          : { ok: false, text: res.error }
-      );
+      setMsg(notify(res, "Cadastrado."));
       if (res.ok) {
         setF({ ...f, name: "", shortName: "", phone: "", email: "", password: "" });
         setOpen(false);
@@ -300,7 +289,7 @@ function NewBarber() {
   }
 
   return (
-    <Card title="Novo barbeiro" icon={UserPlus}>
+    <Card title="Novo barbeiro" icon={<UserPlus className="h-5 w-5" />}>
       <div className="grid gap-4 sm:grid-cols-2">
         <TextInput
           label="Nome completo"
@@ -406,11 +395,7 @@ function Tiers({
         barberPct: f.pct,
         label: f.label,
       });
-      setMsg(
-        res.ok
-          ? { ok: true, text: res.message ?? "Salvo." }
-          : { ok: false, text: res.error }
-      );
+      setMsg(notify(res, "Salvo."));
       if (res.ok) setF({ ...f, meta: "", label: "" });
     });
   }
@@ -419,7 +404,7 @@ function Tiers({
     <Card
       title="Faixas de meta"
       desc="Quando o barbeiro passa do valor gerado no mês, o percentual dele sobe. Sem faixa, vale a comissão base."
-      icon={Target}
+      icon={<Target className="h-5 w-5" />}
     >
       <div className="grid gap-4 sm:grid-cols-4">
         <SelectInput

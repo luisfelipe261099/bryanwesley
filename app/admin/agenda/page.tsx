@@ -4,7 +4,7 @@ import { scheduleBlocks } from "@/db/schema";
 import { getSettings } from "@/lib/schedule";
 import { listTeam } from "@/lib/queries";
 import { shopToday, labelFullDate, formatShopTime, utcToShopParts } from "@/lib/time";
-import { AgendaSettings, BlocksManager } from "./AgendaSettings";
+import { AgendaSettings, BlocksManager, ShopInfo } from "./AgendaSettings";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +22,16 @@ export default async function AdminAgenda() {
 
   return (
     <div className="space-y-5">
+      <ShopInfo
+        settings={{
+          shopName: settings.shopName,
+          shopUnit: settings.shopUnit,
+          shopPhone: settings.shopPhone,
+          shopAddress: settings.shopAddress,
+          shopInstagram: settings.shopInstagram,
+          shopHoursLabel: settings.shopHoursLabel,
+        }}
+      />
       <AgendaSettings settings={settings} />
       <BlocksManager
         today={shopToday()}

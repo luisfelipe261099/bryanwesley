@@ -2,7 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, CalendarCog, Users, Tags, UserRound } from "lucide-react";
+import {
+  BarChart3,
+  CalendarCog,
+  Users,
+  Tags,
+  UserRound,
+  MessageCircle,
+  FileBarChart,
+} from "lucide-react";
 
 const links = [
   { href: "/admin", label: "Visão geral", icon: BarChart3 },
@@ -10,6 +18,8 @@ const links = [
   { href: "/admin/equipe", label: "Equipe", icon: UserRound },
   { href: "/admin/catalogo", label: "Catálogo", icon: Tags },
   { href: "/admin/clientes", label: "Clientes", icon: Users },
+  { href: "/admin/relatorios", label: "Relatórios", icon: FileBarChart },
+  { href: "/admin/notificacoes", label: "Mensagens", icon: MessageCircle },
 ];
 
 export function AdminNav() {

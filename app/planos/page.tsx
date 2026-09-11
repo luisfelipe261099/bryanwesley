@@ -6,6 +6,8 @@ import { Reveal } from "@/components/Reveal";
 import { PlanCard } from "@/components/PlanCard";
 import { listPlans } from "@/lib/queries";
 import { getSession } from "@/lib/auth";
+import { getSettings } from "@/lib/schedule";
+import { shopFrom } from "@/lib/shop";
 import { PlanosGrid } from "./PlanosGrid";
 
 const comparison = [
@@ -49,12 +51,17 @@ function Cell({ value }: { value: string | boolean }) {
 export const dynamic = "force-dynamic";
 
 export default async function Planos() {
-  const [plans, session] = await Promise.all([listPlans(), getSession()]);
+  const [plans, session, settings] = await Promise.all([
+    listPlans(),
+    getSession(),
+    getSettings(),
+  ]);
+  const info = shopFrom(settings);
 
   return (
     <>
       <Background />
-      <Navbar logged={!!session} />
+      <Navbar logged={!!session} unit={info.unit} />
 
       <main className="mx-auto max-w-7xl px-5 pb-10 pt-28 lg:px-8 lg:pt-36">
         <Reveal>
@@ -63,7 +70,7 @@ export default async function Planos() {
             <h1 className="mt-4 font-display text-4xl text-white sm:text-5xl">
               Clube de Assinatura
               <br />
-              <span className="text-gradient">Bryan Wesley</span>
+              <span className="text-gradient">{info.name}</span>
             </h1>
             <p className="mt-4 text-lg text-steel-300">
               Cortes ilimitados, prioridade de agenda e experiências exclusivas

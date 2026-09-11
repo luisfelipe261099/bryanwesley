@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { AlertCircle, Loader2, Scissors, X } from "lucide-react";
+import { toast } from "@/lib/toast";
 import { cancelMyAppointment, changeMyPassword } from "./actions";
 
 export function CancelButton({ appointmentId }: { appointmentId: number }) {
@@ -13,7 +14,8 @@ export function CancelButton({ appointmentId }: { appointmentId: number }) {
     setError(null);
     start(async () => {
       const res = await cancelMyAppointment(appointmentId);
-      if (!res.ok) setError(res.error);
+      if (res.ok) toast("Horário cancelado.", "ok");
+      else setError(res.error);
       setConfirming(false);
     });
   }
@@ -83,11 +85,8 @@ export function ChangePassword() {
     setMsg(null);
     start(async () => {
       const res = await changeMyPassword({ current, next });
-      setMsg(
-        res.ok
-          ? { ok: true, text: "Senha alterada." }
-          : { ok: false, text: res.error }
-      );
+      if (res.ok) toast("Senha alterada.", "ok");
+      setMsg(res.ok ? null : { ok: false, text: res.error });
       if (res.ok) {
         setCurrent("");
         setNext("");

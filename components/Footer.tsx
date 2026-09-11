@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { MapPin, Phone, Clock, Instagram } from "lucide-react";
 import { Logo } from "./Logo";
-import { shop } from "@/lib/shop";
+import { shopFrom } from "@/lib/shop";
+import { getSettings } from "@/lib/schedule";
 
-export function Footer() {
+export async function Footer() {
+  const shop = shopFrom(await getSettings().catch(() => undefined));
   return (
     <footer
       id="contato"
@@ -57,9 +59,9 @@ export function Footer() {
             © {new Date().getFullYear()} Bryan Wesley Barbearia. Todos os
             direitos reservados.
           </span>
-          <span className="text-steel-400/70">
-            Protótipo de demonstração · feito com cuidado
-          </span>
+          <Link href="/privacidade" className="text-steel-400/70 hover:text-electric">
+            Política de privacidade
+          </Link>
         </div>
       </div>
     </footer>

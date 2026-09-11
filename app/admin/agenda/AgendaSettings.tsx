@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { CalendarOff, Clock, Loader2, Plus, Power, X } from "lucide-react";
+import { CalendarOff, Clock, Loader2, Plus, Power, Store, X } from "lucide-react";
 import type { Settings } from "@/db/schema";
-import { saveSettings, addBlock, removeBlock } from "../actions";
+import { saveSettings, addBlock, removeBlock, saveShopInfo } from "../actions";
 import {
   Card,
+  notify,
   Feedback,
   SelectInput,
   TextInput,
@@ -44,11 +45,7 @@ export function AgendaSettings({ settings }: { settings: Settings }) {
         maxAdvanceDays: form.maxAdvanceDays,
         defaultBarberPct: form.defaultBarberPct,
       });
-      setMsg(
-        res.ok
-          ? { ok: true, text: res.message ?? "Salvo." }
-          : { ok: false, text: res.error }
-      );
+      setMsg(notify(res, "Salvo."));
     });
   }
 
@@ -56,7 +53,7 @@ export function AgendaSettings({ settings }: { settings: Settings }) {
     <Card
       title="Regras da agenda"
       desc="Vale na hora para todos os clientes."
-      icon={CalendarOff}
+      icon={<CalendarOff className="h-5 w-5" />}
     >
       <div className="space-y-5">
         <Toggle
@@ -213,11 +210,7 @@ export function BlocksManager({
         barberId: barberId ? Number(barberId) : null,
         reason,
       });
-      setMsg(
-        res.ok
-          ? { ok: true, text: res.message ?? "Criado." }
-          : { ok: false, text: res.error }
-      );
+      setMsg(notify(res, "Criado."));
       if (res.ok) setReason("");
     });
   }
@@ -233,7 +226,7 @@ export function BlocksManager({
     <Card
       title="Bloqueios"
       desc="Folga, feriado, almoço ou manutenção. O horário some da agenda do cliente."
-      icon={Power}
+      icon={<Power className="h-5 w-5" />}
     >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <TextInput
@@ -324,6 +317,85 @@ export function BlocksManager({
           </ul>
         )}
       </div>
+    </Card>
+  );
+}
+
+export function ShopInfo({
+  settings,
+}: {
+  settings: {
+    shopName: string;
+    shopUnit: string;
+    shopPhone: string;
+    shopAddress: string;
+    shopInstagram: string;
+    shopHoursLabel: string;
+  };
+}) {
+  const [f, setF] = useState(settings);
+  const [msg, setMsg] = useState<Msg>(null);
+  const [pending, start] = useTransition();
+
+  return (
+    <Card
+      title="Dados da barbearia"
+      desc="Aparecem no site, no rodapé e nas mensagens enviadas ao cliente."
+      icon={<Store className="h-5 w-5" />}
+    >
+      <div className="grid gap-4 sm:grid-cols-2">
+        <TextInput
+          label="Nome"
+          value={f.shopName}
+          onChange={(e) => setF({ ...f, shopName: e.target.value })}
+        />
+        <TextInput
+          label="Unidade"
+          value={f.shopUnit}
+          placeholder="Ex.: Unidade Cajuru"
+          onChange={(e) => setF({ ...f, shopUnit: e.target.value })}
+        />
+        <TextInput
+          label="WhatsApp"
+          value={f.shopPhone}
+          placeholder="(41) 9 0000-0000"
+          onChange={(e) => setF({ ...f, shopPhone: e.target.value })}
+        />
+        <TextInput
+          label="Instagram"
+          value={f.shopInstagram}
+          placeholder="@bryanwesley.barbearia"
+          onChange={(e) => setF({ ...f, shopInstagram: e.target.value })}
+        />
+        <TextInput
+          label="Endereço"
+          value={f.shopAddress}
+          placeholder="Rua, número — bairro, cidade"
+          onChange={(e) => setF({ ...f, shopAddress: e.target.value })}
+        />
+        <TextInput
+          label="Horário exibido"
+          value={f.shopHoursLabel}
+          placeholder="Ter — Sáb · 09h às 20h"
+          onChange={(e) => setF({ ...f, shopHoursLabel: e.target.value })}
+        />
+      </div>
+      <button
+        type="button"
+        onClick={() => {
+          setMsg(null);
+          start(async () => {
+            const r = await saveShopInfo(f);
+            setMsg(notify(r, "Salvo."));
+          });
+        }}
+        disabled={pending}
+        className="btn-royal label mt-4 inline-flex items-center gap-2 rounded-full px-6 py-3.5 text-white disabled:opacity-50"
+      >
+        {pending && <Loader2 className="h-4 w-4 animate-spin" />}
+        Salvar dados
+      </button>
+      <Feedback msg={msg} />
     </Card>
   );
 }

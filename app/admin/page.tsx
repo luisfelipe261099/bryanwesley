@@ -20,9 +20,18 @@ import {
 } from "@/lib/queries";
 import { getSettings } from "@/lib/schedule";
 import { formatBRL, formatCompactBRL, formatDuration } from "@/lib/money";
-import { formatShopTime, shopToday, minutesToHHMM } from "@/lib/time";
-import { shop } from "@/lib/shop";
+import {
+  formatShopTime,
+  shopToday,
+  minutesToHHMM,
+  addDays,
+  labelFullDate,
+  labelWeekday,
+} from "@/lib/time";
+import { shopFrom } from "@/lib/shop";
+import { openPlanRequests } from "@/lib/queries";
 import { ApptControls } from "./AgendaHoje";
+import { PlanRequests } from "./PlanRequests";
 
 export const dynamic = "force-dynamic";
 
@@ -35,16 +44,39 @@ const statusStyles: Record<string, { label: string; cls: string; dot: string }> 
   NO_SHOW: { label: "Faltou", cls: "bg-amber-400/10 text-amber-300", dot: "bg-amber-400" },
 };
 
-export default async function AdminDashboard() {
-  const [kpi, agenda, semana, equipe, settings] = await Promise.all([
+export default async function AdminDashboard({
+  searchParams,
+}: {
+  searchParams: { dia?: string; barbeiro?: string };
+}) {
+  const today = shopToday();
+  const dateKey =
+    searchParams.dia && /^\d{4}-\d{2}-\d{2}$/.test(searchParams.dia)
+      ? searchParams.dia
+      : today;
+  const barberFilter = searchParams.barbeiro ? Number(searchParams.barbeiro) : null;
+
+  const [kpi, agendaDia, semana, equipe, settings, pedidos] = await Promise.all([
     adminOverview(),
-    appointmentsOfDay(shopToday()),
+    appointmentsOfDay(dateKey, barberFilter),
     weeklyRevenue(),
     teamPerformance(),
     getSettings(),
+    openPlanRequests(),
   ]);
+  const agenda = agendaDia;
 
+  const info = shopFrom(settings);
   const totalSemana = semana.reduce((a, d) => a + d.cents, 0);
+  // Faixa de dias em volta do escolhido, para navegar sem sair da tela.
+  const dias = Array.from({ length: 7 }, (_, i) => addDays(today, i - 2));
+  const qs = (o: { dia?: string; barbeiro?: number | null }) => {
+    const p = new URLSearchParams();
+    if (o.dia && o.dia !== today) p.set("dia", o.dia);
+    if (o.barbeiro) p.set("barbeiro", String(o.barbeiro));
+    const q = p.toString();
+    return q ? `/admin?${q}` : "/admin";
+  };
   const maxSemana = Math.max(1, ...semana.map((d) => d.cents));
 
   // Ocupação: minutos vendidos sobre minutos disponíveis hoje.
@@ -72,7 +104,7 @@ export default async function AdminDashboard() {
               Dashboard Geral
             </h1>
             <p className="mt-2 text-sm text-steel-400">
-              {shop.legalName} · {shop.unit} · {kpi.agendamentosHoje}{" "}
+              {info.legalName} · {info.unit} · {kpi.agendamentosHoje}{" "}
               atendimento(s) hoje · loja das{" "}
               {minutesToHHMM(settings.openMinute)} às{" "}
               {minutesToHHMM(settings.closeMinute)}
@@ -128,17 +160,83 @@ export default async function AdminDashboard() {
         {/* Agenda de hoje */}
         <Reveal>
           <div className="glass rounded-3xl p-6">
-            <div className="flex items-center justify-between">
-              <h2 className="font-display text-lg text-white">Agenda de hoje</h2>
-              <span className="label text-steel-400">
-                {minutesToHHMM(settings.openMinute)} —{" "}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-display text-lg text-white">
+                {dateKey === today ? "Agenda de hoje" : "Agenda"}
+              </h2>
+              <span className="label capitalize text-steel-400">
+                {labelFullDate(dateKey)} · {minutesToHHMM(settings.openMinute)}—
                 {minutesToHHMM(settings.closeMinute)}
               </span>
             </div>
 
+            {/* Navegar dias sem sair do painel */}
+            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+              {dias.map((d) => {
+                const on = d === dateKey;
+                return (
+                  <Link
+                    key={d}
+                    href={qs({ dia: d, barbeiro: barberFilter })}
+                    scroll={false}
+                    className={`flex min-w-[56px] flex-none flex-col items-center gap-1 rounded-xl border py-2.5 transition-colors ${
+                      on
+                        ? "border-electric/60 bg-electric/[0.08]"
+                        : "border-white/8 bg-white/[0.02] hover:border-white/20"
+                    }`}
+                  >
+                    <span
+                      className={`label capitalize ${
+                        on ? "text-electric" : "text-steel-400"
+                      }`}
+                    >
+                      {labelWeekday(d)}
+                    </span>
+                    <span className="font-display text-base text-white">
+                      {d.slice(-2)}
+                    </span>
+                    <span
+                      className={`h-1 w-1 rounded-full ${
+                        d === today ? "bg-electric" : "bg-transparent"
+                      }`}
+                    />
+                  </Link>
+                );
+              })}
+            </div>
+
+            {/* Filtrar por barbeiro */}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link
+                href={qs({ dia: dateKey, barbeiro: null })}
+                scroll={false}
+                className={`label rounded-full px-3.5 py-2 transition-all ${
+                  !barberFilter
+                    ? "border border-electric/50 bg-electric/10 text-electric"
+                    : "border border-white/10 text-steel-400 hover:text-white"
+                }`}
+              >
+                Todos
+              </Link>
+              {equipe.map((t) => (
+                <Link
+                  key={t.barber.id}
+                  href={qs({ dia: dateKey, barbeiro: t.barber.id })}
+                  scroll={false}
+                  className={`label rounded-full px-3.5 py-2 transition-all ${
+                    barberFilter === t.barber.id
+                      ? "border border-electric/50 bg-electric/10 text-electric"
+                      : "border border-white/10 text-steel-400 hover:text-white"
+                  }`}
+                >
+                  {t.barber.shortName}
+                </Link>
+              ))}
+            </div>
+
             {agenda.length === 0 ? (
               <p className="mt-5 rounded-2xl border border-dashed border-white/10 px-4 py-10 text-center text-sm text-steel-400">
-                Nenhum agendamento para hoje ainda.
+                Nenhum agendamento nesse dia.
               </p>
             ) : (
               <ul className="mt-5 space-y-2">
@@ -261,6 +359,14 @@ export default async function AdminDashboard() {
           </Reveal>
         </div>
       </div>
+
+      {pedidos.length > 0 && (
+        <Reveal>
+          <div className="mt-5">
+            <PlanRequests requests={pedidos} />
+          </div>
+        </Reveal>
+      )}
 
       {/* Equipe */}
       <Reveal>

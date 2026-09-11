@@ -8,6 +8,20 @@
       "when": 1789140966660,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1789151357502,
+      "tag": "0001_lockout",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1789151521135,
+      "tag": "0002_pagamentos_identidade",
+      "breakpoints": true
     }
   ]
 }

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { motion } from "framer-motion";
 import {
   AlertCircle,
   ArrowRight,
@@ -10,7 +10,6 @@ import {
   Clock,
   CalendarDays,
   Sparkles,
-  PartyPopper,
   Crown,
   Loader2,
   Zap,
@@ -59,8 +58,8 @@ export function BookingForm({
   const [closed, setClosed] = useState(false);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ code: string } | null>(null);
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   const chosen = services.filter((s) => selected.includes(s.id));
   const totalCents = chosen.reduce((acc, s) => acc + s.priceCents, 0);
@@ -111,6 +110,7 @@ export function BookingForm({
   function confirm() {
     setError(null);
     startTransition(async () => {
+      try {
       const res = await submitBooking({
         serviceIds: selected,
         dateKey: dateKey!,
@@ -121,7 +121,10 @@ export function BookingForm({
         notes: notes || undefined,
       });
       if (res.ok) {
-        setDone({ code: res.code });
+        // Confirmação é uma página de verdade: sobrevive a recarregar,
+        // dá para salvar e mandar no WhatsApp.
+        router.push(`/agendar/confirmado/${res.token}`);
+        return;
       } else {
         setError(res.error);
         // O horário pode ter sido tomado — recarrega a grade.
@@ -135,25 +138,14 @@ export function BookingForm({
           setTime(null);
         }
       }
+      } catch (e) {
+        // Falha inesperada (rede, servidor): o cliente precisa saber.
+        console.error(e);
+        setError(
+          "Não conseguimos falar com o servidor agora. Confira sua conexão e tente de novo."
+        );
+      }
     });
-  }
-
-  if (done) {
-    return (
-      <Success
-        code={done.code}
-        name={name}
-        dayLabel={
-          selectedDay ? `${selectedDay.weekday}, ${selectedDay.dayLabel}` : "—"
-        }
-        time={time}
-        chosen={chosen}
-        totalCents={totalCents}
-        isSub={isSub}
-        planName={plan?.name}
-        barberName={barber?.name ?? "Primeiro disponível"}
-      />
-    );
   }
 
   return (
@@ -553,112 +545,5 @@ function Field({
         className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3.5 text-white outline-none transition-colors placeholder:text-steel-400/60 focus:border-electric/60 focus:ring-2 focus:ring-electric/20"
       />
     </label>
-  );
-}
-
-function Success({
-  code,
-  name,
-  dayLabel,
-  time,
-  chosen,
-  totalCents,
-  isSub,
-  planName,
-  barberName,
-}: {
-  code: string;
-  name: string;
-  dayLabel: string;
-  time: string | null;
-  chosen: Service[];
-  totalCents: number;
-  isSub: boolean;
-  planName?: string;
-  barberName: string;
-}) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.96 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-      className="mx-auto max-w-lg pt-6 text-center"
-    >
-      <div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-royal-grad shadow-glow">
-        <PartyPopper className="h-10 w-10 text-white" />
-      </div>
-      <h1 className="mt-6 font-display text-3xl text-white sm:text-4xl">
-        Tá marcado, {name.split(" ")[0] || "campeão"}!
-      </h1>
-      <p className="mt-3 text-steel-300">
-        Seu horário foi reservado. Enviamos a confirmação no WhatsApp.
-      </p>
-
-      <div className="glass mt-8 rounded-2xl p-6 text-left">
-        <div className="label flex items-center justify-between text-electric">
-          <span className="flex items-center gap-2">
-            <Sparkles className="h-3.5 w-3.5" />
-            Detalhes
-          </span>
-          <span className="rounded-full bg-electric/10 px-2.5 py-1.5">
-            {code}
-          </span>
-        </div>
-        <div className="mt-4 space-y-2.5 text-sm">
-          <Line label="Quando">
-            <span className="capitalize">{dayLabel}</span> · {time}
-          </Line>
-          <Line label="Barbeiro">{barberName}</Line>
-          {chosen.map((s) => (
-            <Line key={s.id} label="Serviço">
-              {s.name}
-            </Line>
-          ))}
-          <div className="flex items-center justify-between gap-4 border-t border-white/8 pt-3">
-            <span className="text-steel-400">{isSub ? "Cobrança" : "Total"}</span>
-            {isSub && totalCents === 0 ? (
-              <span className="inline-flex items-center gap-1 font-semibold text-electric">
-                <Crown className="h-4 w-4" />
-                Incluso no {planName}
-              </span>
-            ) : (
-              <span className="font-display text-2xl text-white">
-                {formatBRL(totalCents)}
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
-        <Link
-          href="/cliente"
-          className="label inline-flex items-center justify-center gap-2 rounded-full border border-white/12 px-6 py-4 text-steel-200 transition-colors hover:border-electric/45 hover:text-white"
-        >
-          Ver meus horários
-        </Link>
-        <Link
-          href="/"
-          className="btn-royal label inline-flex items-center justify-center gap-2 rounded-full px-6 py-4 text-white"
-        >
-          Voltar ao início
-        </Link>
-      </div>
-    </motion.div>
-  );
-}
-
-function Line({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex justify-between gap-4">
-      <span className="text-steel-400">{label}</span>
-      <span className="text-right font-semibold text-white">{children}</span>
-    </div>
   );
 }

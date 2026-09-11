@@ -1,15 +1,29 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Crown, KeyRound, Loader2, Phone, RefreshCw, Upload, UserCheck, X } from "lucide-react";
+import {
+  CalendarClock,
+  Crown,
+  Download,
+  KeyRound,
+  Link2,
+  Loader2,
+  Phone,
+  RefreshCw,
+  Upload,
+  UserCheck,
+  X,
+} from "lucide-react";
 import {
   Card,
+  notify,
   Feedback,
   SelectInput,
   type Msg,
 } from "@/components/admin/Feedback";
 import { formatPhone } from "@/lib/phone";
 import {
+  createSubscriptionCharge,
   importClients,
   subscribeClient,
   cancelSubscription,
@@ -27,6 +41,7 @@ type ClientRow = {
   visits: number;
   lastVisit: string | null;
   hasAccount: boolean;
+  hasFixedSlot: boolean;
 };
 
 export function ClientesManager({
@@ -93,11 +108,7 @@ function ClientRowItem({
         planId: Number(planId),
         cycle,
       });
-      setMsg(
-        res.ok
-          ? { ok: true, text: res.message ?? "Ativada." }
-          : { ok: false, text: res.error }
-      );
+      setMsg(notify(res, "Ativada."));
       if (res.ok) setOpen(false);
     });
   }
@@ -113,11 +124,7 @@ function ClientRowItem({
     setMsg(null);
     start(async () => {
       const res = await renewSubscription(client.id);
-      setMsg(
-        res.ok
-          ? { ok: true, text: res.message ?? "Renovada." }
-          : { ok: false, text: res.error }
-      );
+      setMsg(notify(res, "Renovada."));
     });
   }
 
@@ -127,11 +134,7 @@ function ClientRowItem({
     setMsg(null);
     start(async () => {
       const res = await resetUserPassword({ userId: client.id, password: pw });
-      setMsg(
-        res.ok
-          ? { ok: true, text: res.message ?? "Senha redefinida." }
-          : { ok: false, text: res.error }
-      );
+      setMsg(notify(res, "Senha redefinida."));
       if (res.ok) {
         setPw("");
         setPwOpen(false);
@@ -148,6 +151,15 @@ function ClientRowItem({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate font-medium text-white">{client.name}</span>
+            {client.hasFixedSlot && (
+              <span
+                className="label inline-flex items-center gap-1 rounded-full bg-electric/10 px-2 py-1 text-electric"
+                title="Tem horário fixo reservado"
+              >
+                <CalendarClock className="h-3 w-3" />
+                Fixo
+              </span>
+            )}
             {client.hasAccount && (
               <span
                 className="label inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-1 text-steel-400"
@@ -213,6 +225,7 @@ function ClientRowItem({
                 )}
                 Renovar
               </button>
+              <Cobrar userId={client.id} />
               {client.plan && (
                 <button
                   type="button"
@@ -298,6 +311,55 @@ function ClientRowItem({
   );
 }
 
+function Cobrar({ userId }: { userId: number }) {
+  const [pending, start] = useTransition();
+  const [url, setUrl] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  if (url) {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className="label inline-flex items-center gap-1.5 rounded-full border border-neon/40 bg-neon/10 px-3 py-2 text-neon"
+      >
+        <Link2 className="h-3 w-3" />
+        Abrir cobrança
+      </a>
+    );
+  }
+
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        disabled={pending}
+        title="Gerar link de pagamento do próximo ciclo"
+        onClick={() => {
+          setErr(null);
+          start(async () => {
+            const r = await createSubscriptionCharge(userId);
+            if (r.ok) setUrl(r.url);
+            else setErr(r.error);
+          });
+        }}
+        className="label inline-flex items-center gap-1.5 rounded-full border border-white/12 px-3 py-2 text-steel-300 hover:border-electric/45 hover:text-white disabled:opacity-50"
+      >
+        {pending ? (
+          <Loader2 className="h-3 w-3 animate-spin" />
+        ) : (
+          <Link2 className="h-3 w-3" />
+        )}
+        Cobrar
+      </button>
+      {err && (
+        <span className="max-w-[220px] text-right text-xs text-amber-200">{err}</span>
+      )}
+    </span>
+  );
+}
+
 function ImportBox() {
   const [csv, setCsv] = useState("");
   const [msg, setMsg] = useState<Msg>(null);
@@ -328,7 +390,7 @@ function ImportBox() {
     <Card
       title="Importar clientes do sistema antigo"
       desc="CSV com as colunas nome, telefone e (opcional) e-mail. Quem já existe é atualizado pelo telefone, sem duplicar."
-      icon={Upload}
+      icon={<Upload className="h-5 w-5" />}
     >
       <input
         type="file"
@@ -357,6 +419,13 @@ function ImportBox() {
         )}
         Importar
       </button>
+      <a
+        href="/api/relatorios/clientes"
+        className="btn-outline label ml-3 inline-flex items-center gap-2 rounded-full px-5 py-3 text-electric"
+      >
+        <Download className="h-4 w-4" />
+        Exportar
+      </a>
       <Feedback msg={msg} />
 
       {skipped.length > 0 && (

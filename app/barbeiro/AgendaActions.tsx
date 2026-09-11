@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { AlertCircle, Check, Loader2, Play, UserX } from "lucide-react";
+import { toast } from "@/lib/toast";
 import {
   startAppointment,
   finishAppointment,
@@ -23,7 +24,8 @@ export function AppointmentActions({
     setError(null);
     start(async () => {
       const res = await fn(id);
-      if (!res.ok) setError(res.error);
+      if (res.ok) toast(res.message ?? "Pronto.", "ok");
+      else setError(res.error);
     });
   }
 

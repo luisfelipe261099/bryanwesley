@@ -3,10 +3,22 @@
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { appointments, recurringSlots, subscriptions, users } from "@/db/schema";
+import {
+  appointments,
+  recurringSlots,
+  subscriptions,
+  users,
+  plans,
+  planRequests,
+} from "@/db/schema";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { requireRole } from "@/lib/auth";
-import { transitionAppointment, BookingError } from "@/lib/appointments";
+import {
+  transitionAppointment,
+  rescheduleBooking,
+  BookingError,
+} from "@/lib/appointments";
+import { chargeSubscription, isInfinitePayConfigured } from "@/lib/payments";
 import { materializeRecurring } from "@/lib/recurring";
 import { shopToday } from "@/lib/time";
 
@@ -160,4 +172,121 @@ export async function changeMyPassword(input: {
     .set({ passwordHash: await hashPassword(input.next.trim()) })
     .where(eq(users.id, session.id));
   return { ok: true };
+}
+
+// ───────────────────────── Remarcar ─────────────────────────
+
+export async function rescheduleMyAppointment(input: {
+  appointmentId: number;
+  dateKey: string;
+  time: string;
+  barberId: number | null;
+}): Promise<ActionResult> {
+  const session = await requireRole(["CLIENT", "ADMIN"]);
+
+  const appt = await db.query.appointments.findFirst({
+    where: eq(appointments.id, input.appointmentId),
+  });
+  if (!appt) return { ok: false, error: "Agendamento não encontrado." };
+  if (session.role !== "ADMIN" && appt.clientUserId !== session.id) {
+    return { ok: false, error: "Esse agendamento não é seu." };
+  }
+  if (
+    session.role !== "ADMIN" &&
+    appt.startsAt.getTime() - Date.now() < 2 * 3600_000
+  ) {
+    return {
+      ok: false,
+      error: "Faltam menos de 2h. Fale com a barbearia pelo WhatsApp.",
+    };
+  }
+
+  try {
+    await rescheduleBooking(input);
+  } catch (e) {
+    if (e instanceof BookingError) return { ok: false, error: e.message };
+    throw e;
+  }
+  revalidatePath("/cliente");
+  revalidatePath("/barbeiro");
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
+// ───────────────────────── Assinar ─────────────────────────
+
+export type SubscribeResult =
+  | { ok: true; mode: "pedido" }
+  | { ok: true; mode: "pagamento"; url: string }
+  | { ok: false; error: string };
+
+/**
+ * O cliente pede o plano pelo site. Com cobrança online configurada,
+ * devolve o link de pagamento; senão registra a solicitação e avisa o
+ * admin, que ativa no painel.
+ */
+export async function requestPlan(input: {
+  planId: number;
+  cycle: "MENSAL" | "ANUAL";
+}): Promise<SubscribeResult> {
+  const session = await requireRole(["CLIENT", "ADMIN"]);
+
+  const plan = await db.query.plans.findFirst({
+    where: and(eq(plans.id, input.planId), eq(plans.active, true)),
+  });
+  if (!plan) return { ok: false, error: "Esse plano não está disponível." };
+
+  const ativa = await db.query.subscriptions.findFirst({
+    where: and(
+      eq(subscriptions.userId, session.id),
+      eq(subscriptions.status, "ATIVA")
+    ),
+  });
+  if (ativa) {
+    return {
+      ok: false,
+      error: "Você já tem um plano ativo. Fale com a barbearia para trocar.",
+    };
+  }
+
+  const aberta = await db.query.planRequests.findFirst({
+    where: and(
+      eq(planRequests.userId, session.id),
+      eq(planRequests.status, "ABERTA")
+    ),
+  });
+  if (!aberta) {
+    await db.insert(planRequests).values({
+      userId: session.id,
+      planId: plan.id,
+      cycle: input.cycle,
+    });
+  }
+
+  if (isInfinitePayConfigured()) {
+    // Cria a assinatura inadimplente e cobra o primeiro ciclo: o webhook
+    // ativa quando o pagamento cair.
+    const existente = await db.query.subscriptions.findFirst({
+      where: eq(subscriptions.userId, session.id),
+      orderBy: (s, { desc }) => [desc(s.startedAt)],
+    });
+    if (!existente) {
+      await db.insert(subscriptions).values({
+        userId: session.id,
+        planId: plan.id,
+        cycle: input.cycle,
+        status: "INADIMPLENTE",
+        renewsAt: new Date(),
+      });
+    }
+    const charge = await chargeSubscription(session.id, input.cycle);
+    if (charge.ok) {
+      revalidatePath("/cliente");
+      return { ok: true, mode: "pagamento", url: charge.url };
+    }
+  }
+
+  revalidatePath("/cliente");
+  revalidatePath("/admin");
+  return { ok: true, mode: "pedido" };
 }

@@ -6,6 +6,7 @@ const GUARDED: { prefix: string; roles: Role[] }[] = [
   { prefix: "/admin", roles: ["ADMIN"] },
   { prefix: "/barbeiro", roles: ["BARBER", "ADMIN"] },
   { prefix: "/cliente", roles: ["CLIENT", "ADMIN"] },
+  { prefix: "/conta", roles: ["ADMIN", "BARBER", "CLIENT"] },
 ];
 
 export async function middleware(req: NextRequest) {
@@ -35,5 +36,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/barbeiro/:path*", "/cliente/:path*"],
+  matcher: ["/admin/:path*", "/barbeiro/:path*", "/cliente/:path*", "/conta/:path*"],
 };

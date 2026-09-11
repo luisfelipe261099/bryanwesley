@@ -1,8 +1,25 @@
 "use client";
 
-import { AlertCircle, CheckCircle2, type LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
+import { AlertCircle, CheckCircle2 } from "lucide-react";
+import { toast } from "@/lib/toast";
 
 export type Msg = { ok: boolean; text: string } | null;
+
+/**
+ * Sucesso vira aviso flutuante (sobrevive à revalidação da rota);
+ * erro fica inline, ao lado do formulário, onde o usuário está olhando.
+ */
+export function notify(
+  res: { ok: boolean; message?: string; error?: string },
+  fallback = "Feito."
+): Msg {
+  if (res.ok) {
+    toast(res.message ?? fallback, "ok");
+    return null;
+  }
+  return { ok: false, text: res.error ?? "Não foi possível concluir." };
+}
 
 export function Feedback({ msg }: { msg: Msg }) {
   if (!msg) return null;
@@ -29,17 +46,22 @@ export function Card({
   title,
   desc,
   children,
-  icon: Icon,
+  icon,
 }: {
   title: string;
   desc?: string;
-  children: React.ReactNode;
-  icon?: LucideIcon;
+  children: ReactNode;
+  /**
+   * Elemento já renderizado (ex.: `<Scissors className="h-5 w-5" />`).
+   * Receber o componente em si quebraria quando o Card fosse usado de
+   * dentro de um Server Component.
+   */
+  icon?: ReactNode;
 }) {
   return (
     <div className="glass rounded-3xl p-6">
-      <div className="flex items-center gap-2">
-        {Icon && <Icon className="h-5 w-5 text-electric" />}
+      <div className="flex items-center gap-2 text-electric">
+        {icon}
         <h2 className="font-display text-lg text-white">{title}</h2>
       </div>
       {desc && <p className="mt-1.5 text-sm text-steel-400">{desc}</p>}

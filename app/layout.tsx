@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Space_Grotesk, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
+import { Toaster } from "@/components/Toaster";
 
 // Headline / Label — Space Grotesk
 const display = Space_Grotesk({
@@ -21,7 +22,7 @@ const sans = Plus_Jakarta_Sans({
 export const metadata: Metadata = {
   title: "Bryan Wesley Barbearia — Agende seu corte",
   description:
-    "Barbearia Bryan Wesley, unidade Jardins. Agendamento online, Clube VIP de assinatura e serviços avulsos. Precisão em cada corte.",
+    "Barbearia Bryan Wesley, unidade Cajuru. Agendamento online, Clube VIP de assinatura e serviços avulsos. Precisão em cada corte.",
 };
 
 export const viewport: Viewport = {
@@ -37,7 +38,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-BR" className={`${display.variable} ${sans.variable}`}>
-      <body className="font-sans antialiased">{children}</body>
+      <body className="font-sans antialiased">
+        {children}
+        <Toaster />
+      </body>
     </html>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Check, Loader2, X, Play } from "lucide-react";
+import { toast } from "@/lib/toast";
 import { adminTransition } from "./actions";
 
 export function ApptControls({ id, status }: { id: number; status: string }) {
@@ -12,7 +13,8 @@ export function ApptControls({ id, status }: { id: number; status: string }) {
     setError(null);
     start(async () => {
       const res = await adminTransition(id, next);
-      if (!res.ok) setError(res.error);
+      if (res.ok) toast(res.message ?? "Atualizado.", "ok");
+      else setError(res.error);
     });
   }
 

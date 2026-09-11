@@ -27,6 +27,7 @@ function itemsFor(role: Role | null): Item[] {
     return [
       { href: "/barbeiro", label: "Agenda", icon: CalendarDays, key: "barbeiro" },
       { href: "/agendar", label: "Encaixe", icon: Scissors, key: "inicio" },
+      { href: "/conta", label: "Conta", icon: UserRound, key: "conta" },
     ];
   }
   if (role === "CLIENT") {
@@ -34,6 +35,7 @@ function itemsFor(role: Role | null): Item[] {
       { href: "/agendar", label: "Agendar", icon: Scissors, key: "inicio" },
       { href: "/cliente", label: "Meus horários", icon: CalendarDays, key: "clube" },
       { href: "/planos", label: "Clube VIP", icon: Gem, key: "planos" },
+      { href: "/conta", label: "Conta", icon: UserRound, key: "conta" },
     ];
   }
   return [

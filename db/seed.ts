@@ -32,9 +32,9 @@ const PLANS = [
 ];
 
 const TEAM = [
-  { slug: "bryan", name: "Bryan Wesley", shortName: "Bryan W.", title: "Master Barber & Founder", phone: "(11) 99999-0001", email: "bryan@bryanwesley.com.br", rating: 50, commissionPct: 45, admin: true },
-  { slug: "lucas", name: "Lucas Silva", shortName: "Lucas S.", title: "Barbeiro Sênior", phone: "(11) 99999-0002", email: "lucas@bryanwesley.com.br", rating: 49, commissionPct: 40, admin: false },
-  { slug: "matheus", name: "Matheus Fontes", shortName: "Matheus F.", title: "Especialista em Barba", phone: "(11) 99999-0003", email: "matheus@bryanwesley.com.br", rating: 48, commissionPct: 40, admin: false },
+  { slug: "bryan", name: "Bryan Wesley", shortName: "Bryan W.", title: "Master Barber & Founder", phone: "(41) 99999-0001", email: "bryan@bryanwesley.com.br", rating: 50, commissionPct: 45, admin: true },
+  { slug: "lucas", name: "Lucas Silva", shortName: "Lucas S.", title: "Barbeiro Sênior", phone: "(41) 99999-0002", email: "lucas@bryanwesley.com.br", rating: 49, commissionPct: 40, admin: false },
+  { slug: "matheus", name: "Matheus Fontes", shortName: "Matheus F.", title: "Especialista em Barba", phone: "(41) 99999-0003", email: "matheus@bryanwesley.com.br", rating: 48, commissionPct: 40, admin: false },
 ];
 
 export async function runSeed() {
@@ -43,7 +43,18 @@ export async function runSeed() {
 
   // ── Configurações (linha única) ──
   const cfg = await db.query.settings.findFirst({ where: eq(settings.id, 1) });
-  if (!cfg) await db.insert(settings).values({ id: 1, closedWeekdays: [0, 1] });
+  if (!cfg) {
+    await db.insert(settings).values({
+      id: 1,
+      closedWeekdays: [0, 1],
+      shopName: "Bryan Wesley Barbearia",
+      shopUnit: "Unidade Cajuru",
+      shopPhone: "(41) 9 9999-0000",
+      shopAddress: "Av. Prefeito Maurício Fruet, 1200 — Cajuru, Curitiba",
+      shopInstagram: "@bryanwesley.barbearia",
+      shopHoursLabel: "Ter — Sáb · 09h às 20h",
+    });
+  }
 
   // ── Serviços ──
   for (const s of SERVICES) {

@@ -14,7 +14,9 @@ import {
   barbers,
   plans,
   planServices,
+  planRequests,
   services,
+  recurringSlots,
   subscriptions,
   users,
   type Appointment,
@@ -285,7 +287,7 @@ export async function listClients(limit = 50) {
   if (rows.length === 0) return [];
   const ids = rows.map((u) => u.id);
 
-  const [subs, appts] = await Promise.all([
+  const [subs, appts, fixos] = await Promise.all([
     db
       .select({ sub: subscriptions, plan: plans })
       .from(subscriptions)
@@ -300,7 +302,17 @@ export async function listClients(limit = 50) {
       })
       .from(appointments)
       .where(inArray(appointments.clientUserId, ids)),
+    db
+      .select({ userId: recurringSlots.userId })
+      .from(recurringSlots)
+      .where(
+        and(
+          inArray(recurringSlots.userId, ids),
+          eq(recurringSlots.active, true)
+        )
+      ),
   ]);
+  const comFixo = new Set(fixos.map((f) => f.userId));
 
   return rows.map((u) => {
     const mine = appts.filter((a) => a.clientUserId === u.id);
@@ -319,6 +331,7 @@ export async function listClients(limit = 50) {
       visits: done.length,
       lastVisit: last?.startsAt ?? null,
       hasAccount: !!u.passwordHash,
+      hasFixedSlot: comFixo.has(u.id),
     };
   });
 }
@@ -405,4 +418,25 @@ export async function teamPerformance() {
   return Promise.all(
     team.map(async (b) => ({ barber: b, ...(await barberMonthSummary(b.id)) }))
   );
+}
+
+/** Pedidos de plano feitos pelo site e ainda não resolvidos. */
+export async function openPlanRequests() {
+  const rows = await db
+    .select({ req: planRequests, user: users, plan: plans })
+    .from(planRequests)
+    .innerJoin(users, eq(users.id, planRequests.userId))
+    .innerJoin(plans, eq(plans.id, planRequests.planId))
+    .where(eq(planRequests.status, "ABERTA"))
+    .orderBy(desc(planRequests.createdAt))
+    .limit(20);
+  return rows.map((r) => ({
+    id: r.req.id,
+    cycle: r.req.cycle,
+    clientName: r.user.name,
+    clientPhone: r.user.phone,
+    planName: r.plan.name,
+    priceCents:
+      r.req.cycle === "ANUAL" ? r.plan.annualPriceCents : r.plan.priceCents,
+  }));
 }

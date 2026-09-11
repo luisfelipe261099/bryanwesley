@@ -20,6 +20,7 @@ import { listServices, listPlans, listTeam } from "@/lib/queries";
 import { formatBRL, formatDuration } from "@/lib/money";
 import { getSettings, listOpenDays, getAvailability } from "@/lib/schedule";
 import { getSession } from "@/lib/auth";
+import { shopFrom } from "@/lib/shop";
 
 const steps = [
   {
@@ -83,12 +84,17 @@ export default async function Home() {
     getSession(),
   ]);
   const combo = services.find((s) => s.slug === "combo") ?? services[0];
+  const settings = await getSettings();
+  const info = shopFrom(settings);
+  const unitLabel = info.unit;
+  // "Unidade Cajuru" → "Cajuru", para o kicker da seção de equipe.
+  const unitShort = info.unit.replace(/^Unidade\s+/i, "");
   const next = combo ? await nextFreeSlot(combo.durationMin) : null;
 
   return (
     <>
       <Background />
-      <Navbar logged={!!session} />
+      <Navbar logged={!!session} unit={info.unit} />
 
       <main className="overflow-x-clip">
         {/* ───────── HERO ───────── */}
@@ -101,7 +107,7 @@ export default async function Home() {
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-neon opacity-75" />
                     <span className="relative inline-flex h-2 w-2 rounded-full bg-neon" />
                   </span>
-                  Agenda aberta · Unidade Jardins
+                  Agenda aberta · {unitLabel}
                 </span>
               </Reveal>
 
@@ -155,7 +161,8 @@ export default async function Home() {
             <Reveal delay={0.15} className="relative">
               <HeroVisual
                 time={next?.time ?? null}
-                dayLabel={next ? `${next.day.weekday}, ${next.day.dayLabel}` : null}
+                weekday={next?.day.weekday ?? null}
+                dayLabel={next?.day.dayLabel ?? null}
                 serviceName={combo?.name ?? "Combo Completo"}
                 duration={combo ? formatDuration(combo.durationMin) : "1h15"}
                 priceCents={combo?.priceCents ?? 15000}
@@ -189,7 +196,7 @@ export default async function Home() {
         <section className="mx-auto max-w-7xl px-5 py-20 lg:px-8">
           <Reveal>
             <SectionHeading
-              kicker="Ateliê Jardins"
+              kicker={`Ateliê ${unitShort}`}
               title="Escolha seu barbeiro"
               subtitle="Cada um com sua especialidade — você decide quem cuida do seu visual."
             />
@@ -390,12 +397,14 @@ function SectionHeading({
 
 function HeroVisual({
   time,
+  weekday,
   dayLabel,
   serviceName,
   duration,
   priceCents,
 }: {
   time: string | null;
+  weekday: string | null;
   dayLabel: string | null;
   serviceName: string;
   duration: string;
@@ -422,8 +431,15 @@ function HeroVisual({
             <div className="font-display text-5xl leading-none text-white">
               {time ?? "—"}
             </div>
-            <div className="mt-2 text-sm capitalize text-steel-300">
-              {dayLabel ?? "Sem vaga nos próximos dias"}
+            <div className="mt-2 text-sm text-steel-300">
+              {weekday && dayLabel ? (
+                <>
+                  {/* Só o dia da semana em maiúscula: "Hoje, 11 de set" */}
+                  <span className="capitalize">{weekday}</span>, {dayLabel}
+                </>
+              ) : (
+                "Sem vaga nos próximos dias"
+              )}
             </div>
           </div>
           <div className="grid h-14 w-14 place-items-center rounded-2xl bg-royal-grad text-white shadow-glow-sm">

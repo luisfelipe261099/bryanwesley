@@ -1,7 +1,7 @@
 # Bryan Wesley Barbearia — Sistema de agendamento
 
 Sistema completo de agendamento, assinaturas e gestão da **Bryan Wesley
-Barbearia** (Unidade Jardins). Não é mais um protótipo: tem banco de dados,
+Barbearia** (Unidade Cajuru). Não é mais um protótipo: tem banco de dados,
 login, agenda real com prevenção de conflito, comissões e notificações.
 
 ## Stack
@@ -29,17 +29,25 @@ Utilitários em [`app/globals.css`](app/globals.css): `.glass`, `.btn-royal`,
 
 | Rota | Quem acessa | O que faz |
 |------|-------------|-----------|
-| `/` | Público | Vitrine: serviços, equipe, Clube VIP |
+| `/` | Público | Vitrine: serviços, equipe, Clube VIP, próximo horário livre real |
 | `/planos` | Público | Planos, ciclo mensal/anual, comparativo, FAQ |
 | `/agendar` | Público | Agenda em 3 passos, com ou sem cadastro |
+| `/agendar/confirmado/[token]` | Quem tem o link | Confirmação durável, com QR de check-in |
+| `/assinar/[slug]` | `CLIENT` | Pede o plano (ou vai ao pagamento, se configurado) |
 | `/entrar` | Público | Login e criação de conta |
-| `/cliente` | `CLIENT` | Horários, QR de check-in, plano, histórico |
-| `/barbeiro` | `BARBER` | Agenda do dia, iniciar/finalizar, check-in, comissão |
-| `/admin` | `ADMIN` | Faturamento, MRR, ocupação, agenda, equipe |
-| `/admin/agenda` | `ADMIN` | Regras da agenda e bloqueios |
-| `/admin/equipe` | `ADMIN` | Barbeiros, jornada individual, faixas de meta |
+| `/privacidade` | Público | Política de privacidade (LGPD) |
+| `/cliente` | `CLIENT` | Horários, remarcar, QR, plano, horário fixo, histórico |
+| `/conta` | Qualquer sessão | Dados e troca de senha |
+| `/barbeiro` | `BARBER` | Agenda do dia, comissão, check-in, iniciar/finalizar |
+| `/barbeiro/checkin/[token]` | `BARBER` | Destino do QR lido pela câmera |
+| `/admin` | `ADMIN` | KPIs, agenda navegável por dia e barbeiro, pedidos de plano |
+| `/admin/agenda` | `ADMIN` | Dados da barbearia, regras da agenda e bloqueios |
+| `/admin/equipe` | `ADMIN` | Barbeiros, jornada própria, metas e faixas de comissão |
 | `/admin/catalogo` | `ADMIN` | Serviços e planos de assinatura |
-| `/admin/clientes` | `ADMIN` | Clientes, assinaturas e importação em CSV |
+| `/admin/clientes` | `ADMIN` | Clientes, assinaturas, cobrança, senha, importar/exportar |
+| `/admin/relatorios` | `ADMIN` | Fechamento mensal por barbeiro + CSV |
+| `/admin/notificacoes` | `ADMIN` | Fila de mensagens, reenvio e disparo manual |
+| `/api/health` | Monitor | Disponibilidade e latência do banco |
 
 O acesso é barrado no [`middleware.ts`](middleware.ts) e reconferido em cada
 Server Action — a proteção não depende da interface. A nav inferior mostra só
@@ -50,9 +58,23 @@ WhatsApp. Se esse número já tem agendamento, o cadastro exige o **código de 6
 letras** de um deles como prova de posse — sem isso, qualquer pessoa com o
 número veria os horários de outra. (Quando o WhatsApp entrar, isso vira OTP.)
 
-**Senhas.** O cliente troca a própria em `/cliente`; o admin redefine a de
+**Senhas.** Qualquer sessão troca a própria em `/conta`; o admin redefine a de
 qualquer conta em `/admin/clientes`. O login gasta o mesmo tempo com usuário
-existente ou não, para não denunciar quem tem conta.
+existente ou não, para não denunciar quem tem conta, e trava por 15 minutos
+após 5 tentativas erradas.
+
+## Avisos que sobrevivem à revalidação
+
+Toda ação do painel chama `revalidatePath`, e isso **remonta a árvore da
+rota** — uma mensagem de sucesso guardada em `useState` sumiria no instante
+em que o usuário fosse lê-la. Por isso a fila de avisos mora em
+[`lib/toast.ts`](lib/toast.ts), fora do React: o `<Toaster />` do layout raiz
+relê a fila ao remontar. Erros continuam inline, junto do campo.
+
+Modais (remarcar, QR) são renderizados em portal no `<body>`
+([`components/Modal.tsx`](components/Modal.tsx)): dentro da página eles
+herdariam o contexto de empilhamento dos cards animados e ficariam atrás do
+conteúdo.
 
 ## Como a agenda evita conflito
 
@@ -208,6 +230,12 @@ Variáveis do projeto na Vercel:
 | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` | não | Entrega das mensagens |
 | `INFINITEPAY_HANDLE` | não | Cobrança avulsa online |
 
+## Relatórios
+
+`/admin/relatorios` fecha o mês a partir da razão de comissões — por barbeiro,
+com lançamento a lançamento e exportação em CSV (`;` e vírgula decimal, abre
+direto no Excel pt-BR). A base de clientes também sai em CSV.
+
 ## Pagamentos
 
 O adaptador da **InfinitePay** está pronto em
@@ -220,8 +248,12 @@ link de pagamento e reconferência via `payment_check`), inerte até
 > Clube VIP, ou se gera um link novo a cada renovação (com baixa por webhook),
 > ou se usa um gateway com recorrência nativa só para as assinaturas.
 
-Enquanto isso, a assinatura é ativada pelo admin em `/admin/clientes`, o que
-já cobre a operação do dia a dia.
+O fluxo está fechado: o cliente escolhe o plano em `/assinar/[slug]`; com
+`INFINITEPAY_HANDLE` configurado ele vai ao checkout e o
+[webhook](app/api/pagamentos/infinitepay/route.ts) ativa a assinatura
+(reconferindo em `payment_check`, sem confiar só no callback). Sem o handle,
+vira um pedido que o admin ativa em um clique no painel. O admin também gera
+link de cobrança avulso para renovações.
 
 ## O que ainda depende de credencial externa
 

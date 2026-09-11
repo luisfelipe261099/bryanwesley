@@ -52,6 +52,8 @@ export type CreateBookingInput = {
    * imediata (o membro já sabe), só os lembretes.
    */
   fromRecurring?: boolean;
+  /** Remarcação: a mensagem certa é "remarcado", não "criado". */
+  skipConfirmation?: boolean;
 };
 
 export async function createBooking(input: CreateBookingInput) {
@@ -240,7 +242,7 @@ export async function createBooking(input: CreateBookingInput) {
     // agendamento: o horário já está garantido.
     try {
       await queueBookingNotifications(appt, barber.shortName, {
-        skipConfirmation: !!input.fromRecurring,
+        skipConfirmation: !!input.fromRecurring || !!input.skipConfirmation,
       });
     } catch (e) {
       console.error("Falha ao enfileirar notificações:", e);
@@ -257,6 +259,75 @@ export async function createBooking(input: CreateBookingInput) {
   }
   }
   throw new BookingError("Não foi possível gerar o código. Tente novamente.");
+}
+
+/**
+ * Remarca um atendimento: cancela o antigo e cria o novo com os mesmos
+ * serviços, passando pela mesma trava de conflito. Se o horário novo não
+ * estiver livre, nada muda — o cliente não perde o que já tinha.
+ */
+export async function rescheduleBooking(input: {
+  appointmentId: number;
+  dateKey: string;
+  time: string;
+  barberId?: number | null;
+}) {
+  const appt = await db.query.appointments.findFirst({
+    where: eq(appointments.id, input.appointmentId),
+  });
+  if (!appt) throw new BookingError("Agendamento não encontrado.");
+  if (["CONCLUIDO", "CANCELADO", "NO_SHOW"].includes(appt.status)) {
+    throw new BookingError("Esse atendimento já foi encerrado.");
+  }
+
+  const items = await db
+    .select()
+    .from(appointmentServices)
+    .where(eq(appointmentServices.appointmentId, appt.id));
+  const serviceIds = items
+    .map((i) => i.serviceId)
+    .filter((id): id is number => id !== null);
+  if (serviceIds.length === 0) {
+    throw new BookingError("Não dá para remarcar: os serviços saíram do catálogo.");
+  }
+
+  // Libera o horário antigo primeiro, senão ele bloquearia o novo quando
+  // for o mesmo barbeiro em horário próximo.
+  await db
+    .update(appointments)
+    .set({ status: "CANCELADO" })
+    .where(eq(appointments.id, appt.id));
+
+  try {
+    const novo = await createBooking({
+      serviceIds,
+      dateKey: input.dateKey,
+      time: input.time,
+      barberId: input.barberId ?? appt.barberId,
+      clientName: appt.clientName,
+      clientPhone: appt.clientPhone,
+      userId: appt.clientUserId,
+      notes: appt.notes ?? undefined,
+      skipConfirmation: true,
+    });
+    await cancelPendingNotifications(appt.id);
+    try {
+      await queueNotification({
+        kind: "AGENDAMENTO_REMARCADO",
+        appointment: novo,
+      });
+    } catch (e) {
+      console.error("Falha ao avisar remarcação:", e);
+    }
+    return novo;
+  } catch (err) {
+    // Não conseguiu o horário novo: devolve o antigo como estava.
+    await db
+      .update(appointments)
+      .set({ status: appt.status })
+      .where(eq(appointments.id, appt.id));
+    throw err;
+  }
 }
 
 /** Transições de estado permitidas, para não pular etapas. */

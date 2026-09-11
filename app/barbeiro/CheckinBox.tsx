@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { AlertCircle, CheckCircle2, Loader2, QrCode } from "lucide-react";
+import { AlertCircle, Loader2, QrCode } from "lucide-react";
+import { toast } from "@/lib/toast";
 import { checkIn } from "./actions";
 
 /**
@@ -19,12 +20,15 @@ export function CheckinBox() {
     setMsg(null);
     start(async () => {
       const res = await checkIn({ code });
-      setMsg(
-        res.ok
-          ? { ok: true, text: res.message ?? "Check-in confirmado." }
-          : { ok: false, text: res.error }
-      );
-      if (res.ok) setCode("");
+      if (res.ok) {
+        // Aviso flutuante: a revalidação da agenda remontaria este card
+        // e apagaria a confirmação bem na hora em que o barbeiro lê.
+        toast(res.message ?? "Check-in confirmado.", "ok");
+        setCode("");
+        setMsg(null);
+      } else {
+        setMsg({ ok: false, text: res.error });
+      }
     });
   }
 
@@ -57,18 +61,10 @@ export function CheckinBox() {
       </form>
       {msg && (
         <p
-          role="status"
-          className={`mt-3 flex items-start gap-2 rounded-xl px-3.5 py-3 text-sm ${
-            msg.ok
-              ? "border border-neon/30 bg-neon/10 text-neon"
-              : "border border-amber-400/30 bg-amber-400/10 text-amber-200"
-          }`}
+          role="alert"
+          className="mt-3 flex items-start gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3.5 py-3 text-sm text-amber-200"
         >
-          {msg.ok ? (
-            <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none" />
-          ) : (
-            <AlertCircle className="mt-0.5 h-4 w-4 flex-none" />
-          )}
+          <AlertCircle className="mt-0.5 h-4 w-4 flex-none" />
           {msg.text}
         </p>
       )}

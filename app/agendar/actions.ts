@@ -38,7 +38,7 @@ const bookingSchema = z.object({
 });
 
 export type BookingResult =
-  | { ok: true; code: string; id: number }
+  | { ok: true; code: string; id: number; token: string }
   | { ok: false; error: string };
 
 export async function submitBooking(
@@ -59,7 +59,12 @@ export async function submitBooking(
     revalidatePath("/cliente");
     revalidatePath("/barbeiro");
     revalidatePath("/admin");
-    return { ok: true, code: appt.code, id: appt.id };
+    return {
+      ok: true,
+      code: appt.code,
+      id: appt.id,
+      token: appt.checkinToken ?? "",
+    };
   } catch (err) {
     if (err instanceof BookingError) return { ok: false, error: err.message };
     console.error("Erro ao agendar:", err);

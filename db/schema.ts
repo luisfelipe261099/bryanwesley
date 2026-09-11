@@ -72,6 +72,9 @@ export const users = mysqlTable(
     passwordHash: varchar("password_hash", { length: 100 }),
     role: mysqlEnum("role", ROLES).notNull().default("CLIENT"),
     active: boolean("active").notNull().default(true),
+    // Força bruta: após 5 erros seguidos a conta trava por 15 minutos.
+    failedLogins: int("failed_logins").notNull().default(0),
+    lockedUntil: ts("locked_until"),
     createdAt: tsNow("created_at"),
   },
   (t) => ({
@@ -408,12 +411,78 @@ export const settings = mysqlTable("settings", {
   subscriptionCommissionBase: varchar("subscription_commission_base", { length: 20 })
     .notNull()
     .default("PRECO_TABELA"),
-  // Nome/telefone que assinam as mensagens enviadas ao cliente.
+  // Identidade da barbearia — editável no painel, sem mexer no código.
   shopName: varchar("shop_name", { length: 120 })
     .notNull()
     .default("Bryan Wesley Barbearia"),
+  shopUnit: varchar("shop_unit", { length: 80 }).notNull().default("Unidade Cajuru"),
   shopPhone: varchar("shop_phone", { length: 20 }).notNull().default(""),
+  shopAddress: varchar("shop_address", { length: 200 }).notNull().default(""),
+  shopInstagram: varchar("shop_instagram", { length: 80 }).notNull().default(""),
+  shopHoursLabel: varchar("shop_hours_label", { length: 80 })
+    .notNull()
+    .default("Ter — Sáb · 09h às 20h"),
 });
+
+// ───────────────────────── Pagamentos ─────────────────────────
+
+export const PAYMENT_STATUSES = ["PENDENTE", "PAGO", "EXPIRADO", "CANCELADO"] as const;
+export const PAYMENT_KINDS = ["ASSINATURA", "AVULSO"] as const;
+
+// Cobrança gerada para o cliente (link da InfinitePay). O webhook dá baixa
+// e a reconferência via payment_check evita confiar só no callback.
+export const payments = mysqlTable(
+  "payments",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    orderNsu: varchar("order_nsu", { length: 40 }).notNull(),
+    userId: int("user_id").references(() => users.id, { onDelete: "set null" }),
+    subscriptionId: int("subscription_id").references(() => subscriptions.id, {
+      onDelete: "set null",
+    }),
+    appointmentId: int("appointment_id").references(() => appointments.id, {
+      onDelete: "set null",
+    }),
+    kind: mysqlEnum("kind", PAYMENT_KINDS).notNull(),
+    amountCents: int("amount_cents").notNull(),
+    description: varchar("description", { length: 160 }).notNull(),
+    status: mysqlEnum("status", PAYMENT_STATUSES).notNull().default("PENDENTE"),
+    provider: varchar("provider", { length: 30 }).notNull().default("infinitepay"),
+    checkoutUrl: varchar("checkout_url", { length: 500 }),
+    transactionNsu: varchar("transaction_nsu", { length: 60 }),
+    slug: varchar("slug", { length: 60 }),
+    receiptUrl: varchar("receipt_url", { length: 500 }),
+    paidAt: ts("paid_at"),
+    createdAt: tsNow("created_at"),
+  },
+  (t) => ({
+    nsuIdx: uniqueIndex("payments_order_nsu_idx").on(t.orderNsu),
+    userIdx: index("payments_user_idx").on(t.userId),
+  })
+);
+
+// ───────────────────────── Solicitações de plano ─────────────────────────
+
+export const REQUEST_STATUSES = ["ABERTA", "ATENDIDA", "RECUSADA"] as const;
+
+// O cliente pede um plano pelo site; o admin ativa (ou o pagamento ativa).
+export const planRequests = mysqlTable(
+  "plan_requests",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    planId: int("plan_id")
+      .notNull()
+      .references(() => plans.id, { onDelete: "cascade" }),
+    cycle: mysqlEnum("cycle", SUB_CYCLES).notNull().default("MENSAL"),
+    status: mysqlEnum("status", REQUEST_STATUSES).notNull().default("ABERTA"),
+    note: varchar("note", { length: 300 }),
+    createdAt: tsNow("created_at"),
+  },
+  (t) => ({ userIdx: index("plan_requests_user_idx").on(t.userId) })
+);
 
 // ───────────────────────── Relações ─────────────────────────
 
@@ -484,4 +553,6 @@ export type RecurringSlot = typeof recurringSlots.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
 export type AppointmentCommission = typeof appointmentCommissions.$inferSelect;
 export type CommissionTier = typeof commissionTiers.$inferSelect;
+export type Payment = typeof payments.$inferSelect;
+export type PlanRequest = typeof planRequests.$inferSelect;
 export type ApptStatus = Appointment["status"];

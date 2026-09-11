@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Gem, Loader2, Plus, Save, Scissors } from "lucide-react";
 import {
   Card,
+  notify,
   Feedback,
   TextInput,
   Toggle,
@@ -52,7 +53,7 @@ export function CatalogoManager({
       <Card
         title="Serviços"
         desc="Preço e duração aparecem no agendamento na hora que você salvar."
-        icon={Scissors}
+        icon={<Scissors className="h-5 w-5" />}
       >
         <div className="space-y-3">
           {services.map((s) => (
@@ -65,7 +66,7 @@ export function CatalogoManager({
       <Card
         title="Planos de assinatura"
         desc="Os serviços marcados saem sem cobrança para o membro."
-        icon={Gem}
+        icon={<Gem className="h-5 w-5" />}
       >
         <div className="space-y-5">
           {plans.map((p) => (
@@ -97,11 +98,7 @@ function ServiceRowForm({ service }: { service: ServiceRow }) {
         tag: f.tag || null,
         active: f.active,
       });
-      setMsg(
-        res.ok
-          ? { ok: true, text: res.message ?? "Salvo." }
-          : { ok: false, text: res.error }
-      );
+      setMsg(notify(res, "Salvo."));
     });
   }
 
@@ -263,11 +260,7 @@ function NewService() {
                 tag: null,
                 active: true,
               });
-              setMsg(
-                res.ok
-                  ? { ok: true, text: res.message ?? "Criado." }
-                  : { ok: false, text: res.error }
-              );
+              setMsg(notify(res, "Criado."));
               if (res.ok) {
                 setF({ name: "", price: "0,00", durationMin: 30, description: "" });
                 setOpen(false);
@@ -328,11 +321,7 @@ function PlanForm({
         active: f.active,
         serviceIds: f.serviceIds,
       });
-      setMsg(
-        res.ok
-          ? { ok: true, text: res.message ?? "Salvo." }
-          : { ok: false, text: res.error }
-      );
+      setMsg(notify(res, "Salvo."));
     });
   }
 

@@ -34,6 +34,8 @@ import { formatShopTime, utcToShopParts, labelFullDate, shopToday } from "@/lib/
 import { checkinQrSvg, publicBaseUrl } from "@/lib/qr";
 import { CheckinQR } from "./CheckinQR";
 import { CancelButton, EmptyState, ChangePassword } from "./MeusHorarios";
+import { Remarcar } from "./Remarcar";
+import { listOpenDays } from "@/lib/schedule";
 import { KeyRound } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -55,7 +57,11 @@ function countdown(date: Date) {
   return h > 0 ? `Em ${h}h ${m}min` : `Em ${m}min`;
 }
 
-export default async function ClienteDashboard() {
+export default async function ClienteDashboard({
+  searchParams,
+}: {
+  searchParams: { assinatura?: string; pagamento?: string };
+}) {
   const session = await requireRole(["CLIENT", "ADMIN"]);
 
   const [subscription, upcoming, history, totalVisits, fixo, team, services, settings] =
@@ -74,6 +80,8 @@ export default async function ClienteDashboard() {
       listServices(),
       getSettings(),
     ]);
+  const days = listOpenDays(settings, 10);
+  const teamChips = team.map((b) => ({ id: b.id, shortName: b.shortName }));
 
   const proximo = upcoming[0];
   const plan = subscription?.plan;
@@ -126,7 +134,7 @@ export default async function ClienteDashboard() {
 
       <main className="mx-auto max-w-7xl px-5 pb-28 pt-24 lg:px-8">
         <Reveal>
-          <span className="label text-electric">Ateliê Jardins</span>
+          <span className="label text-electric">Ateliê Cajuru</span>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <h1 className="font-display text-3xl text-white sm:text-4xl">
               Olá, {session.name.split(" ")[0]}
@@ -144,6 +152,31 @@ export default async function ClienteDashboard() {
               : "Você não tem horário marcado. Bora agendar?"}
           </p>
         </Reveal>
+
+        {searchParams.assinatura === "pedida" && (
+          <Reveal delay={0.02}>
+            <div className="mt-6 flex items-start gap-3 rounded-2xl border border-neon/30 bg-neon/[0.07] px-4 py-4 text-sm text-neon">
+              <Gem className="mt-0.5 h-5 w-5 flex-none" />
+              <span>
+                Pedido de assinatura registrado. A barbearia confirma com você
+                pelo WhatsApp e libera os benefícios — enquanto isso, você já
+                pode agendar normalmente.
+              </span>
+            </div>
+          </Reveal>
+        )}
+
+        {searchParams.pagamento === "ok" && (
+          <Reveal delay={0.02}>
+            <div className="mt-6 flex items-start gap-3 rounded-2xl border border-neon/30 bg-neon/[0.07] px-4 py-4 text-sm text-neon">
+              <Check className="mt-0.5 h-5 w-5 flex-none" strokeWidth={3} />
+              <span>
+                Pagamento recebido. Assim que a confirmação cair, seu plano fica
+                ativo — costuma ser na hora.
+              </span>
+            </div>
+          </Reveal>
+        )}
 
         {/* Próximo horário + check-in */}
         {proximo && (
@@ -173,12 +206,21 @@ export default async function ClienteDashboard() {
                     </p>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
                   {qrSvg && (
                     <CheckinQR
                       svg={qrSvg}
                       code={proximo.code}
                       service={proximo.items.map((i) => i.name).join(" + ")}
+                    />
+                  )}
+                  {proximo.status !== "EM_ANDAMENTO" && (
+                    <Remarcar
+                      appointmentId={proximo.id}
+                      durationMin={proximo.durationMin}
+                      barberId={proximo.barberId}
+                      days={days}
+                      team={teamChips}
                     />
                   )}
                   <CancelButton appointmentId={proximo.id} />
@@ -327,7 +369,16 @@ export default async function ClienteDashboard() {
                           {a.barber.user.name}
                         </p>
                         {a.id !== proximo?.id && a.status !== "EM_ANDAMENTO" && (
-                          <CancelButton appointmentId={a.id} />
+                          <span className="flex items-center gap-2">
+                            <Remarcar
+                              appointmentId={a.id}
+                              durationMin={a.durationMin}
+                              barberId={a.barberId}
+                              days={days}
+                              team={teamChips}
+                            />
+                            <CancelButton appointmentId={a.id} />
+                          </span>
                         )}
                       </div>
                     </li>

@@ -21,6 +21,9 @@ export type AuthState = { error?: string } | undefined;
 const DUMMY_HASH =
   "$2b$10$H/6ulv31oIqfcLrAFOFz.erhql8DPlDXj6fZbts7cHhu5XnCfe.vK";
 
+const MAX_FAILED_LOGINS = 5;
+const LOCK_MINUTES = 15;
+
 const loginSchema = z.object({
   identifier: z.string().trim().min(3, "Informe seu e-mail ou telefone."),
   password: z.string().min(1, "Informe sua senha."),
@@ -59,9 +62,40 @@ export async function login(
 
   // Mensagem genérica e tempo parecido: não revela se o usuário existe.
   const genericError = { error: "E-mail/telefone ou senha inválidos." };
+
+  // Conta travada por excesso de tentativas: nem confere a senha.
+  if (user?.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+    const min = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60_000);
+    return {
+      error: `Muitas tentativas. Tente de novo em ${min} minuto(s).`,
+    };
+  }
+
   const hash = user?.passwordHash ?? DUMMY_HASH;
   const ok = await verifyPassword(password, hash);
-  if (!user || !user.passwordHash || !user.active || !ok) return genericError;
+  if (!user || !user.passwordHash || !user.active || !ok) {
+    if (user) {
+      const failed = user.failedLogins + 1;
+      await db
+        .update(users)
+        .set({
+          failedLogins: failed,
+          lockedUntil:
+            failed >= MAX_FAILED_LOGINS
+              ? new Date(Date.now() + LOCK_MINUTES * 60_000)
+              : null,
+        })
+        .where(eq(users.id, user.id));
+    }
+    return genericError;
+  }
+
+  if (user.failedLogins > 0 || user.lockedUntil) {
+    await db
+      .update(users)
+      .set({ failedLogins: 0, lockedUntil: null })
+      .where(eq(users.id, user.id));
+  }
 
   const barber =
     user.role === "BARBER" || user.role === "ADMIN"

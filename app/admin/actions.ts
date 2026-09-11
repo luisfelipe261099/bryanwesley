@@ -7,6 +7,7 @@ import { db } from "@/db/client";
 import {
   barbers,
   commissionTiers,
+  planRequests,
   planServices,
   plans,
   scheduleBlocks,
@@ -17,7 +18,19 @@ import {
 } from "@/db/schema";
 import { requireRole } from "@/lib/auth";
 import { hashPassword } from "@/lib/auth/password";
-import { transitionAppointment, BookingError } from "@/lib/appointments";
+import {
+  transitionAppointment,
+  rescheduleBooking,
+  BookingError,
+} from "@/lib/appointments";
+import {
+  retryNotification,
+  pendingNotifications,
+  markSent,
+  markFailed,
+} from "@/lib/notifications";
+import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
+import { chargeSubscription } from "@/lib/payments";
 import { shopTimeToUtc, parseDateKey } from "@/lib/time";
 import { normalizePhone, isValidPhone } from "@/lib/phone";
 import { nextRenewal } from "@/lib/subscriptions";
@@ -29,7 +42,20 @@ async function admin() {
 }
 
 function done(message?: string): Result {
-  for (const p of ["/admin", "/admin/agenda", "/admin/equipe", "/admin/catalogo", "/admin/clientes", "/barbeiro", "/cliente", "/agendar", "/", "/planos"]) {
+  for (const p of [
+    "/admin",
+    "/admin/agenda",
+    "/admin/equipe",
+    "/admin/catalogo",
+    "/admin/clientes",
+    "/admin/notificacoes",
+    "/admin/relatorios",
+    "/barbeiro",
+    "/cliente",
+    "/agendar",
+    "/",
+    "/planos",
+  ]) {
     revalidatePath(p);
   }
   return { ok: true, message };
@@ -610,6 +636,159 @@ export async function importClients(csv: string): Promise<
     }
 
     return { ...done(`${imported} cliente(s) importado(s).`), imported, skipped };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ───────────────────────── Identidade da barbearia ─────────────────────────
+
+export async function saveShopInfo(input: {
+  shopName: string;
+  shopUnit: string;
+  shopPhone: string;
+  shopAddress: string;
+  shopInstagram: string;
+  shopHoursLabel: string;
+}): Promise<Result> {
+  try {
+    await admin();
+    await db
+      .update(settingsTable)
+      .set({
+        shopName: input.shopName.trim() || "Bryan Wesley Barbearia",
+        shopUnit: input.shopUnit.trim(),
+        shopPhone: input.shopPhone.trim(),
+        shopAddress: input.shopAddress.trim(),
+        shopInstagram: input.shopInstagram.trim(),
+        shopHoursLabel: input.shopHoursLabel.trim(),
+      })
+      .where(eq(settingsTable.id, 1));
+    return done("Dados da barbearia salvos.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ───────────────────────── Notificações ─────────────────────────
+
+export async function resendNotification(id: number): Promise<Result> {
+  try {
+    await admin();
+    await retryNotification(id);
+    return done("Mensagem recolocada na fila.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Dispara a fila na hora, sem esperar o cron. */
+export async function flushNotifications(): Promise<Result> {
+  try {
+    await admin();
+    const fila = await pendingNotifications(50);
+    if (!isWhatsappConfigured()) {
+      return {
+        ok: false,
+        error: `WhatsApp não configurado. ${fila.length} mensagem(ns) aguardando na fila.`,
+      };
+    }
+    let enviadas = 0;
+    for (const n of fila) {
+      const res = await sendWhatsapp(n.phone, n.body);
+      if (res.sent) {
+        await markSent(n.id);
+        enviadas++;
+      } else {
+        await markFailed(n.id, res.reason, res.retryable ? n.attempts : 99);
+      }
+    }
+    return done(`${enviadas} mensagem(ns) enviada(s).`);
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ───────────────────────── Cobrança ─────────────────────────
+
+export type ChargeActionResult =
+  | { ok: true; url: string }
+  | { ok: false; error: string };
+
+/** Gera o link de pagamento do próximo ciclo da assinatura. */
+export async function createSubscriptionCharge(
+  userId: number
+): Promise<ChargeActionResult> {
+  try {
+    await admin();
+    const sub = await db.query.subscriptions.findFirst({
+      where: eq(subscriptions.userId, userId),
+      orderBy: (s, { desc }) => [desc(s.startedAt)],
+    });
+    if (!sub) return { ok: false, error: "Cliente sem assinatura." };
+    const res = await chargeSubscription(userId, sub.cycle);
+    if (!res.ok) return { ok: false, error: res.error };
+    revalidatePath("/admin/clientes");
+    return { ok: true, url: res.url };
+  } catch (e) {
+    const r = fail(e);
+    return { ok: false, error: r.ok ? "Erro" : r.error };
+  }
+}
+
+// ───────────────────────── Solicitações de plano ─────────────────────────
+
+/** Aceita o pedido feito pelo cliente no site e ativa a assinatura. */
+export async function acceptPlanRequest(requestId: number): Promise<Result> {
+  try {
+    await admin();
+    const req = await db.query.planRequests.findFirst({
+      where: eq(planRequests.id, requestId),
+    });
+    if (!req) return { ok: false, error: "Solicitação não encontrada." };
+
+    const r = await subscribeClient({
+      userId: req.userId,
+      planId: req.planId,
+      cycle: req.cycle,
+    });
+    if (!r.ok) return r;
+
+    await db
+      .update(planRequests)
+      .set({ status: "ATENDIDA" })
+      .where(eq(planRequests.id, requestId));
+    return done("Assinatura ativada.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function rejectPlanRequest(requestId: number): Promise<Result> {
+  try {
+    await admin();
+    await db
+      .update(planRequests)
+      .set({ status: "RECUSADA" })
+      .where(eq(planRequests.id, requestId));
+    return done("Solicitação arquivada.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ───────────────────────── Remarcar pelo admin ─────────────────────────
+
+export async function adminReschedule(input: {
+  appointmentId: number;
+  dateKey: string;
+  time: string;
+  barberId: number | null;
+}): Promise<Result> {
+  try {
+    await admin();
+    await rescheduleBooking(input);
+    return done("Horário remarcado.");
   } catch (e) {
     return fail(e);
   }

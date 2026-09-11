@@ -105,7 +105,7 @@ export function PlanCard({
       </ul>
 
       <Link
-        href={`/agendar?plano=${plan.id}`}
+        href={`/assinar/${plan.slug}`}
         className={`label relative mt-7 inline-flex items-center justify-center rounded-full py-4 transition-transform active:scale-[0.98] ${
           plan.highlight
             ? "btn-royal text-white"

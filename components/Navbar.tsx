@@ -12,7 +12,13 @@ const links = [
   { href: "/#contato", label: "Contato" },
 ];
 
-export function Navbar({ logged = false }: { logged?: boolean }) {
+export function Navbar({
+  logged = false,
+  unit,
+}: {
+  logged?: boolean;
+  unit?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -33,7 +39,7 @@ export function Navbar({ logged = false }: { logged?: boolean }) {
     >
       <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 lg:px-8">
         <Link href="/" aria-label="Bryan Wesley Barbearia — início">
-          <Logo />
+          <Logo subtitle={unit} />
         </Link>
 
         <div className="hidden items-center gap-8 md:flex">

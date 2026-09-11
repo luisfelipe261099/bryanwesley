@@ -3,7 +3,7 @@
 // A regra de negócio só ENFILEIRA; a entrega é de um worker que chama
 // o provedor. Trocar WhatsApp por SMS não mexe em nada aqui.
 // ───────────────────────────────────────────────────────────
-import { and, eq, lte, inArray } from "drizzle-orm";
+import { and, eq, lte, desc, inArray, count as drizzleCount } from "drizzle-orm";
 import { db } from "@/db/client";
 import { notifications, appointments } from "@/db/schema";
 import { getSettings } from "./schedule";
@@ -161,4 +161,36 @@ export async function markFailed(id: number, error: string, attempts: number) {
       attempts: attempts + 1,
     })
     .where(eq(notifications.id, id));
+}
+
+/** Recoloca uma mensagem com erro na fila. */
+export async function retryNotification(id: number) {
+  await db
+    .update(notifications)
+    .set({ status: "PENDENTE", attempts: 0, error: null, scheduledFor: new Date() })
+    .where(eq(notifications.id, id));
+}
+
+/** Contagem por situação, para o painel. */
+export async function notificationStats() {
+  const rows = await db
+    .select({ status: notifications.status, total: drizzleCount() })
+    .from(notifications)
+    .groupBy(notifications.status);
+  const by = Object.fromEntries(rows.map((r) => [r.status, Number(r.total)]));
+  return {
+    pendentes: by.PENDENTE ?? 0,
+    enviadas: by.ENVIADA ?? 0,
+    erros: by.ERRO ?? 0,
+    canceladas: by.CANCELADA ?? 0,
+  };
+}
+
+/** Últimas mensagens, para auditoria no painel. */
+export async function recentNotifications(limit = 40) {
+  return db
+    .select()
+    .from(notifications)
+    .orderBy(desc(notifications.createdAt))
+    .limit(limit);
 }

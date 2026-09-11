@@ -288,6 +288,11 @@ export default async function BarbeiroPanel({
                         <p className="truncate text-sm text-steel-400">
                           {a.items.map((i) => i.name).join(" + ")}
                         </p>
+                        {a.notes && (
+                          <p className="mt-1 rounded-lg border border-electric/20 bg-electric/[0.06] px-2.5 py-1.5 text-xs leading-snug text-electric">
+                            {a.notes}
+                          </p>
+                        )}
                         <p className="mt-1 flex flex-wrap items-center gap-2">
                           <a
                             href={`https://wa.me/55${a.clientPhone}`}
