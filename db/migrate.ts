@@ -38,7 +38,30 @@ function connOptions(connectionString: string): mysql.ConnectionOptions {
   };
 }
 
+/**
+ * Garante que o schema exista antes de migrar.
+ *
+ * Num cluster novo do TiDB só vem o banco `test`: apontar a
+ * DATABASE_URL para um schema que ainda não existe derrubaria o build
+ * no primeiro deploy. Conecta sem escolher banco, cria se faltar e sai.
+ */
+async function ensureDatabase() {
+  const opts = connOptions(url!);
+  const name = opts.database;
+  if (!name) throw new Error("DATABASE_URL sem nome de banco.");
+  if (!/^[A-Za-z0-9_]+$/.test(name)) {
+    throw new Error(`Nome de banco inválido na DATABASE_URL: ${name}`);
+  }
+  const conn = await mysql.createConnection({ ...opts, database: undefined });
+  await conn.query(
+    `CREATE DATABASE IF NOT EXISTS \`${name}\` ` +
+      "CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
+  );
+  await conn.end();
+}
+
 async function main() {
+  await ensureDatabase();
   const conn = await mysql.createConnection(connOptions(url!));
 
   await conn.query(`CREATE TABLE IF NOT EXISTS __migrations (
