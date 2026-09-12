@@ -23,6 +23,12 @@ import { CheckinQR } from "@/app/cliente/CheckinQR";
 
 export const dynamic = "force-dynamic";
 
+// Reforço do robots.txt: a URL tem o token do check-in, então nem buscador
+// nem pré-visualização de link devem guardar essa página.
+export const metadata = {
+  robots: { index: false, follow: false, nocache: true },
+};
+
 /**
  * Confirmação do agendamento.
  *

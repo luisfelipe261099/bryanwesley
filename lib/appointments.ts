@@ -30,6 +30,12 @@ import { normalizePhone } from "./phone";
 /** MySQL: chave duplicada (unicidade). */
 const DUP_ENTRY = "ER_DUP_ENTRY";
 
+// Teto de horários futuros em aberto por telefone. A agenda é pública:
+// sem teto, uma pessoa (ou um script) reserva o dia inteiro e trava a
+// barbearia. Quem assina marca mais vezes, então tem folga maior.
+const MAX_ABERTOS_AVULSO = 4;
+const MAX_ABERTOS_ASSINANTE = 12;
+
 export class BookingError extends Error {
   constructor(message: string) {
     super(message);
@@ -100,6 +106,27 @@ export async function createBooking(input: CreateBookingInput) {
   }
   const allCovered =
     !!subscription && chosen.every((s) => coveredIds.has(s.id));
+
+  // Horário fixo é materializado pelo próprio sistema (5 semanas de uma
+  // vez): ele não passa pelo teto, senão o benefício se auto-bloqueia.
+  if (!input.fromRecurring) {
+    const teto = subscription ? MAX_ABERTOS_ASSINANTE : MAX_ABERTOS_AVULSO;
+    const abertos = await db
+      .select({ total: rawSql<number>`count(*)` })
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.clientPhone, phone),
+          inArray(appointments.status, ["PENDENTE", "CONFIRMADO"]),
+          gt(appointments.startsAt, new Date())
+        )
+      );
+    if (Number(abertos[0]?.total ?? 0) >= teto) {
+      throw new BookingError(
+        `Você já tem ${teto} horários marcados. Cancele um antes de marcar outro ou fale com a barbearia.`
+      );
+    }
+  }
 
   const totalCents = allCovered
     ? 0

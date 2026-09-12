@@ -118,7 +118,11 @@ export function toCsv(rows: Record<string, string | number>[]) {
   if (rows.length === 0) return "";
   const headers = Object.keys(rows[0]);
   const esc = (v: string | number) => {
-    const s = String(v);
+    let s = String(v);
+    // Nome de cliente é texto que o próprio cliente digitou. Começando com
+    // = + - @ (ou tab/CR), o Excel lê como fórmula e executa ao abrir o
+    // arquivo. A aspa simples na frente neutraliza sem sujar a leitura.
+    if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const body = rows.map((r) => headers.map((h) => esc(r[h])).join(";"));

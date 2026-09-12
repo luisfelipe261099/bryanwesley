@@ -97,16 +97,24 @@ export async function settlePayment(input: {
   if (!payment) return { ok: false as const, error: "Cobrança desconhecida." };
   if (payment.status === "PAGO") return { ok: true as const, already: true };
 
-  // Nunca confia só no callback: reconfere na InfinitePay.
-  if (input.transactionNsu && input.slug) {
-    const check = await checkPayment({
-      orderNsu: input.orderNsu,
-      transactionNsu: input.transactionNsu,
-      slug: input.slug,
-    });
-    if (!check.paid) {
-      return { ok: false as const, error: check.error ?? "Pagamento não confirmado." };
-    }
+  // Nunca confia no callback: o webhook é um endereço público e sem
+  // assinatura, então quem descobrisse um order_nsu ativaria um plano de
+  // graça. A baixa só acontece depois que a própria InfinitePay confirma
+  // o pagamento pelo payment_check. Sem os dados da transação não há o
+  // que reconferir — e aí a cobrança continua pendente.
+  if (!input.transactionNsu || !input.slug) {
+    return {
+      ok: false as const,
+      error: "Callback sem transaction_nsu/slug: pagamento não confirmado.",
+    };
+  }
+  const check = await checkPayment({
+    orderNsu: input.orderNsu,
+    transactionNsu: input.transactionNsu,
+    slug: input.slug,
+  });
+  if (!check.paid) {
+    return { ok: false as const, error: check.error ?? "Pagamento não confirmado." };
   }
 
   await db

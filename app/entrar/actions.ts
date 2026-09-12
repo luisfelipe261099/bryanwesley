@@ -2,10 +2,10 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { eq, or } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
-import { users, barbers, appointments } from "@/db/schema";
+import { users, barbers, appointments, subscriptions } from "@/db/schema";
 import { verifyPassword, hashPassword } from "@/lib/auth/password";
 import {
   SESSION_COOKIE,
@@ -13,6 +13,7 @@ import {
   sessionCookieOptions,
 } from "@/lib/auth/session";
 import { normalizePhone, isValidPhone } from "@/lib/phone";
+import { safeNext } from "@/lib/url";
 
 export type AuthState = { error?: string } | undefined;
 
@@ -110,8 +111,7 @@ export async function login(
   });
   cookies().set(SESSION_COOKIE, token, sessionCookieOptions);
 
-  const next = String(formData.get("proximo") || "");
-  redirect(next && next.startsWith("/") ? next : homeFor(user.role));
+  redirect(safeNext(formData.get("proximo")) ?? homeFor(user.role));
 }
 
 const signupSchema = z.object({
@@ -163,6 +163,23 @@ export async function signup(
       columns: { code: true },
       limit: 50,
     });
+    // Conta de assinante não se reivindica sozinha. O código prova pouco:
+    // quem souber o WhatsApp da pessoa consegue agendar em nome dela e
+    // ficar com o código daquele agendamento. Como assinatura vale dinheiro
+    // (atendimento incluso no plano), esse caso passa pelo balcão.
+    const assinaturaAtiva = await db.query.subscriptions.findFirst({
+      where: and(
+        eq(subscriptions.userId, existing.id),
+        eq(subscriptions.status, "ATIVA")
+      ),
+    });
+    if (assinaturaAtiva) {
+      return {
+        error:
+          "Esse WhatsApp já tem plano ativo. Fale com a barbearia para liberar o seu acesso.",
+      };
+    }
+
     if (owned.length > 0) {
       if (!code) return { needsCode: true };
       if (!owned.some((a) => a.code === code)) {

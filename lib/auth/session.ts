@@ -12,6 +12,8 @@ export type SessionUser = {
   barberId?: number;
 };
 
+const ROLES: Role[] = ["ADMIN", "BARBER", "CLIENT"];
+
 export const SESSION_COOKIE = "bw_session";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 dias
 
@@ -39,10 +41,13 @@ export async function verifySession(
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, secretKey());
+    // Confere o papel contra a lista conhecida: um token antigo, de outra
+    // versão do sistema, não vira papel inexistente que escapa dos guards.
     if (
       typeof payload.id !== "number" ||
       typeof payload.name !== "string" ||
-      typeof payload.role !== "string"
+      typeof payload.role !== "string" ||
+      !ROLES.includes(payload.role as Role)
     ) {
       return null;
     }
