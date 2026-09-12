@@ -192,19 +192,45 @@ Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
 ## Testes
 
 ```bash
-npm test              # 43 verificações
-npm run test:agenda   # 34 — motor de agenda, jornada por barbeiro, faixas de meta
-npm run test:fixo     #  9 — horário fixo
+npm test                  # 61 verificações
+npm run test:agenda       # 34 — motor de agenda, jornada por barbeiro, faixas de meta
+npm run test:fixo         #  9 — horário fixo
+npm run test:seguranca    # 18 — teto de agendamentos, webhook, redirect, CSV, sessão
 ```
 
-Há ainda um roteiro de navegador (Playwright) com 25 verificações de ponta a
+Há ainda um roteiro de navegador (Playwright) com 51 verificações de ponta a
 ponta: agendamento de visitante, login, todas as telas do admin, check-in por
 código, endpoint do cron protegido, tomada de conta com prova por código, nav
-por papel e troca de senha.
+por papel, troca de senha, assinatura pelo site, remarcação, relatórios e
+download dos CSVs.
 
 Cobrem disponibilidade, bloqueios, antecedência, reserva dupla, corrida de
 concorrência, ciclo de vida do atendimento, fechamento da comissão e a
 materialização idempotente do horário fixo.
+
+## Segurança
+
+O que está no lugar, e por quê:
+
+| Proteção | Onde | Contra o quê |
+|----------|------|--------------|
+| Sessão JWT em cookie `httpOnly`, papel conferido contra lista | [`lib/auth/session.ts`](lib/auth/session.ts) | Sessão forjada ou token de versão antiga |
+| Guarda por papel no middleware **e** dentro de cada Server Action | [`middleware.ts`](middleware.ts), `app/*/actions.ts` | Ação chamada direto, sem passar pela tela |
+| Dono do recurso conferido em cancelar, remarcar e check-in | [`app/cliente/actions.ts`](app/cliente/actions.ts), [`app/barbeiro/actions.ts`](app/barbeiro/actions.ts) | Mexer no horário de outra pessoa |
+| Trava de 5 tentativas por 15 min + mensagem genérica no login | [`app/entrar/actions.ts`](app/entrar/actions.ts) | Força bruta e descoberta de quem tem conta |
+| Retorno de login só para rota interna (`//x` e `/\x` recusados) | [`lib/url.ts`](lib/url.ts) | Redirecionamento aberto usado como isca |
+| Conta com assinatura ativa não se reivindica sozinha | [`app/entrar/actions.ts`](app/entrar/actions.ts) | Tomada de conta por quem sabe o WhatsApp |
+| Teto de horários futuros em aberto por telefone (4 / 12) | [`lib/appointments.ts`](lib/appointments.ts) | Script reservando a agenda inteira |
+| Baixa de pagamento só após `payment_check` na InfinitePay | [`lib/payments.ts`](lib/payments.ts) | Callback falso ativando plano de graça |
+| `CRON_SECRET` obrigatório em produção no despacho | [`app/api/notificacoes/despachar`](app/api/notificacoes/despachar/route.ts) | Disparo de mensagens por terceiros (custa dinheiro) |
+| CSV neutraliza `= + - @` no início do campo | [`lib/reports.ts`](lib/reports.ts) | Fórmula executando ao abrir no Excel |
+| CSP, `X-Frame-Options`, `nosniff`, HSTS, `Permissions-Policy` | [`next.config.mjs`](next.config.mjs) | Clickjacking, sniffing, downgrade |
+| `noindex` + `robots` na confirmação (URL tem token) | [`app/agendar/confirmado`](app/agendar/confirmado/[token]/page.tsx) | Link compartilhado caindo em buscador |
+
+A CSP entra sem `default-src`/`script-src`: o App Router injeta script inline
+(`self.__next_f.push`) em toda página e barrar isso quebraria a hidratação.
+Ficam as diretivas que valem sozinhas — `frame-ancestors`, `base-uri`,
+`form-action`, `object-src`, `upgrade-insecure-requests`.
 
 ## Deploy
 
@@ -229,6 +255,39 @@ Variáveis do projeto na Vercel:
 | `SEED_PASSWORD` | não | Senha inicial da equipe (padrão `bryan2026`) |
 | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` | não | Entrega das mensagens |
 | `INFINITEPAY_HANDLE` | não | Cobrança avulsa online |
+| `NEXT_PUBLIC_SITE_URL` | recomendada | Base dos links do QR e do webhook |
+
+### Passo a passo da primeira publicação
+
+1. **TiDB Cloud** — criar o cluster e o banco, e copiar a string de conexão
+   (`mysql://usuario:senha@host:4000/banco`). Liberar o IP de saída da Vercel
+   na lista de acesso do cluster.
+2. **Vercel → Settings → Environment Variables** (ambiente *Production*):
+   `DATABASE_URL`, `AUTH_SECRET` (≥ 24 caracteres, aleatória),
+   `CRON_SECRET`, `NEXT_PUBLIC_SITE_URL` e, se quiser trocar a senha inicial
+   da equipe, `SEED_PASSWORD`. Gerar segredos com:
+
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   ```
+
+3. **Publicar** — o merge na `main` dispara o deploy. O build roda as
+   migrações e, com o catálogo vazio, o seed: serviços, planos, contas da
+   equipe e as configurações da Unidade Cajuru.
+4. **Trocar as senhas da equipe** em `/admin/equipe` antes de divulgar. A
+   senha do seed é a mesma para todos e serve só para o primeiro acesso.
+5. **Conferir** `/api/health` — deve responder `{"ok":true,"db":"ok"}`.
+6. **Agendador externo** — o plano Hobby da Vercel só permite cron diário
+   ([`vercel.json`](vercel.json) usa `0 9 * * *`). Para lembrete de hora em
+   hora, apontar um agendador externo (cron-job.org, por exemplo) a cada 15
+   minutos para:
+
+   ```
+   https://SEU-DOMINIO/api/notificacoes/despachar?token=CRON_SECRET
+   ```
+
+   Sem `WHATSAPP_TOKEN` as mensagens ficam na fila sem consumir tentativa —
+   dá para ligar o agendador antes do número estar aprovado.
 
 ## Relatórios
 
