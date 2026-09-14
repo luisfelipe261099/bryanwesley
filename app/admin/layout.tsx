@@ -1,6 +1,7 @@
 import { Background } from "@/components/Background";
 import { AppHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
+import { Heartbeat } from "@/components/Heartbeat";
 import { requireRole } from "@/lib/auth";
 import { AdminNav } from "./AdminNav";
 
@@ -22,6 +23,7 @@ export default async function AdminLayout({
         {children}
       </main>
       <BottomNav active="admin" role={session.role} />
+      <Heartbeat />
     </>
   );
 }

@@ -1,25 +1,20 @@
 import { NextResponse } from "next/server";
-import {
-  pendingNotifications,
-  markSent,
-  markFailed,
-} from "@/lib/notifications";
-import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
-import { materializeRecurring } from "@/lib/recurring";
-import { expireOverdueSubscriptions } from "@/lib/subscriptions";
+import { claimDispatchSlot, runDispatch, CRON_INTERVAL_MS } from "@/lib/dispatch";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * Despacha as notificações vencidas.
- * Chamado pelo Vercel Cron (vercel.json). Protegido por CRON_SECRET —
- * a Vercel envia o header Authorization automaticamente.
+ * Despacho pelo cron da Vercel (vercel.json) ou por um agendador externo.
+ * Protegido por CRON_SECRET — a Vercel envia o header Authorization
+ * sozinha; agendadores que não enviam usam ?token=.
+ *
+ * O dia a dia é coberto pelo heartbeat do painel (/api/notificacoes/heartbeat);
+ * esta rota é a rede de segurança para os dias em que ninguém abre o sistema.
  */
 async function handler(req: Request) {
   // Em produção o segredo é obrigatório: sem ele qualquer um dispararia
-  // envios (que custam dinheiro) à vontade. Aceita header ou ?token=
-  // para os agendadores externos que não enviam Authorization.
+  // envios (que custam dinheiro) à vontade.
   const secret = process.env.CRON_SECRET;
   if (process.env.NODE_ENV === "production" && !secret) {
     return NextResponse.json(
@@ -35,48 +30,23 @@ async function handler(req: Request) {
     }
   }
 
-  // Assinaturas vencidas perdem o benefício até a renovação ser registrada.
-  const expiradas = await expireOverdueSubscriptions();
-
-  // Garante os horários fixos das próximas semanas antes de notificar,
-  // para que a confirmação deles também saia nesta rodada.
-  const fixos = await materializeRecurring();
-
-  const fila = await pendingNotifications(50);
-
-  if (!isWhatsappConfigured()) {
-    // Sem provedor: não marca como erro nem consome tentativas.
-    // As mensagens seguem na fila até o número ser configurado.
+  // Duas execuções coladas (cron + agendador externo, ou retry do
+  // agendador) não podem entregar a mesma mensagem duas vezes.
+  const vez = await claimDispatchSlot(CRON_INTERVAL_MS);
+  if (!vez) {
     return NextResponse.json({
-      configurado: false,
-      pendentes: fila.length,
-      horariosFixos: fixos,
-      assinaturasExpiradas: expiradas,
-      mensagem:
-        "Provedor de WhatsApp não configurado. As mensagens ficam na fila.",
+      skipped: true,
+      mensagem: "Outra varredura rodou há menos de um minuto.",
     });
   }
 
-  let enviadas = 0;
-  let falhas = 0;
-
-  for (const n of fila) {
-    const res = await sendWhatsapp(n.phone, n.body);
-    if (res.sent) {
-      await markSent(n.id);
-      enviadas++;
-    } else {
-      await markFailed(n.id, res.reason, res.retryable ? n.attempts : 99);
-      falhas++;
-    }
-  }
-
+  const report = await runDispatch(50);
   return NextResponse.json({
-    configurado: true,
-    enviadas,
-    falhas,
-    horariosFixos: fixos,
-    assinaturasExpiradas: expiradas,
+    skipped: false,
+    ...report,
+    ...(report.configurado
+      ? {}
+      : { mensagem: "Provedor de WhatsApp não configurado. As mensagens ficam na fila." }),
   });
 }
 

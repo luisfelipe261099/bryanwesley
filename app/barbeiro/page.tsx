@@ -14,6 +14,7 @@ import {
 import { Background } from "@/components/Background";
 import { AppHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
+import { Heartbeat } from "@/components/Heartbeat";
 import { Reveal } from "@/components/Reveal";
 import { requireRole } from "@/lib/auth";
 import {
@@ -343,6 +344,7 @@ export default async function BarbeiroPanel({
       </main>
 
       <BottomNav active="barbeiro" role={session.role} />
+      <Heartbeat />
     </>
   );
 }

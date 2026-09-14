@@ -13,7 +13,8 @@
     "test:agenda": "tsx scripts/test-agenda.ts",
     "test:fixo": "tsx scripts/test-fixo.ts",
     "test:seguranca": "tsx scripts/test-seguranca.ts",
-    "test": "tsx scripts/test-agenda.ts && tsx scripts/test-fixo.ts && tsx scripts/test-seguranca.ts"
+    "test:despacho": "tsx scripts/test-despacho.ts",
+    "test": "tsx scripts/test-agenda.ts && tsx scripts/test-fixo.ts && tsx scripts/test-seguranca.ts && tsx scripts/test-despacho.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

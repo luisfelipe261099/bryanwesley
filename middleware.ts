@@ -16,6 +16,15 @@ export async function middleware(req: NextRequest) {
   );
   if (!guard) return NextResponse.next();
 
+  // Server Action (POST com o header next-action): deixa passar. Cada
+  // action confere a sessão por conta própria (requireRole) e, se faltar,
+  // lança o redirect() que o router do Next entende e executa na tela.
+  // Um 307 daqui seria seguido pelo fetch do navegador até o HTML do
+  // login — a action nunca responderia e a tela ficaria muda.
+  if (req.method === "POST" && req.headers.get("next-action")) {
+    return NextResponse.next();
+  }
+
   const session = await verifySession(req.cookies.get(SESSION_COOKIE)?.value);
 
   if (!session) {

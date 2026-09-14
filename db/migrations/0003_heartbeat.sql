@@ -1,0 +1,1 @@
+ALTER TABLE `settings` ADD `last_dispatch_at` datetime(3);

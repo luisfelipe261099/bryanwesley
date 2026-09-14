@@ -150,17 +150,22 @@ A aplicação **enfileira**; quem entrega é o worker. Cada agendamento gera
 confirmação imediata e lembretes de 24h e 2h. Cancelar derruba os lembretes
 pendentes.
 
-O despacho roda em `/api/notificacoes/despachar` e também materializa os
-horários fixos e expira assinaturas vencidas. Exige `CRON_SECRET` em produção
-(header `Authorization: Bearer` ou `?token=`); sem ele responde 503 e não
-dispara nada.
+A varredura ([`lib/dispatch.ts`](lib/dispatch.ts)) expira assinaturas
+vencidas, materializa os horários fixos e entrega o que venceu. Três coisas a
+disparam, e uma trava garante que só uma rode por vez:
 
-> **Plano Hobby da Vercel só permite cron diário**, então o
-> [`vercel.json`](vercel.json) agenda às 09:00 UTC. Os lembretes de 24h e 2h
-> precisam de uma cadência menor: aponte um agendador externo gratuito
-> (ex.: cron-job.org) para `…/api/notificacoes/despachar?token=<CRON_SECRET>`
-> a cada 15 min, ou suba para o plano Pro e troque o `schedule` para
-> `*/15 * * * *`.
+| Gatilho | Cadência | Para quê |
+|---------|----------|----------|
+| **Heartbeat do painel** — `POST /api/notificacoes/heartbeat` | a cada 10 min enquanto `/admin` ou `/barbeiro` estiver aberto | O dia a dia. A barbearia fica com o painel aberto, então os lembretes de 24h e 2h saem no horário sem nada externo |
+| Cron da Vercel — `/api/notificacoes/despachar` | diário às 09:00 UTC ([`vercel.json`](vercel.json), limite do plano Hobby) | Rede de segurança para dias sem movimento |
+| Agendador externo (opcional) | o que você configurar | Só se quiser cadência garantida mesmo com o painel fechado |
+
+O heartbeat exige sessão de equipe; o cron exige `CRON_SECRET` (header
+`Authorization: Bearer` ou `?token=`) e em produção responde 503 sem ele.
+A trava é um compare-and-swap em `settings.last_dispatch_at`: cada chamada
+tenta avançar o carimbo e só quem consegue varre a fila — duas abas abertas,
+ou cron e agendador colados, não entregam a mesma mensagem duas vezes.
+`/admin/notificacoes` mostra quando foi a última varredura.
 
 Sem `WHATSAPP_TOKEN` configurado o sistema segue funcionando: as mensagens
 ficam gravadas na fila até o número ser aprovado. Horário fixo materializado
@@ -215,7 +220,7 @@ O que está no lugar, e por quê:
 | Proteção | Onde | Contra o quê |
 |----------|------|--------------|
 | Sessão JWT em cookie `httpOnly`, papel conferido contra lista | [`lib/auth/session.ts`](lib/auth/session.ts) | Sessão forjada ou token de versão antiga |
-| Guarda por papel no middleware **e** dentro de cada Server Action | [`middleware.ts`](middleware.ts), `app/*/actions.ts` | Ação chamada direto, sem passar pela tela |
+| Guarda por papel no middleware **e** dentro de cada Server Action — o middleware deixa o POST da action passar e ela mesma redireciona se a sessão faltar | [`middleware.ts`](middleware.ts), `app/*/actions.ts`, [`lib/errors.ts`](lib/errors.ts) | Ação chamada direto, sem passar pela tela; sessão expirada virando tela muda |
 | Dono do recurso conferido em cancelar, remarcar e check-in | [`app/cliente/actions.ts`](app/cliente/actions.ts), [`app/barbeiro/actions.ts`](app/barbeiro/actions.ts) | Mexer no horário de outra pessoa |
 | Trava de 5 tentativas por 15 min + mensagem genérica no login | [`app/entrar/actions.ts`](app/entrar/actions.ts) | Força bruta e descoberta de quem tem conta |
 | Retorno de login só para rota interna (`//x` e `/\x` recusados) | [`lib/url.ts`](lib/url.ts) | Redirecionamento aberto usado como isca |

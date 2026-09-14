@@ -17,6 +17,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/auth";
+import { isNextControlFlow } from "@/lib/errors";
 import { hashPassword } from "@/lib/auth/password";
 import {
   transitionAppointment,
@@ -62,6 +63,9 @@ function done(message?: string): Result {
 }
 
 function fail(e: unknown): Result {
+  // redirect()/notFound() do Next viajam como exceção. Engolir aqui faria a
+  // sessão expirada virar "não foi possível concluir" em vez de ir ao login.
+  if (isNextControlFlow(e)) throw e;
   if (e instanceof BookingError) return { ok: false, error: e.message };
   if (e instanceof z.ZodError) return { ok: false, error: e.issues[0].message };
   console.error(e);

@@ -42,10 +42,13 @@ export function NotificacoesPanel({
   stats,
   rows,
   configured,
+  ultimaVerificacao,
 }: {
   stats: { pendentes: number; enviadas: number; erros: number; canceladas: number };
   rows: NotifRow[];
   configured: boolean;
+  /** "há 3 min" ou null quando a fila nunca foi varrida. */
+  ultimaVerificacao: string | null;
 }) {
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, start] = useTransition();
@@ -66,6 +69,15 @@ export function NotificacoesPanel({
           </p>
         </div>
       )}
+
+      <p className="text-xs leading-relaxed text-steel-400">
+        Fila verificada{" "}
+        <span className="font-semibold text-steel-200">
+          {ultimaVerificacao ?? "ainda nenhuma vez"}
+        </span>
+        . O painel da equipe varre a fila sozinho enquanto está aberto — a
+        cada 10 minutos — e o cron da Vercel cobre os dias sem movimento.
+      </p>
 
       <div className="grid gap-4 sm:grid-cols-4">
         <Stat label="Na fila" value={stats.pendentes} tone="amber" />

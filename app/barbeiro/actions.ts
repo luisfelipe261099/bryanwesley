@@ -6,6 +6,7 @@ import { db } from "@/db/client";
 import { appointments } from "@/db/schema";
 import { activeSubscription } from "@/lib/queries";
 import { requireRole } from "@/lib/auth";
+import { isNextControlFlow } from "@/lib/errors";
 import { transitionAppointment, BookingError } from "@/lib/appointments";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -136,6 +137,8 @@ function revalidateAll() {
 }
 
 function toResult(e: unknown): ActionResult {
+  // Mesma regra do admin: redirect() de sessão expirada precisa propagar.
+  if (isNextControlFlow(e)) throw e;
   if (e instanceof BookingError) return { ok: false, error: e.message };
   console.error(e);
   return { ok: false, error: "Não foi possível concluir a ação." };

@@ -154,3 +154,15 @@ export function relativeWeekday(dateKey: string, today = shopToday()) {
   if (dateKey === addDays(today, 1)) return "Amanhã";
   return labelWeekday(dateKey);
 }
+
+/** "agora", "há 3 min", "há 2 h", "há 3 dias" — para carimbos de status. */
+export function labelAgo(date: Date, now = new Date()): string {
+  const s = Math.max(0, Math.round((now.getTime() - date.getTime()) / 1000));
+  if (s < 60) return "agora";
+  const m = Math.round(s / 60);
+  if (m < 60) return `há ${m} min`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `há ${h} h`;
+  const d = Math.round(h / 24);
+  return `há ${d} dia${d === 1 ? "" : "s"}`;
+}

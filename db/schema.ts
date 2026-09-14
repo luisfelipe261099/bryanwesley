@@ -422,6 +422,10 @@ export const settings = mysqlTable("settings", {
   shopHoursLabel: varchar("shop_hours_label", { length: 80 })
     .notNull()
     .default("Ter — Sáb · 09h às 20h"),
+  // Última vez que a fila de notificações foi varrida. Serve de trava
+  // (compare-and-swap) para o heartbeat do painel não rodar em duplicidade
+  // e de indicador no /admin/notificacoes.
+  lastDispatchAt: ts("last_dispatch_at"),
 });
 
 // ───────────────────────── Pagamentos ─────────────────────────
