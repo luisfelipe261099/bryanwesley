@@ -17,7 +17,13 @@ import {
   subscriptions,
   users,
 } from "@/db/schema";
+import { cookies } from "next/headers";
 import { requireRole } from "@/lib/auth";
+import {
+  SESSION_COOKIE,
+  signSession,
+  sessionCookieOptions,
+} from "@/lib/auth/session";
 import { cancelFutureOccurrences } from "@/lib/recurring";
 import { isNextControlFlow } from "@/lib/errors";
 import { hashPassword } from "@/lib/auth/password";
@@ -644,7 +650,7 @@ export async function resetUserPassword(input: {
   password: string;
 }): Promise<Result> {
   try {
-    await admin();
+    const session = await admin();
     if (input.password.trim().length < 6) {
       return { ok: false, error: "A senha precisa ter ao menos 6 caracteres." };
     }
@@ -656,6 +662,18 @@ export async function resetUserPassword(input: {
         tokenVersion: rawSql`${users.tokenVersion} + 1`,
       })
       .where(eq(users.id, input.userId));
+
+    // Redefinindo a própria senha pelo painel: sem renovar o cookie, o admin
+    // se deslogaria no mesmo clique (a versão do token acabou de subir).
+    if (input.userId === session.id) {
+      const eu = await db.query.users.findFirst({ where: eq(users.id, session.id) });
+      cookies().set(
+        SESSION_COOKIE,
+        await signSession({ ...session, v: eu?.tokenVersion ?? 0 }),
+        sessionCookieOptions
+      );
+      return done("Sua senha foi trocada. As outras sessões suas foram encerradas.");
+    }
     return done("Senha redefinida. A pessoa precisa entrar de novo.");
   } catch (e) {
     return fail(e);

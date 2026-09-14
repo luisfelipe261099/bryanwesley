@@ -204,13 +204,14 @@ npm run test:seguranca    # 18 — teto de agendamentos, webhook, redirect, CSV,
 npm run test:despacho     # 35 — trava da varredura, mensagem vencida, renovação, erro do driver
 ```
 
-Há ainda um roteiro de navegador (Playwright) com 76 verificações de ponta a
+Há ainda um roteiro de navegador (Playwright) com 91 verificações de ponta a
 ponta: agendamento de visitante, login, todas as telas do admin, check-in por
 código, endpoint do cron protegido, tomada de conta com prova por código, nav
 por papel, troca de senha, assinatura pelo site, remarcação, relatórios,
 download dos CSVs, heartbeat disparado pelo painel, redirect com sessão
-expirada, foco preso no modal, toggle do catálogo x banco, e desativação de
-barbeiro (com a guarda de auto-desativação do admin).
+expirada, foco preso no modal, toggle do catálogo x banco, desativação de
+barbeiro (com a guarda de auto-desativação do admin) e redefinição de senha da
+equipe pelo painel.
 
 Cobrem disponibilidade, bloqueios, antecedência, reserva dupla, corrida de
 concorrência, ciclo de vida do atendimento, fechamento da comissão e a
@@ -226,6 +227,7 @@ O que está no lugar, e por quê:
 | Guarda por papel no middleware **e** dentro de cada Server Action — o middleware deixa o POST da action passar e ela mesma redireciona se a sessão faltar | [`middleware.ts`](middleware.ts), `app/*/actions.ts`, [`lib/errors.ts`](lib/errors.ts) | Ação chamada direto, sem passar pela tela; sessão expirada virando tela muda |
 | Sessão confrontada com o banco a cada requisição: conta ativa, papel e `token_version` | [`lib/auth/index.ts`](lib/auth/index.ts) | Cookie de 30 dias sobrevivendo a demissão ou troca de senha |
 | Admin não desativa a própria conta nem o último admin ativo | [`app/admin/actions.ts`](app/admin/actions.ts) | Ficar trancado para fora do painel, sem outra porta de entrada |
+| Redefinir senha da equipe em `/admin/equipe`; cada pessoa troca a própria em `/conta` | [`app/admin/equipe/EquipeManager.tsx`](app/admin/equipe/EquipeManager.tsx), [`app/conta/page.tsx`](app/conta/page.tsx) | Barbeiro que esquece a senha ficar sem acesso — não há recuperação por e-mail |
 | Transição de atendimento condicional ao estado lido | [`lib/appointments.ts`](lib/appointments.ts) | Dois cliques concorrentes lançando comissão em atendimento cancelado |
 | Baixa de pagamento condicional ao PENDENTE | [`lib/payments.ts`](lib/payments.ts) | Webhook entregue em duplicidade estendendo a assinatura dois ciclos |
 | Dono do recurso conferido em cancelar, remarcar e check-in | [`app/cliente/actions.ts`](app/cliente/actions.ts), [`app/barbeiro/actions.ts`](app/barbeiro/actions.ts) | Mexer no horário de outra pessoa |

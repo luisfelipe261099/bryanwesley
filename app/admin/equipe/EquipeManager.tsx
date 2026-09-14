@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Loader2, Plus, Save, Target, UserPlus, X } from "lucide-react";
+import { KeyRound, Loader2, Plus, Save, Target, UserPlus, X } from "lucide-react";
 import {
   Card,
   notify,
@@ -13,8 +13,8 @@ import {
 } from "@/components/admin/Feedback";
 import { toast } from "@/lib/toast";
 import { formatBRL } from "@/lib/money";
-import { resetUserPassword } from "../actions";
 import {
+  resetUserPassword,
   createBarber,
   updateBarber,
   upsertCommissionTier,
@@ -26,6 +26,8 @@ const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
 type BarberRow = {
   id: number;
+  /** Conta de login do barbeiro (users.id). */
+  userId: number;
   name: string;
   shortName: string;
   title: string;
@@ -157,6 +159,8 @@ function BarberCard({ barber }: { barber: BarberRow }) {
 
       <BarberHours barberId={barber.id} hours={barber.hours} />
 
+      <ResetSenha userId={barber.userId} nome={barber.shortName} />
+
       <button
         type="button"
         onClick={save}
@@ -172,6 +176,89 @@ function BarberCard({ barber }: { barber: BarberRow }) {
       </button>
       <Feedback msg={msg} />
     </Card>
+  );
+}
+
+/**
+ * Redefinir a senha de quem trabalha na barbearia.
+ *
+ * Não existe "esqueci minha senha" por e-mail: sem isto, barbeiro que
+ * esquece a senha fica sem acesso e ninguém consegue devolvê-lo. A ação
+ * também sobe o token_version, então as sessões antigas daquela conta caem.
+ */
+function ResetSenha({ userId, nome }: { userId: number; nome: string }) {
+  const [aberto, setAberto] = useState(false);
+  const [senha, setSenha] = useState("");
+  const [msg, setMsg] = useState<Msg>(null);
+  const [pending, start] = useTransition();
+
+  if (!aberto) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAberto(true)}
+        className="label mt-4 inline-flex items-center gap-2 rounded-full border border-white/12 px-4 py-2.5 text-steel-300 transition-colors hover:border-electric/45 hover:text-white"
+      >
+        <KeyRound className="h-3.5 w-3.5" />
+        Redefinir senha
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl border border-white/8 bg-white/[0.02] p-4">
+      <p className="text-sm font-semibold text-white">Nova senha de {nome}</p>
+      <p className="mt-1 text-xs text-steel-400">
+        Ao salvar, as sessões abertas dessa conta caem e a pessoa entra de novo
+        com a senha nova.
+      </p>
+      <div className="mt-3 flex flex-wrap items-end gap-2">
+        <div className="min-w-[12rem] flex-1">
+          <TextInput
+            label="Senha"
+            type="text"
+            autoComplete="new-password"
+            value={senha}
+            onChange={(e) => setSenha(e.target.value)}
+          />
+        </div>
+        <button
+          type="button"
+          disabled={pending || senha.trim().length < 6}
+          onClick={() => {
+            setMsg(null);
+            start(async () => {
+              const r = await resetUserPassword({ userId, password: senha });
+              setMsg(notify(r, "Senha redefinida."));
+              if (r.ok) {
+                setSenha("");
+                setAberto(false);
+              }
+            });
+          }}
+          className="btn-royal label inline-flex items-center gap-2 rounded-full px-5 py-3 text-white disabled:opacity-50"
+        >
+          {pending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <KeyRound className="h-4 w-4" />
+          )}
+          Salvar senha
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setAberto(false);
+            setSenha("");
+            setMsg(null);
+          }}
+          className="label rounded-full border border-white/12 px-4 py-3 text-steel-400 hover:text-white"
+        >
+          Cancelar
+        </button>
+      </div>
+      <Feedback msg={msg} />
+    </div>
   );
 }
 

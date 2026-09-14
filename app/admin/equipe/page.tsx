@@ -17,6 +17,8 @@ export default async function AdminEquipe() {
     <EquipeManager
       team={perf.map((p) => ({
         id: p.barber.id,
+        // Conta de login do barbeiro: a senha é do usuário, não do cartão.
+        userId: p.barber.userId,
         name: p.barber.user.name,
         shortName: p.barber.shortName,
         title: p.barber.title,

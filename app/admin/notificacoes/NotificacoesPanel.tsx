@@ -199,7 +199,15 @@ function Discard({ id }: { id: number }) {
       type="button"
       disabled={pending}
       title="Tirar da fila: esta mensagem não será enviada"
-      onClick={() => start(() => discardNotification(id).then(() => {}))}
+      onClick={() =>
+        start(async () => {
+          const r = await discardNotification(id);
+          toast(
+            r.ok ? r.message ?? "Descartada." : r.error ?? "Não foi possível.",
+            r.ok ? "ok" : "erro"
+          );
+        })
+      }
       className="label inline-flex items-center gap-1.5 rounded-full border border-white/12 px-3 py-2 text-steel-300 hover:border-red-400/50 hover:text-red-200 disabled:opacity-50"
     >
       {pending ? (
