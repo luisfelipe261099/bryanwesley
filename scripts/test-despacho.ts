@@ -7,12 +7,15 @@ import {
   claimDispatchSlot,
   runDispatch,
   lastDispatchAt,
+  discardStaleNotifications,
   HEARTBEAT_INTERVAL_MS,
 } from "../lib/dispatch";
+import { nextRenewal } from "../lib/subscriptions";
+import { sessionMatchesAccount } from "../lib/auth/session";
 import { isNextControlFlow } from "../lib/errors";
 import { BookingError } from "../lib/appointments";
 import { labelAgo } from "../lib/time";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 let p = 0, f = 0;
 const ok = (l: string, c: boolean, e = "") =>
@@ -75,6 +78,56 @@ async function main() {
     ok("BookingError não é", !isNextControlFlow(new BookingError("x")));
     ok("null/undefined não quebram", !isNextControlFlow(null) && !isNextControlFlow(undefined));
     ok("digest de outro tipo não é", !isNextControlFlow({ digest: 12345 }));
+  }
+
+  console.log("\n2b. Mensagem vencida é descartada, a válida fica");
+  {
+    const appt = await db.query.appointments.findFirst();
+    if (!appt) {
+      ok("há agendamento para ancorar a notificação", false);
+    } else {
+      const agora = Date.now();
+      const [{ id: velha }] = await db.insert(notifications).values({
+        appointmentId: appt.id, phone: "11900000000", kind: "LEMBRETE_2H",
+        body: "teste vencida", scheduledFor: new Date(agora - 3 * 3600_000),
+      }).$returningId();
+      const [{ id: nova }] = await db.insert(notifications).values({
+        appointmentId: appt.id, phone: "11900000000", kind: "LEMBRETE_2H",
+        body: "teste válida", scheduledFor: new Date(agora - 5 * 60_000),
+      }).$returningId();
+      const n = await discardStaleNotifications();
+      const v = await db.query.notifications.findFirst({ where: eq(notifications.id, velha) });
+      const w = await db.query.notifications.findFirst({ where: eq(notifications.id, nova) });
+      ok("lembrete de 2h com 3h de atraso vira CANCELADA com motivo", v?.status === "CANCELADA" && /Vencida/.test(v.error ?? ""), v?.status);
+      ok("lembrete de 2h com 5 min de atraso continua PENDENTE", w?.status === "PENDENTE", w?.status);
+      ok("contagem de descartadas ≥ 1", n >= 1, String(n));
+      await db.delete(notifications).where(inArray(notifications.id, [velha, nova]));
+    }
+  }
+
+  console.log("\n2c. nextRenewal não transborda o mês");
+  {
+    const jan31 = new Date(2027, 0, 31, 12);
+    const r = nextRenewal(jan31, "MENSAL");
+    ok("31/jan + 1 mês = 28/fev", r.getMonth() === 1 && r.getDate() === 28, r.toISOString());
+    const mar31 = new Date(2027, 2, 31, 12);
+    const r2 = nextRenewal(mar31, "MENSAL");
+    ok("31/mar + 1 mês = 30/abr", r2.getMonth() === 3 && r2.getDate() === 30, r2.toISOString());
+    const fev29 = new Date(2028, 1, 29, 12);
+    const r3 = nextRenewal(fev29, "ANUAL");
+    ok("29/fev/2028 + 12 meses = 28/fev/2029", r3.getFullYear() === 2029 && r3.getMonth() === 1 && r3.getDate() === 28, r3.toISOString());
+    const d15 = new Date(2027, 4, 15, 12);
+    ok("dia comum não muda", nextRenewal(d15, "MENSAL").getDate() === 15);
+  }
+
+  console.log("\n2d. Sessão só vale enquanto a conta bate com o banco");
+  {
+    const s = { id: 1, name: "X", role: "BARBER" as const, v: 2 };
+    ok("conta ativa, mesmo papel e versão → vale", sessionMatchesAccount(s, { active: true, role: "BARBER", tokenVersion: 2 }));
+    ok("conta desativada → cai", !sessionMatchesAccount(s, { active: false, role: "BARBER", tokenVersion: 2 }));
+    ok("senha trocada (versão subiu) → cai", !sessionMatchesAccount(s, { active: true, role: "BARBER", tokenVersion: 3 }));
+    ok("papel mudou → cai", !sessionMatchesAccount(s, { active: true, role: "CLIENT", tokenVersion: 2 }));
+    ok("conta apagada → cai", !sessionMatchesAccount(s, null));
   }
 
   console.log("\n4. labelAgo");

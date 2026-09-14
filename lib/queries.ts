@@ -235,11 +235,13 @@ export async function barberMonthSummary(barberId: number, ref = new Date()) {
       atendimentos: count(),
     })
     .from(appointmentCommissions)
+    .innerJoin(appointments, eq(appointments.id, appointmentCommissions.appointmentId))
     .where(
       and(
         eq(appointmentCommissions.barberId, barberId),
-        gte(appointmentCommissions.createdAt, monthStart(ref)),
-        lt(appointmentCommissions.createdAt, nextMonthStart(ref))
+        // Mês do atendimento, não do fechamento (veja barberMonthRevenueCents).
+        gte(appointments.startsAt, monthStart(ref)),
+        lt(appointments.startsAt, nextMonthStart(ref))
       )
     );
   return {
@@ -355,10 +357,11 @@ export async function adminOverview() {
         shop: sum(appointmentCommissions.shopCents),
       })
       .from(appointmentCommissions)
+      .innerJoin(appointments, eq(appointments.id, appointmentCommissions.appointmentId))
       .where(
         and(
-          gte(appointmentCommissions.createdAt, monthStart(now)),
-          lt(appointmentCommissions.createdAt, nextMonthStart(now))
+          gte(appointments.startsAt, monthStart(now)),
+          lt(appointments.startsAt, nextMonthStart(now))
         )
       ),
     db

@@ -57,8 +57,9 @@ export async function commissionReport(
     .innerJoin(users, eq(users.id, barbers.userId))
     .where(
       and(
-        gte(appointmentCommissions.createdAt, start),
-        lt(appointmentCommissions.createdAt, end),
+        // Mês do atendimento: o fechamento pode ser registrado no dia seguinte.
+        gte(appointments.startsAt, start),
+        lt(appointments.startsAt, end),
         barberId ? eq(appointmentCommissions.barberId, barberId) : undefined
       )
     )

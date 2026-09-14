@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `token_version` int DEFAULT 0 NOT NULL;

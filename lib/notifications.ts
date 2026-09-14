@@ -36,7 +36,9 @@ export async function renderTemplate(
     case "AGENDAMENTO_CRIADO":
       return `Fala, ${first}! Seu horário na ${shop} está confirmado para ${quando}${comQuem}. ${valor} Código: ${appt.code}.`;
     case "LEMBRETE_24H":
-      return `Oi, ${first}! Passando pra lembrar do seu horário amanhã, ${quando}${comQuem}. Até lá! — ${shop}`;
+      // Sem "amanhã": a data completa já está no texto, e a mensagem pode
+      // sair com atraso — aí "amanhã" viraria mentira.
+      return `Oi, ${first}! Passando pra lembrar do seu horário: ${quando}${comQuem}. Até lá! — ${shop}`;
     case "LEMBRETE_2H":
       return `${first}, seu horário é daqui a pouco: ${quando}${comQuem}. Te esperamos na ${shop}!`;
     case "AGENDAMENTO_CANCELADO":
@@ -161,6 +163,16 @@ export async function markFailed(id: number, error: string, attempts: number) {
       attempts: attempts + 1,
     })
     .where(eq(notifications.id, id));
+}
+
+/** Tira uma mensagem da fila de vez (o dono decidiu que não deve sair). */
+export async function discardNotification(id: number) {
+  await db
+    .update(notifications)
+    .set({ status: "CANCELADA", error: "Descartada pelo painel" })
+    .where(
+      and(eq(notifications.id, id), inArray(notifications.status, ["PENDENTE", "ERRO"]))
+    );
 }
 
 /** Recoloca uma mensagem com erro na fila. */

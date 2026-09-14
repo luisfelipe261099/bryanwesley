@@ -29,6 +29,7 @@ import {
   pendingNotifications,
   markSent,
   markFailed,
+  discardNotification as discardNotificationRow,
 } from "@/lib/notifications";
 import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
 import { chargeSubscription } from "@/lib/payments";
@@ -201,6 +202,22 @@ export async function createBarber(
 
     let userId: number;
     const existing = await db.query.users.findFirst({ where: eq(users.phone, phone) });
+    // Só uma conta "leve" (cliente sem senha, criado por um agendamento)
+    // vira barbeiro por aqui. Conta com senha é de alguém: sobrescrever
+    // papel e senha dela seria tomar a conta.
+    if (existing?.passwordHash) {
+      return {
+        ok: false,
+        error:
+          "Já existe uma conta com esse WhatsApp. Use outro número ou peça para a pessoa entrar em contato.",
+      };
+    }
+    const emailDono = await db.query.users.findFirst({
+      where: eq(users.email, userData.email),
+    });
+    if (emailDono && emailDono.id !== existing?.id) {
+      return { ok: false, error: "Esse e-mail já está em outra conta." };
+    }
     if (existing) {
       await db.update(users).set(userData).where(eq(users.id, existing.id));
       userId = existing.id;
@@ -249,7 +266,18 @@ export async function updateBarber(input: {
         active: input.active,
       })
       .where(eq(barbers.id, input.id));
-    return done("Barbeiro atualizado.");
+    // Sair da agenda é sair do sistema: a conta acompanha, e a sessão que
+    // ainda estiver aberta no celular dele cai na próxima requisição.
+    const alvo = await db.query.barbers.findFirst({ where: eq(barbers.id, input.id) });
+    if (alvo) {
+      await db
+        .update(users)
+        .set({ active: input.active })
+        .where(eq(users.id, alvo.userId));
+    }
+    return done(
+      input.active ? "Barbeiro atualizado." : "Barbeiro desativado e acesso encerrado."
+    );
   } catch (e) {
     return fail(e);
   }
@@ -565,11 +593,15 @@ export async function resetUserPassword(input: {
     if (input.password.trim().length < 6) {
       return { ok: false, error: "A senha precisa ter ao menos 6 caracteres." };
     }
+    // Senha redefinida pelo balcão: toda sessão antiga da conta cai.
     await db
       .update(users)
-      .set({ passwordHash: await hashPassword(input.password.trim()) })
+      .set({
+        passwordHash: await hashPassword(input.password.trim()),
+        tokenVersion: rawSql`${users.tokenVersion} + 1`,
+      })
       .where(eq(users.id, input.userId));
-    return done("Senha redefinida.");
+    return done("Senha redefinida. A pessoa precisa entrar de novo.");
   } catch (e) {
     return fail(e);
   }
@@ -681,6 +713,17 @@ export async function resendNotification(id: number): Promise<Result> {
     await admin();
     await retryNotification(id);
     return done("Mensagem recolocada na fila.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Tira uma mensagem da fila (não sai nunca). */
+export async function discardNotification(id: number): Promise<Result> {
+  try {
+    await admin();
+    await discardNotificationRow(id);
+    return done("Mensagem descartada.");
   } catch (e) {
     return fail(e);
   }

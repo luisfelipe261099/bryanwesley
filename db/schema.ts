@@ -75,6 +75,9 @@ export const users = mysqlTable(
     // Força bruta: após 5 erros seguidos a conta trava por 15 minutos.
     failedLogins: int("failed_logins").notNull().default(0),
     lockedUntil: ts("locked_until"),
+    // Sobe a cada troca/redefinição de senha: sessões antigas (cookie de
+    // 30 dias) carregam a versão com que nasceram e deixam de valer.
+    tokenVersion: int("token_version").notNull().default(0),
     createdAt: tsNow("created_at"),
   },
   (t) => ({

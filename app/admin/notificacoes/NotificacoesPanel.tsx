@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Loader2, RefreshCw, Send, MessageCircle } from "lucide-react";
+import { Loader2, RefreshCw, Send, MessageCircle, Ban } from "lucide-react";
 import { Card,
   notify,
   Feedback,
   type Msg,
 } from "@/components/admin/Feedback";
 import { formatPhone } from "@/lib/phone";
-import { resendNotification, flushNotifications } from "../actions";
+import { resendNotification, flushNotifications, discardNotification } from "../actions";
 
 const KIND_LABEL: Record<string, string> = {
   AGENDAMENTO_CRIADO: "Confirmação",
@@ -142,6 +142,9 @@ export function NotificacoesPanel({
                       {n.status.toLowerCase()}
                     </span>
                     {n.status === "ERRO" && <Resend id={n.id} />}
+                    {(n.status === "PENDENTE" || n.status === "ERRO") && (
+                      <Discard id={n.id} />
+                    )}
                   </span>
                 </div>
                 <p className="mt-2 text-sm leading-relaxed text-steel-300">
@@ -176,6 +179,26 @@ function Resend({ id }: { id: number }) {
         <RefreshCw className="h-3 w-3" />
       )}
       Reenviar
+    </button>
+  );
+}
+
+function Discard({ id }: { id: number }) {
+  const [pending, start] = useTransition();
+  return (
+    <button
+      type="button"
+      disabled={pending}
+      title="Tirar da fila: esta mensagem não será enviada"
+      onClick={() => start(() => discardNotification(id).then(() => {}))}
+      className="label inline-flex items-center gap-1.5 rounded-full border border-white/12 px-3 py-2 text-steel-300 hover:border-red-400/50 hover:text-red-200 disabled:opacity-50"
+    >
+      {pending ? (
+        <Loader2 className="h-3 w-3 animate-spin" />
+      ) : (
+        <Ban className="h-3 w-3" />
+      )}
+      Descartar
     </button>
   );
 }

@@ -16,9 +16,8 @@ export async function GET() {
       time: new Date().toISOString(),
     });
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, db: "erro", error: e instanceof Error ? e.message : "?" },
-      { status: 503 }
-    );
+    // A mensagem do driver traz host e usuário do banco: fica só no log.
+    console.error("healthcheck:", e);
+    return NextResponse.json({ ok: false, db: "erro" }, { status: 503 });
   }
 }

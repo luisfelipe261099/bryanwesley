@@ -12,9 +12,9 @@
 // A trava é um compare-and-swap em settings.last_dispatch_at: só quem
 // conseguir avançar o carimbo executa; o resto pula.
 // ───────────────────────────────────────────────────────────
-import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { settings } from "@/db/schema";
+import { notifications, settings } from "@/db/schema";
 import { getSettings } from "./schedule";
 import { pendingNotifications, markSent, markFailed } from "./notifications";
 import { sendWhatsapp, isWhatsappConfigured } from "./providers/whatsapp";
@@ -32,9 +32,58 @@ export type DispatchReport = {
   enviadas: number;
   falhas: number;
   pendentes: number;
+  descartadas: number;
   horariosFixos: MaterializeReport;
   assinaturasExpiradas: number;
 };
+
+/** DATETIME(3) em UTC para SQL cru (o driver está em timezone "Z"). */
+function sqlDate(d: Date) {
+  return d.toISOString().slice(0, 23).replace("T", " ");
+}
+
+/**
+ * Mensagem que perdeu o sentido não sai atrasada. Acontece quando ninguém
+ * abre o painel por horas: um "seu horário é daqui a pouco" entregue depois
+ * do corte só confunde. Cada regra marca como CANCELADA com o motivo.
+ */
+export async function discardStaleNotifications(now = new Date()): Promise<number> {
+  let total = 0;
+  const vencer = async (
+    kinds: (typeof notifications.$inferSelect)["kind"][],
+    antesDe: Date,
+    motivo: string
+  ) => {
+    const [res] = await db
+      .update(notifications)
+      .set({ status: "CANCELADA", error: motivo })
+      .where(
+        and(
+          eq(notifications.status, "PENDENTE"),
+          inArray(notifications.kind, kinds),
+          lt(notifications.scheduledFor, antesDe)
+        )
+      );
+    total += res.affectedRows;
+  };
+
+  // Lembrete de 2h com mais de 90 min de atraso: o cliente já chegou (ou já foi).
+  await vencer(["LEMBRETE_2H"], new Date(now.getTime() - 90 * 60_000), "Vencida: lembrete de 2h atrasado demais");
+  // Lembrete de 24h com mais de 12h de atraso: o de 2h cobre o que resta.
+  await vencer(["LEMBRETE_24H"], new Date(now.getTime() - 12 * 3600_000), "Vencida: lembrete de 24h atrasado demais");
+
+  // Qualquer aviso de um horário que já começou há mais de 1h.
+  const [res] = await db.execute(sql`
+    UPDATE notifications n
+    JOIN appointments a ON a.id = n.appointment_id
+    SET n.status = 'CANCELADA', n.error = 'Vencida: o horário já passou'
+    WHERE n.status = 'PENDENTE'
+      AND n.kind IN ('AGENDAMENTO_CRIADO','AGENDAMENTO_REMARCADO','AGENDAMENTO_CANCELADO','LEMBRETE_24H','LEMBRETE_2H')
+      AND a.starts_at < ${sqlDate(new Date(now.getTime() - 3600_000))}
+  `);
+  total += Number((res as { affectedRows?: number }).affectedRows ?? 0);
+  return total;
+}
 
 /**
  * Tenta reservar a vez de varrer a fila. Devolve true para exatamente um
@@ -62,6 +111,7 @@ export async function claimDispatchSlot(
 /** Varre a fila. Não trava: quem chama decide se deve rodar (claimDispatchSlot). */
 export async function runDispatch(limit = 50): Promise<DispatchReport> {
   const assinaturasExpiradas = await expireOverdueSubscriptions();
+  const descartadas = await discardStaleNotifications();
 
   // Horários fixos das próximas semanas entram antes da entrega, para que
   // os lembretes deles também saiam nesta rodada.
@@ -91,6 +141,7 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
     enviadas,
     falhas,
     pendentes: configurado ? fila.length - enviadas : fila.length,
+    descartadas,
     horariosFixos,
     assinaturasExpiradas,
   };

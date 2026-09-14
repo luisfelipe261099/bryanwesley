@@ -207,20 +207,31 @@ export async function createBooking(input: CreateBookingInput) {
       );
 
       // Reconfere o horário já dentro da trava — quem entrou antes ganhou.
-      const clash = await tx.query.appointments.findFirst({
-        where: and(
-          eq(appointments.barberId, barberId),
-          inArray(appointments.status, [
-            "PENDENTE",
-            "CONFIRMADO",
-            "EM_ANDAMENTO",
-            "CONCLUIDO",
-          ]),
-          // Operadores tipados: o Drizzle serializa o Date pelo tipo da coluna.
-          lt(appointments.startsAt, endsAt),
-          gt(appointments.endsAt, startsAt)
-        ),
-      });
+      // FOR UPDATE é obrigatório aqui: no TiDB (transação pessimista) um
+      // SELECT comum lê o snapshot tirado no BEGIN, ou seja, de ANTES de
+      // esperarmos a trava — e não enxergaria a reserva que a outra
+      // transação acabou de gravar. A leitura com trava vê o dado atual.
+      // No InnoDB tanto faz (o snapshot nasce na primeira leitura), e o
+      // teste de corrida local passa dos dois jeitos — por isso o cuidado.
+      const [clash] = await tx
+        .select({ id: appointments.id })
+        .from(appointments)
+        .where(
+          and(
+            eq(appointments.barberId, barberId),
+            inArray(appointments.status, [
+              "PENDENTE",
+              "CONFIRMADO",
+              "EM_ANDAMENTO",
+              "CONCLUIDO",
+            ]),
+            // Operadores tipados: o Drizzle serializa o Date pelo tipo da coluna.
+            lt(appointments.startsAt, endsAt),
+            gt(appointments.endsAt, startsAt)
+          )
+        )
+        .limit(1)
+        .for("update");
       if (clash) {
         throw new BookingError(
           "Esse horário acabou de ser reservado por outra pessoa. Escolha outro."

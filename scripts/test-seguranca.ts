@@ -129,12 +129,12 @@ async function main() {
 
   console.log("\n5. Sessão só aceita papel conhecido");
   {
-    const bom = await signSession({ id: 1, name: "Teste", role: "ADMIN" });
+    const bom = await signSession({ id: 1, name: "Teste", role: "ADMIN", v: 0 });
     ok("papel válido passa", (await verifySession(bom))?.role === "ADMIN");
 
     // Token assinado com papel fora da lista (regressão de versão antiga).
     const torto = await signSession({
-      id: 1, name: "Teste", role: "SUPERADMIN" as never,
+      id: 1, name: "Teste", role: "SUPERADMIN" as never, v: 0,
     });
     ok("papel desconhecido é rejeitado", (await verifySession(torto)) === null);
     ok("token adulterado é rejeitado", (await verifySession(bom + "x")) === null);

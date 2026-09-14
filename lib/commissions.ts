@@ -46,14 +46,17 @@ export function nextMonthStart(ref = new Date()) {
 
 /** Faturamento já realizado pelo barbeiro no mês (base das metas). */
 export async function barberMonthRevenueCents(barberId: number, ref = new Date()) {
+  // O mês é o do atendimento, não o do clique em "concluir": quem fecha os
+  // de ontem na manhã seguinte não pode jogar a comissão no mês errado.
   const [row] = await db
     .select({ total: sum(appointmentCommissions.baseCents) })
     .from(appointmentCommissions)
+    .innerJoin(appointments, eq(appointments.id, appointmentCommissions.appointmentId))
     .where(
       and(
         eq(appointmentCommissions.barberId, barberId),
-        gte(appointmentCommissions.createdAt, monthStart(ref)),
-        lt(appointmentCommissions.createdAt, nextMonthStart(ref))
+        gte(appointments.startsAt, monthStart(ref)),
+        lt(appointments.startsAt, nextMonthStart(ref))
       )
     );
   return Number(row?.total ?? 0);

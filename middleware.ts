@@ -21,8 +21,15 @@ export async function middleware(req: NextRequest) {
   // lança o redirect() que o router do Next entende e executa na tela.
   // Um 307 daqui seria seguido pelo fetch do navegador até o HTML do
   // login — a action nunca responderia e a tela ficaria muda.
+  // A página protegida precisa saber o próprio caminho para, se a sessão
+  // cair, mandar de volta para ela depois do login (Server Components não
+  // enxergam a URL). Vai num header interno da requisição.
+  const forwarded = new Headers(req.headers);
+  forwarded.set("x-pathname", pathname + req.nextUrl.search);
+  const next = () => NextResponse.next({ request: { headers: forwarded } });
+
   if (req.method === "POST" && req.headers.get("next-action")) {
-    return NextResponse.next();
+    return next();
   }
 
   const session = await verifySession(req.cookies.get(SESSION_COOKIE)?.value);
@@ -41,7 +48,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  return NextResponse.next();
+  return next();
 }
 
 export const config = {

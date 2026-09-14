@@ -76,7 +76,11 @@ export async function login(
   const ok = await verifyPassword(password, hash);
   if (!user || !user.passwordHash || !user.active || !ok) {
     if (user) {
-      const failed = user.failedLogins + 1;
+      // Trava que já expirou não conta mais: senão o primeiro erro depois
+      // dos 15 minutos travaria de novo na hora (5 + 1 ≥ 5).
+      const travaVencida =
+        !!user.lockedUntil && user.lockedUntil.getTime() <= Date.now();
+      const failed = (travaVencida ? 0 : user.failedLogins) + 1;
       await db
         .update(users)
         .set({
@@ -108,6 +112,7 @@ export async function login(
     name: user.name,
     role: user.role,
     barberId: barber?.id,
+    v: user.tokenVersion,
   });
   cookies().set(SESSION_COOKIE, token, sessionCookieOptions);
 
@@ -209,7 +214,13 @@ export async function signup(
     userId = id;
   }
 
-  const token = await signSession({ id: userId, name, role: "CLIENT" });
+  const conta = await db.query.users.findFirst({ where: eq(users.id, userId) });
+  const token = await signSession({
+    id: userId,
+    name,
+    role: "CLIENT",
+    v: conta?.tokenVersion ?? 0,
+  });
   cookies().set(SESSION_COOKIE, token, sessionCookieOptions);
   redirect("/cliente");
 }

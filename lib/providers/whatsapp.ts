@@ -47,6 +47,9 @@ export async function sendWhatsapp(
           type: "text",
           text: { preview_url: false, body },
         }),
+        // A varredura manda em série dentro do tempo da função (30–60 s):
+        // uma chamada pendurada não pode consumir a janela inteira.
+        signal: AbortSignal.timeout(10_000),
       }
     );
 

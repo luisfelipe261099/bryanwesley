@@ -11,8 +11,10 @@ import {
   plans,
   planRequests,
 } from "@/db/schema";
+import { cookies } from "next/headers";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { requireRole } from "@/lib/auth";
+import { SESSION_COOKIE, signSession, sessionCookieOptions } from "@/lib/auth/session";
 import {
   transitionAppointment,
   rescheduleBooking,
@@ -167,10 +169,18 @@ export async function changeMyPassword(input: {
   if (!user?.passwordHash) return { ok: false, error: "Conta sem senha definida." };
   const ok = await verifyPassword(input.current, user.passwordHash);
   if (!ok) return { ok: false, error: "Senha atual incorreta." };
+  // Versão nova derruba as outras sessões desta conta (celular antigo,
+  // computador da barbearia). A sessão atual ganha um cookie novo e segue.
+  const v = user.tokenVersion + 1;
   await db
     .update(users)
-    .set({ passwordHash: await hashPassword(input.next.trim()) })
+    .set({ passwordHash: await hashPassword(input.next.trim()), tokenVersion: v })
     .where(eq(users.id, session.id));
+  cookies().set(
+    SESSION_COOKIE,
+    await signSession({ ...session, v }),
+    sessionCookieOptions
+  );
   return { ok: true };
 }
 

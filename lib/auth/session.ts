@@ -10,7 +10,30 @@ export type SessionUser = {
   name: string;
   role: Role;
   barberId?: number;
+  /** users.token_version no momento do login. */
+  v: number;
 };
+
+/** Situação atual da conta no banco, para confrontar com o cookie. */
+export type AccountState = {
+  active: boolean;
+  role: Role;
+  tokenVersion: number;
+};
+
+/**
+ * O cookie vale 30 dias, mas nesse meio-tempo a conta pode ter sido
+ * desativada, mudado de papel ou trocado a senha. Só a sessão que ainda
+ * bate com o banco continua valendo.
+ */
+export function sessionMatchesAccount(
+  session: SessionUser,
+  account: AccountState | null
+): boolean {
+  if (!account || !account.active) return false;
+  if (account.role !== session.role) return false;
+  return account.tokenVersion === session.v;
+}
 
 const ROLES: Role[] = ["ADMIN", "BARBER", "CLIENT"];
 
@@ -57,6 +80,8 @@ export async function verifySession(
       role: payload.role as Role,
       barberId:
         typeof payload.barberId === "number" ? payload.barberId : undefined,
+      // Token de antes da versão existir vale como versão 0.
+      v: typeof payload.v === "number" ? payload.v : 0,
     };
   } catch {
     return null;

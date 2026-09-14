@@ -28,8 +28,10 @@ function poolConfig(connectionString: string): mysql.PoolOptions {
     timezone: "Z",
     dateStrings: false,
     supportBigNumbers: true,
-    // Na Vercel cada função é efêmera: 1 conexão. Num servidor comum, mais.
-    connectionLimit: process.env.VERCEL ? 1 : 5,
+    // Na Vercel uma instância atende várias requisições ao mesmo tempo
+    // (Fluid compute): com 1 conexão elas fariam fila no pool. Poucas
+    // bastam — cada instância vive pouco e o TiDB aceita bem mais.
+    connectionLimit: process.env.VERCEL ? 4 : 5,
     waitForConnections: true,
     enableKeepAlive: true,
   };
