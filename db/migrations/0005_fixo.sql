@@ -1,0 +1,1 @@
+ALTER TABLE `appointments` ADD `recurring_slot_id` int;

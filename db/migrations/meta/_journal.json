@@ -36,6 +36,13 @@
       "when": 1789393384837,
       "tag": "0004_sessao",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1789406100605,
+      "tag": "0005_fixo",
+      "breakpoints": true
     }
   ]
 }

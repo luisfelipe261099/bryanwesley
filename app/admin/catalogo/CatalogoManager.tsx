@@ -10,6 +10,7 @@ import {
   Toggle,
   type Msg,
 } from "@/components/admin/Feedback";
+import { toast } from "@/lib/toast";
 import { formatBRL } from "@/lib/money";
 import { saveService, savePlan, toggleService } from "../actions";
 
@@ -173,8 +174,17 @@ function ToggleActive({
       disabled={pending}
       onClick={() => {
         const next = !active;
-        onChange(next);
-        start(() => toggleService(id, next).then(() => {}));
+        // Vira só quando o servidor confirma: otimista sem rollback deixava
+        // a tela mostrando o oposto do banco quando a ação falhava.
+        start(async () => {
+          const r = await toggleService(id, next);
+          if (r.ok) {
+            onChange(next);
+            toast(r.message ?? (next ? "Serviço ativado." : "Serviço desativado."));
+          } else {
+            toast(r.error ?? "Não foi possível alterar.", "erro");
+          }
+        });
       }}
       className={`label rounded-full px-4 py-2.5 transition-colors disabled:opacity-50 ${
         active

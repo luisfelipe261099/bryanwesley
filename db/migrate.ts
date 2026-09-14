@@ -69,17 +69,39 @@ async function main() {
     applied_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
   )`);
 
-  const [rows] = await conn.query<mysql.RowDataPacket[]>(
-    "SELECT name FROM __migrations"
+  // DDL não é transacional no MySQL/TiDB: uma migração que quebrasse no 3º
+  // statement deixava os dois primeiros aplicados e nada registrado — e o
+  // build seguinte tropeçava para sempre em "coluna já existe". Cada
+  // statement concluído é anotado, e a retomada começa do próximo.
+  const [cols] = await conn.query<mysql.RowDataPacket[]>(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = '__migrations'
+        AND COLUMN_NAME = 'statements_done'`
   );
-  const applied = new Set(rows.map((r) => r.name as string));
+  if (cols.length === 0) {
+    await conn.query(
+      "ALTER TABLE __migrations ADD statements_done INT NOT NULL DEFAULT 0, ADD done TINYINT(1) NOT NULL DEFAULT 1"
+    );
+  }
+
+  const [rows] = await conn.query<mysql.RowDataPacket[]>(
+    "SELECT name, statements_done, done FROM __migrations"
+  );
+  const state = new Map(
+    rows.map((r) => [
+      r.name as string,
+      { done: Boolean(r.done), at: Number(r.statements_done) },
+    ])
+  );
 
   const files = readdirSync(dir)
     .filter((f) => f.endsWith(".sql"))
     .sort();
 
   for (const file of files) {
-    if (applied.has(file)) continue;
+    const st = state.get(file);
+    if (st?.done) continue;
     const body = readFileSync(join(dir, file), "utf8");
     // drizzle-kit separa os statements com "--> statement-breakpoint"
     const statements = body
@@ -87,11 +109,26 @@ async function main() {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    console.log(`▶ aplicando ${file} (${statements.length} statement(s))`);
-    for (const statement of statements) {
-      await conn.query(statement);
+    const inicio = st?.at ?? 0;
+    console.log(
+      `▶ aplicando ${file} (${statements.length} statement(s)${
+        inicio ? `, retomando do ${inicio + 1}º` : ""
+      })`
+    );
+    if (!st) {
+      await conn.query(
+        "INSERT INTO __migrations (name, statements_done, done) VALUES (?, 0, 0)",
+        [file]
+      );
     }
-    await conn.query("INSERT INTO __migrations (name) VALUES (?)", [file]);
+    for (let i = inicio; i < statements.length; i++) {
+      await conn.query(statements[i]);
+      await conn.query(
+        "UPDATE __migrations SET statements_done = ? WHERE name = ?",
+        [i + 1, file]
+      );
+    }
+    await conn.query("UPDATE __migrations SET done = 1 WHERE name = ?", [file]);
     console.log(`✓ ${file}`);
   }
 

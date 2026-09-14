@@ -12,7 +12,7 @@ import {
 } from "../lib/dispatch";
 import { nextRenewal } from "../lib/subscriptions";
 import { sessionMatchesAccount } from "../lib/auth/session";
-import { isNextControlFlow } from "../lib/errors";
+import { isNextControlFlow, dbErrorCode } from "../lib/errors";
 import { BookingError } from "../lib/appointments";
 import { labelAgo } from "../lib/time";
 import { eq, inArray } from "drizzle-orm";
@@ -78,6 +78,11 @@ async function main() {
     ok("BookingError não é", !isNextControlFlow(new BookingError("x")));
     ok("null/undefined não quebram", !isNextControlFlow(null) && !isNextControlFlow(undefined));
     ok("digest de outro tipo não é", !isNextControlFlow({ digest: 12345 }));
+    // O Drizzle 0.45 embrulha a exceção do driver: o código fica em `cause`.
+    ok("dbErrorCode lê code no topo", dbErrorCode({ code: "ER_DUP_ENTRY" }) === "ER_DUP_ENTRY");
+    ok("dbErrorCode lê code em cause (DrizzleQueryError)", dbErrorCode({ message: "x", cause: { code: "ER_DUP_ENTRY" } }) === "ER_DUP_ENTRY");
+    ok("dbErrorCode desce dois níveis", dbErrorCode({ cause: { cause: { code: "ER_LOCK" } } }) === "ER_LOCK");
+    ok("sem código devolve undefined", dbErrorCode(new Error("x")) === undefined && dbErrorCode(null) === undefined);
   }
 
   console.log("\n2b. Mensagem vencida é descartada, a válida fica");

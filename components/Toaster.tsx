@@ -15,7 +15,9 @@ export function Toaster() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  if (!mounted || toasts.length === 0) return null;
+  // A região aria-live precisa existir ANTES do primeiro aviso, senão o
+  // leitor de tela não anuncia o que aparecer nela depois.
+  if (!mounted) return null;
 
   return createPortal(
     <div

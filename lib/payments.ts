@@ -117,7 +117,10 @@ export async function settlePayment(input: {
     return { ok: false as const, error: check.error ?? "Pagamento não confirmado." };
   }
 
-  await db
+  // Condicional ao PENDENTE: o provedor pode entregar o mesmo webhook duas
+  // vezes ao mesmo tempo; só a chamada que der a baixa aplica o efeito,
+  // senão a assinatura seria estendida dois ciclos.
+  const [upd] = await db
     .update(payments)
     .set({
       status: "PAGO",
@@ -126,7 +129,8 @@ export async function settlePayment(input: {
       slug: input.slug ?? null,
       receiptUrl: input.receiptUrl ?? null,
     })
-    .where(eq(payments.id, payment.id));
+    .where(and(eq(payments.id, payment.id), eq(payments.status, "PENDENTE")));
+  if (upd.affectedRows === 0) return { ok: true as const, already: true };
 
   if (payment.kind === "ASSINATURA" && payment.subscriptionId) {
     const sub = await db.query.subscriptions.findFirst({

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
@@ -25,18 +25,45 @@ export function Modal({
   maxWidth?: string;
 }) {
   const [mounted, setMounted] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => setMounted(true), []);
 
-  // Esc fecha e a página atrás não rola enquanto o diálogo está aberto.
+  // Esc fecha, a página atrás não rola, e o foco entra no diálogo, circula
+  // dentro dele (Tab) e volta para onde estava ao fechar — senão teclado e
+  // leitor de tela continuam navegando a página de trás.
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const antes = document.activeElement as HTMLElement | null;
+    const focaveis = () =>
+      Array.from(
+        panelRef.current?.querySelectorAll<HTMLElement>(
+          'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+        ) ?? []
+      );
+    (focaveis()[0] ?? panelRef.current)?.focus();
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return onClose();
+      if (e.key !== "Tab") return;
+      const lista = focaveis();
+      if (lista.length === 0) return;
+      const primeiro = lista[0];
+      const ultimo = lista[lista.length - 1];
+      if (e.shiftKey && document.activeElement === primeiro) {
+        e.preventDefault();
+        ultimo.focus();
+      } else if (!e.shiftKey && document.activeElement === ultimo) {
+        e.preventDefault();
+        primeiro.focus();
+      }
+    };
     document.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
+      antes?.focus?.();
     };
   }, [open, onClose]);
 
@@ -51,7 +78,9 @@ export function Modal({
       onClick={onClose}
     >
       <div
-        className={`glass my-auto w-full ${maxWidth} rounded-3xl p-6`}
+        ref={panelRef}
+        tabIndex={-1}
+        className={`glass my-auto w-full ${maxWidth} rounded-3xl p-6 outline-none`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">

@@ -7,6 +7,7 @@ import { Card,
   Feedback,
   type Msg,
 } from "@/components/admin/Feedback";
+import { toast } from "@/lib/toast";
 import { formatPhone } from "@/lib/phone";
 import { resendNotification, flushNotifications, discardNotification } from "../actions";
 
@@ -170,7 +171,15 @@ function Resend({ id }: { id: number }) {
     <button
       type="button"
       disabled={pending}
-      onClick={() => start(() => resendNotification(id).then(() => {}))}
+      onClick={() =>
+        start(async () => {
+          const r = await resendNotification(id);
+          toast(
+            r.ok ? r.message ?? "Recolocada na fila." : r.error ?? "Não foi possível.",
+            r.ok ? "ok" : "erro"
+          );
+        })
+      }
       className="label inline-flex items-center gap-1.5 rounded-full border border-white/12 px-3 py-2 text-steel-300 hover:border-electric/45 hover:text-white disabled:opacity-50"
     >
       {pending ? (

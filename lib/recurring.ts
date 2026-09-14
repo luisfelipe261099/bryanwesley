@@ -6,7 +6,7 @@
 // impede marcar horários avulsos: são agendamentos comuns, criados pelo
 // mesmo caminho e sujeitos às mesmas regras de conflito.
 // ───────────────────────────────────────────────────────────
-import { and, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, eq, gt, inArray, or } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointments,
@@ -15,6 +15,7 @@ import {
   users,
 } from "@/db/schema";
 import { createBooking, BookingError } from "./appointments";
+import { cancelPendingNotifications } from "./notifications";
 import { getSettings } from "./schedule";
 import {
   shopToday,
@@ -67,12 +68,18 @@ export type MaterializeReport = {
  * Conflito não é erro — o horário fixo cede para quem já estava lá,
  * e o caso é reportado para o admin resolver.
  */
-export async function materializeRecurring(): Promise<MaterializeReport> {
+export async function materializeRecurring(
+  opts: { slotId?: number } = {}
+): Promise<MaterializeReport> {
   const settings = await getSettings();
   const report: MaterializeReport = { criados: 0, jaExistiam: 0, conflitos: [] };
 
+  // Com slotId, só aquele fixo: o relatório de conflitos é do membro que
+  // acabou de salvar, não uma mistura com o de todo mundo.
   const slots = await db.query.recurringSlots.findMany({
-    where: eq(recurringSlots.active, true),
+    where: opts.slotId
+      ? and(eq(recurringSlots.active, true), eq(recurringSlots.id, opts.slotId))
+      : eq(recurringSlots.active, true),
   });
   if (slots.length === 0) return report;
 
@@ -97,18 +104,26 @@ export async function materializeRecurring(): Promise<MaterializeReport> {
       const { year, month, day } = parseDateKey(dateKey);
       const startsAt = shopTimeToUtc(year, month, day, slot.minutesOfDay);
 
-      // Já materializado?
+      // Já tratado? Para uma ocorrência deste fixo vale QUALQUER status:
+      // cancelada pelo membro, ela não pode voltar na próxima varredura.
+      // O segundo ramo cobre ocorrências criadas antes do vínculo existir.
       const existente = await db.query.appointments.findFirst({
-        where: and(
-          eq(appointments.clientUserId, slot.userId),
-          eq(appointments.barberId, slot.barberId),
-          eq(appointments.startsAt, startsAt),
-          inArray(appointments.status, [
-            "PENDENTE",
-            "CONFIRMADO",
-            "EM_ANDAMENTO",
-            "CONCLUIDO",
-          ])
+        where: or(
+          and(
+            eq(appointments.recurringSlotId, slot.id),
+            eq(appointments.startsAt, startsAt)
+          ),
+          and(
+            eq(appointments.clientUserId, slot.userId),
+            eq(appointments.barberId, slot.barberId),
+            eq(appointments.startsAt, startsAt),
+            inArray(appointments.status, [
+              "PENDENTE",
+              "CONFIRMADO",
+              "EM_ANDAMENTO",
+              "CONCLUIDO",
+            ])
+          )
         ),
       });
       if (existente) {
@@ -127,6 +142,7 @@ export async function materializeRecurring(): Promise<MaterializeReport> {
           userId: user.id,
           notes: "Horário fixo do plano",
           fromRecurring: true,
+          recurringSlotId: slot.id,
         });
         report.criados++;
       } catch (e) {
@@ -140,4 +156,33 @@ export async function materializeRecurring(): Promise<MaterializeReport> {
   }
 
   return report;
+}
+
+/**
+ * Abriu mão do fixo, trocou por outro, ou o barbeiro saiu: as ocorrências
+ * futuras que já estavam garantidas na agenda são canceladas e os lembretes
+ * delas derrubados. Sem aviso de cancelamento — foi o próprio membro (ou a
+ * barbearia) que pediu, e um "seu horário foi cancelado" por semana seria
+ * ruído.
+ */
+export async function cancelFutureOccurrences(slotIds: number[]): Promise<number> {
+  if (slotIds.length === 0) return 0;
+  const alvo = await db
+    .select({ id: appointments.id })
+    .from(appointments)
+    .where(
+      and(
+        inArray(appointments.recurringSlotId, slotIds),
+        gt(appointments.startsAt, new Date()),
+        inArray(appointments.status, ["PENDENTE", "CONFIRMADO"])
+      )
+    );
+  if (alvo.length === 0) return 0;
+  const ids = alvo.map((a) => a.id);
+  await db
+    .update(appointments)
+    .set({ status: "CANCELADO" })
+    .where(inArray(appointments.id, ids));
+  for (const id of ids) await cancelPendingNotifications(id);
+  return ids.length;
 }

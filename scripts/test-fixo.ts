@@ -4,7 +4,8 @@ import {
   appointments, appointmentServices, appointmentCommissions,
   notifications, recurringSlots, subscriptions, users, plans, services as sv,
 } from "../db/schema";
-import { materializeRecurring, occurrencesFor } from "../lib/recurring";
+import { materializeRecurring, occurrencesFor, cancelFutureOccurrences } from "../lib/recurring";
+import { createBooking, transitionAppointment } from "../lib/appointments";
 import { shopToday, addDays, weekdayOf } from "../lib/time";
 import { eq, and, inArray } from "drizzle-orm";
 
@@ -102,6 +103,103 @@ async function main() {
     } catch (e) { console.log("     (não foi possível: " + (e as Error).message + ")"); }
   }
   ok("membro com fixo ainda agenda avulso", !!extra);
+
+
+  console.log("\n5. Ocorrência cancelada pelo membro não volta");
+  {
+    const slot = (await db.query.recurringSlots.findFirst({
+      where: eq(recurringSlots.active, true),
+    }))!;
+    const ocor = await db
+      .select()
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.recurringSlotId, slot.id),
+          eq(appointments.status, "CONFIRMADO")
+        )
+      );
+    ok("ocorrências carregam o vínculo com o fixo", ocor.length > 0, String(ocor.length));
+    if (ocor.length > 0) {
+      await transitionAppointment(ocor[0].id, "CANCELADO");
+      const antes = (
+        await db.select().from(appointments).where(eq(appointments.recurringSlotId, slot.id))
+      ).length;
+      const rel = await materializeRecurring();
+      const depois = (
+        await db.select().from(appointments).where(eq(appointments.recurringSlotId, slot.id))
+      ).length;
+      ok(
+        "materializar de novo não recria a cancelada",
+        rel.criados === 0 && depois === antes,
+        `criados=${rel.criados} ${antes}->${depois}`
+      );
+      const mesma = await db.query.appointments.findFirst({
+        where: eq(appointments.id, ocor[0].id),
+      });
+      ok("a ocorrência continua CANCELADO", mesma?.status === "CANCELADO", mesma?.status);
+    }
+  }
+
+  console.log("\n6. Abrir mão do fixo libera as ocorrências futuras");
+  {
+    const slot = (await db.query.recurringSlots.findFirst({
+      where: eq(recurringSlots.active, true),
+    }))!;
+    const liberados = await cancelFutureOccurrences([slot.id]);
+    ok("libera as ocorrências futuras", liberados >= 1, String(liberados));
+    const ativas = await db
+      .select()
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.recurringSlotId, slot.id),
+          inArray(appointments.status, ["PENDENTE", "CONFIRMADO"])
+        )
+      );
+    ok("nenhuma futura continua ativa", ativas.length === 0, String(ativas.length));
+    const rel = await materializeRecurring();
+    ok("e a varredura não as recria", rel.criados === 0, `criados=${rel.criados}`);
+  }
+
+  console.log("\n7. Transição concorrente: só uma vence, comissão coerente");
+  {
+    let alvo = null as Awaited<ReturnType<typeof createBooking>> | null;
+    for (let d = 2; d <= 9 && !alvo; d++) {
+      try {
+        alvo = await createBooking({
+          serviceIds: [corte.id],
+          dateKey: addDays(shopToday(), d),
+          time: "16:30",
+          barberId: null,
+          clientName: "Corrida Transicao",
+          clientPhone: "11970008888",
+        });
+      } catch { /* dia fechado ou ocupado */ }
+    }
+    if (!alvo) {
+      ok("consegui um horário para o teste de corrida", false);
+    } else {
+      const [a, b] = await Promise.allSettled([
+        transitionAppointment(alvo.id, "CONCLUIDO"),
+        transitionAppointment(alvo.id, "CANCELADO"),
+      ]);
+      const venceram = [a, b].filter((r) => r.status === "fulfilled").length;
+      ok("exatamente uma transição vence", venceram === 1, `${a.status}/${b.status}`);
+      const final = await db.query.appointments.findFirst({
+        where: eq(appointments.id, alvo.id),
+      });
+      const com = await db
+        .select()
+        .from(appointmentCommissions)
+        .where(eq(appointmentCommissions.appointmentId, alvo.id));
+      ok(
+        "comissão existe se e só se terminou CONCLUIDO",
+        (final?.status === "CONCLUIDO") === (com.length === 1),
+        `${final?.status} com=${com.length}`
+      );
+    }
+  }
 
   console.log(`\n${p} passaram · ${f} falharam\n`);
   await pool.end();

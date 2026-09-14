@@ -21,10 +21,12 @@ import {
   BookingError,
 } from "@/lib/appointments";
 import { chargeSubscription, isInfinitePayConfigured } from "@/lib/payments";
-import { materializeRecurring } from "@/lib/recurring";
+import { materializeRecurring, cancelFutureOccurrences } from "@/lib/recurring";
 import { shopToday } from "@/lib/time";
 
-export type ActionResult = { ok: true } | { ok: false; error: string };
+export type ActionResult =
+  | { ok: true; warning?: string }
+  | { ok: false; error: string };
 
 /** O cliente só pode cancelar o próprio horário, e com antecedência. */
 export async function cancelMyAppointment(
@@ -92,7 +94,15 @@ export async function saveRecurringSlot(input: {
     return { ok: false, error: "Escolha ao menos um serviço." };
   }
 
-  // Um fixo por membro: salvar substitui o anterior.
+  // Um fixo por membro: salvar substitui o anterior — e as semanas que o
+  // anterior já tinha garantido na agenda saem junto, senão o membro fica
+  // com dois horários fixos ocupando a agenda do barbeiro.
+  const antigos = await db
+    .select({ id: recurringSlots.id })
+    .from(recurringSlots)
+    .where(
+      and(eq(recurringSlots.userId, session.id), eq(recurringSlots.active, true))
+    );
   await db
     .update(recurringSlots)
     .set({ active: false })
@@ -102,8 +112,9 @@ export async function saveRecurringSlot(input: {
         eq(recurringSlots.active, true)
       )
     );
+  await cancelFutureOccurrences(antigos.map((a) => a.id));
 
-  await db.insert(recurringSlots).values({
+  const [{ id: novoId }] = await db.insert(recurringSlots).values({
     userId: session.id,
     barberId: input.barberId,
     frequency: input.frequency,
@@ -112,10 +123,10 @@ export async function saveRecurringSlot(input: {
     minutesOfDay: input.minutesOfDay,
     serviceIds: input.serviceIds,
     startsOn: shopToday(),
-  });
+  }).$returningId();
 
-  // Já deixa os próximos horários garantidos na agenda.
-  const report = await materializeRecurring();
+  // Já deixa os próximos horários garantidos na agenda — só deste fixo.
+  const report = await materializeRecurring({ slotId: novoId });
 
   revalidatePath("/cliente");
   revalidatePath("/barbeiro");
@@ -137,11 +148,28 @@ export async function saveRecurringSlot(input: {
       error: `Esse horário não está livre: ${report.conflitos[0].motivo} Escolha outro.`,
     };
   }
+  if (report.conflitos.length > 0) {
+    // Parte das semanas coube, parte não: o membro precisa saber quais
+    // datas ficaram de fora em vez de achar que está tudo reservado.
+    const dias = report.conflitos.map(
+      (c) => `${c.dateKey.slice(8, 10)}/${c.dateKey.slice(5, 7)}`
+    );
+    return {
+      ok: true,
+      warning: `Fixo salvo, mas ${dias.length === 1 ? "o dia" : "os dias"} ${dias.join(", ")} já ${dias.length === 1 ? "estava ocupado" : "estavam ocupados"}. Marque avulso nessas datas.`,
+    };
+  }
   return { ok: true };
 }
 
 export async function cancelRecurringSlot(): Promise<ActionResult> {
   const session = await requireRole(["CLIENT", "ADMIN"]);
+  const ativos = await db
+    .select({ id: recurringSlots.id })
+    .from(recurringSlots)
+    .where(
+      and(eq(recurringSlots.userId, session.id), eq(recurringSlots.active, true))
+    );
   await db
     .update(recurringSlots)
     .set({ active: false })
@@ -151,8 +179,19 @@ export async function cancelRecurringSlot(): Promise<ActionResult> {
         eq(recurringSlots.active, true)
       )
     );
+  // Abrir mão do fixo libera as semanas que já estavam na agenda: senão o
+  // barbeiro segue bloqueado por um fixo que não existe mais.
+  const liberados = await cancelFutureOccurrences(ativos.map((a) => a.id));
   revalidatePath("/cliente");
-  return { ok: true };
+  revalidatePath("/barbeiro");
+  revalidatePath("/admin");
+  return {
+    ok: true,
+    warning:
+      liberados > 0
+        ? `${liberados} horário(s) futuro(s) do fixo liberado(s).`
+        : undefined,
+  };
 }
 
 // ───────────────────────── Minha conta ─────────────────────────

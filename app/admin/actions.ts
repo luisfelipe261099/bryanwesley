@@ -10,6 +10,7 @@ import {
   planRequests,
   planServices,
   plans,
+  recurringSlots,
   scheduleBlocks,
   services,
   settings as settingsTable,
@@ -17,6 +18,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireRole } from "@/lib/auth";
+import { cancelFutureOccurrences } from "@/lib/recurring";
 import { isNextControlFlow } from "@/lib/errors";
 import { hashPassword } from "@/lib/auth/password";
 import {
@@ -255,7 +257,42 @@ export async function updateBarber(input: {
   active: boolean;
 }): Promise<Result> {
   try {
-    await admin();
+    const session = await admin();
+
+    // Desativar um barbeiro desativa a conta dele. Sem esta guarda o admin
+    // desativa o próprio cartão e fica trancado para fora do sistema — não
+    // existe outra porta para voltar. Aconteceu num teste aqui.
+    if (!input.active) {
+      const alvoAtual = await db.query.barbers.findFirst({
+        where: eq(barbers.id, input.id),
+      });
+      if (alvoAtual?.userId === session.id) {
+        return {
+          ok: false,
+          error:
+            "Você não pode desativar a própria conta — ficaria sem acesso ao painel. Peça a outro administrador.",
+        };
+      }
+      if (alvoAtual) {
+        const dono = await db.query.users.findFirst({
+          where: eq(users.id, alvoAtual.userId),
+        });
+        if (dono?.role === "ADMIN") {
+          const [{ n }] = await db
+            .select({ n: rawSql<number>`count(*)` })
+            .from(users)
+            .where(and(eq(users.role, "ADMIN"), eq(users.active, true)));
+          if (Number(n) <= 1) {
+            return {
+              ok: false,
+              error:
+                "Esse é o último administrador ativo. Promova outra pessoa antes de desativá-lo.",
+            };
+          }
+        }
+      }
+    }
+
     await db
       .update(barbers)
       .set({
@@ -275,8 +312,26 @@ export async function updateBarber(input: {
         .set({ active: input.active })
         .where(eq(users.id, alvo.userId));
     }
+    if (input.active) return done("Barbeiro atualizado.");
+
+    // Quem tinha fixo com ele fica sem: o fixo é desligado e as semanas
+    // futuras saem da agenda. Sem isso o membro veria um fixo "ativo" que
+    // nunca mais materializa, e o barbeiro sairia com a agenda ocupada.
+    const fixos = await db
+      .select({ id: recurringSlots.id })
+      .from(recurringSlots)
+      .where(
+        and(eq(recurringSlots.barberId, input.id), eq(recurringSlots.active, true))
+      );
+    if (fixos.length === 0) return done("Barbeiro desativado e acesso encerrado.");
+    const ids = fixos.map((f) => f.id);
+    await db
+      .update(recurringSlots)
+      .set({ active: false })
+      .where(inArray(recurringSlots.id, ids));
+    const liberados = await cancelFutureOccurrences(ids);
     return done(
-      input.active ? "Barbeiro atualizado." : "Barbeiro desativado e acesso encerrado."
+      `Barbeiro desativado e acesso encerrado. ${ids.length} horário(s) fixo(s) desligado(s) e ${liberados} agendamento(s) liberado(s) — avise os membros.`
     );
   } catch (e) {
     return fail(e);
@@ -659,15 +714,43 @@ export async function importClients(csv: string): Promise<
         skipped.push(`${name} — telefone inválido (${rawPhone})`);
         continue;
       }
-      await db
-        .insert(users)
-        .values({
-          name,
-          phone: normalizePhone(rawPhone),
-          email: email && email.includes("@") ? email.toLowerCase() : null,
-          role: "CLIENT",
-        })
-        .onDuplicateKeyUpdate({ set: { name } });
+      const phone = normalizePhone(rawPhone);
+      const mail = email && email.includes("@") ? email.toLowerCase() : null;
+
+      // ON DUPLICATE KEY cego casaria também pelo índice único de e-mail e
+      // renomearia a conta de outra pessoa (inclusive a do admin). Aqui a
+      // chave é só o telefone, e o e-mail só entra se estiver livre.
+      const existing = await db.query.users.findFirst({
+        where: eq(users.phone, phone),
+      });
+      const donoDoEmail = mail
+        ? await db.query.users.findFirst({ where: eq(users.email, mail) })
+        : null;
+      const emailLivre = !donoDoEmail || donoDoEmail.id === existing?.id;
+      if (mail && !emailLivre) {
+        skipped.push(`${name} — e-mail ${mail} já é de outra conta; importado sem e-mail`);
+      }
+
+      if (existing) {
+        // Conta com senha é de alguém que já usa o sistema: não se mexe.
+        if (!existing.passwordHash) {
+          await db
+            .update(users)
+            .set({
+              name,
+              ...(mail && emailLivre && !existing.email ? { email: mail } : {}),
+            })
+            .where(eq(users.id, existing.id));
+        }
+        imported++;
+        continue;
+      }
+      await db.insert(users).values({
+        name,
+        phone,
+        email: emailLivre ? mail : null,
+        role: "CLIENT",
+      });
       imported++;
     }
 

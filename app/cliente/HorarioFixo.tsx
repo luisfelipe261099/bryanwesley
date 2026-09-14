@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { CalendarClock, Loader2, Save, X } from "lucide-react";
 import { saveRecurringSlot, cancelRecurringSlot } from "./actions";
+import { toast } from "@/lib/toast";
 
 const WEEKDAYS = [
   { i: 0, l: "Dom" },
@@ -67,8 +68,10 @@ export function HorarioFixo({
         minutesOfDay: toMin(time),
         serviceIds: picked,
       });
-      if (res.ok) setOpen(false);
-      else setError(res.error);
+      if (res.ok) {
+        setOpen(false);
+        toast(res.warning ?? "Horário fixo salvo.", res.warning ? "erro" : "ok");
+      } else setError(res.error);
     });
   }
 
@@ -262,7 +265,13 @@ function CancelFixo() {
     <button
       type="button"
       disabled={pending}
-      onClick={() => start(() => cancelRecurringSlot().then(() => {}))}
+      onClick={() =>
+        start(async () => {
+          const r = await cancelRecurringSlot();
+          if (r.ok) toast(r.warning ?? "Você abriu mão do horário fixo.", "ok");
+          else toast(r.error, "erro");
+        })
+      }
       className="label inline-flex items-center gap-2 rounded-full border border-white/12 px-5 py-3 text-steel-300 transition-colors hover:border-red-400/50 hover:text-red-200 disabled:opacity-50"
     >
       {pending ? (

@@ -33,7 +33,7 @@ function itemsFor(role: Role | null): Item[] {
   if (role === "CLIENT") {
     return [
       { href: "/agendar", label: "Agendar", icon: Scissors, key: "inicio" },
-      { href: "/cliente", label: "Meus horários", icon: CalendarDays, key: "clube" },
+      { href: "/cliente", label: "Meus horários", icon: CalendarDays, key: "cliente" },
       { href: "/planos", label: "Clube VIP", icon: Gem, key: "planos" },
       { href: "/conta", label: "Conta", icon: UserRound, key: "conta" },
     ];

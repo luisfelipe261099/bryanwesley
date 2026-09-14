@@ -29,6 +29,7 @@ import {
   services as servicesTable,
 } from "@/db/schema";
 import { getSettings } from "./schedule";
+import { dbErrorCode } from "./errors";
 import { shopTimeToUtc, utcToShopParts } from "./time";
 
 /** Primeiro instante do mês (na loja) que contém `ref`. */
@@ -197,7 +198,7 @@ export async function recordCommission(appointmentId: number) {
       fromSubscription,
     });
   } catch (e) {
-    if ((e as { code?: string })?.code !== "ER_DUP_ENTRY") throw e;
+    if (dbErrorCode(e) !== "ER_DUP_ENTRY") throw e;
   }
   return (
     (await db.query.appointmentCommissions.findFirst({

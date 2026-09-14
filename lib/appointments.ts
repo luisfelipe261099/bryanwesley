@@ -26,6 +26,7 @@ import {
 import { randomBytes } from "node:crypto";
 import { shopTimeToUtc, parseDateKey } from "./time";
 import { normalizePhone } from "./phone";
+import { dbErrorCode, dbErrorMessage } from "./errors";
 
 /** MySQL: chave duplicada (unicidade). */
 const DUP_ENTRY = "ER_DUP_ENTRY";
@@ -60,6 +61,8 @@ export type CreateBookingInput = {
   fromRecurring?: boolean;
   /** Remarcação: a mensagem certa é "remarcado", não "criado". */
   skipConfirmation?: boolean;
+  /** Horário fixo que está gerando esta ocorrência. */
+  recurringSlotId?: number | null;
 };
 
 export async function createBooking(input: CreateBookingInput) {
@@ -256,6 +259,7 @@ export async function createBooking(input: CreateBookingInput) {
           subscriptionId: allCovered ? subscription!.id : null,
           barberPctSnapshot: barberPct,
           notes: input.notes?.trim() || null,
+          recurringSlotId: input.recurringSlotId ?? null,
         })
         .$returningId();
 
@@ -288,9 +292,10 @@ export async function createBooking(input: CreateBookingInput) {
 
     return appt;
   } catch (err) {
-    const code = (err as { code?: string })?.code;
-    const message = (err as { message?: string })?.message ?? "";
-    if (code === DUP_ENTRY && message.includes("appointments_code_unique")) {
+    if (
+      dbErrorCode(err) === DUP_ENTRY &&
+      dbErrorMessage(err).includes("appointments_code_unique")
+    ) {
       continue; // colisão do código curto: tenta de novo
     }
     throw err;
@@ -400,7 +405,18 @@ export async function transitionAppointment(
   if (next === "EM_ANDAMENTO") patch.startedAt = new Date();
   if (next === "CONCLUIDO") patch.finishedAt = new Date();
 
-  await db.update(appointments).set(patch).where(eq(appointments.id, id));
+  // Condicional ao estado lido: dois cliques concorrentes ("concluir" e
+  // "cancelar") não podem passar os dois — o segundo encontra outro estado
+  // e para aqui, sem comissão lançada em atendimento cancelado.
+  const [res] = await db
+    .update(appointments)
+    .set(patch)
+    .where(and(eq(appointments.id, id), eq(appointments.status, current.status)));
+  if (res.affectedRows === 0) {
+    throw new BookingError(
+      "A situação desse atendimento acabou de mudar. Atualize a tela."
+    );
+  }
   const updated = (await db.query.appointments.findFirst({
     where: eq(appointments.id, id),
   }))!;

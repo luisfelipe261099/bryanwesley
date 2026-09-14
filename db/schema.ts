@@ -211,6 +211,10 @@ export const appointments = mysqlTable(
     // Token do QR que o cliente apresenta para o barbeiro validar a chegada.
     checkinToken: varchar("checkin_token", { length: 40 }),
     checkedInAt: ts("checked_in_at"),
+    // Horário fixo que gerou este agendamento (null para avulso). Com o
+    // vínculo, uma ocorrência cancelada continua cancelada: a próxima
+    // materialização vê que a data já foi tratada e não a recria.
+    recurringSlotId: int("recurring_slot_id"),
     // Percentual do barbeiro congelado no momento do atendimento.
     barberPctSnapshot: int("barber_pct_snapshot"),
     startedAt: ts("started_at"),

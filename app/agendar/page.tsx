@@ -48,7 +48,7 @@ export default async function Agendar() {
   return (
     <>
       <Background />
-      <TopBar planName={plan?.name} logged={!!session} />
+      <TopBar planName={plan?.name} backHref={homeFor(session?.role ?? null)} />
 
       <main className="mx-auto max-w-5xl px-5 pb-28 pt-24 lg:px-8">
         <div className="mb-8">
@@ -95,19 +95,28 @@ export default async function Agendar() {
   );
 }
 
+/** Para onde o "voltar" leva: a casa de quem está logado. Mandar o
+ * barbeiro para /cliente o jogava direto em "sem permissão". */
+function homeFor(role: "ADMIN" | "BARBER" | "CLIENT" | null) {
+  if (role === "ADMIN") return "/admin";
+  if (role === "BARBER") return "/barbeiro";
+  if (role === "CLIENT") return "/cliente";
+  return "/";
+}
+
 function TopBar({
   planName,
-  logged,
+  backHref,
 }: {
   planName?: string;
-  logged: boolean;
+  backHref: string;
 }) {
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-ink-800/90 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-5xl items-center justify-between gap-3 px-5 lg:px-8">
         <div className="flex min-w-0 items-center gap-2.5">
           <Link
-            href={logged ? "/cliente" : "/"}
+            href={backHref}
             aria-label="Voltar"
             className="grid h-9 w-9 flex-none place-items-center rounded-xl border border-white/10 text-steel-300 transition-colors hover:border-electric/40 hover:text-white"
           >

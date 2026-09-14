@@ -11,6 +11,7 @@ import {
   Toggle,
   type Msg,
 } from "@/components/admin/Feedback";
+import { toast } from "@/lib/toast";
 import { formatBRL } from "@/lib/money";
 import { resetUserPassword } from "../actions";
 import {
@@ -212,6 +213,7 @@ function BarberHours({
               <span className="label w-10 flex-none text-steel-400">{d}</span>
               <input
                 type="time"
+                aria-label={`Abertura de ${d}`}
                 defaultValue={h ? hhmm(h.openMinute) : ""}
                 id={`o-${barberId}-${i}`}
                 className="rounded-lg border border-white/10 bg-surface-2 px-3 py-2 text-sm text-white [color-scheme:dark] focus:border-electric/60"
@@ -219,6 +221,7 @@ function BarberHours({
               <span className="text-steel-400">—</span>
               <input
                 type="time"
+                aria-label={`Fechamento de ${d}`}
                 defaultValue={h ? hhmm(h.closeMinute) : ""}
                 id={`c-${barberId}-${i}`}
                 className="rounded-lg border border-white/10 bg-surface-2 px-3 py-2 text-sm text-white [color-scheme:dark] focus:border-electric/60"
@@ -493,7 +496,15 @@ function TierRemove({ id }: { id: number }) {
     <button
       type="button"
       disabled={pending}
-      onClick={() => start(() => removeCommissionTier(id).then(() => {}))}
+      onClick={() =>
+        start(async () => {
+          const r = await removeCommissionTier(id);
+          toast(
+            r.ok ? r.message ?? "Faixa removida." : r.error ?? "Não foi possível.",
+            r.ok ? "ok" : "erro"
+          );
+        })
+      }
       aria-label="Remover faixa"
       className="flex-none text-steel-400 transition-colors hover:text-red-200 disabled:opacity-40"
     >

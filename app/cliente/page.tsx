@@ -525,7 +525,7 @@ export default async function ClienteDashboard({
         </Reveal>
       </main>
 
-      <BottomNav active="clube" role={session.role} />
+      <BottomNav active="cliente" role={session.role} />
     </>
   );
 }
