@@ -197,11 +197,12 @@ Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
 ## Testes
 
 ```bash
-npm test                  # 103 verificações
+npm test                  # 142 verificações
 npm run test:agenda       # 33 — motor de agenda, jornada por barbeiro, faixas de meta
 npm run test:fixo         # 17 — horário fixo, ocorrência cancelada, transição concorrente
 npm run test:seguranca    # 18 — teto de agendamentos, webhook, redirect, CSV, sessão
 npm run test:despacho     # 35 — trava da varredura, mensagem vencida, renovação, erro do driver
+npm run test:import       # 38 — leitura do CSV, colunas fora de ordem, telefone compartilhado
 ```
 
 Há ainda um roteiro de navegador (Playwright) com 91 verificações de ponta a

@@ -5,7 +5,7 @@
 // subquery correlacionada, que o TiDB não executa. Aqui as relações são
 // joins explícitos ou uma segunda consulta por lote — portável.
 // ───────────────────────────────────────────────────────────
-import { and, asc, desc, eq, gte, lt, or, inArray, sum, count } from "drizzle-orm";
+import { and, asc, desc, eq, gte, like, lt, or, inArray, sql, sum, count } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointments,
@@ -279,11 +279,40 @@ export async function barberTodaySummary(barberId: number) {
 
 // ───────────────────────── Clientes ─────────────────────────
 
-export async function listClients(limit = 50) {
+/**
+ * Clientes para o painel, com busca no banco.
+ *
+ * A base importada do sistema antigo passa de novecentas pessoas: filtrar
+ * no navegador só encontraria quem estivesse na primeira página. O termo
+ * vai para o SQL, e `total` é a contagem real, não o tamanho da página.
+ */
+export async function countClients(q?: string) {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(users)
+    .where(clientFilter(q));
+  return Number(row?.n ?? 0);
+}
+
+function clientFilter(q?: string) {
+  const termo = (q ?? "").trim();
+  if (!termo) return eq(users.role, "CLIENT");
+  const digitos = termo.replace(/\D/g, "");
+  // Busca por nome ou por telefone — o telefone é guardado só com dígitos.
+  const porNome = like(users.name, `%${termo}%`);
+  return and(
+    eq(users.role, "CLIENT"),
+    digitos.length >= 3
+      ? or(porNome, like(users.phone, `%${digitos}%`))
+      : porNome
+  );
+}
+
+export async function listClients(limit = 50, q?: string) {
   const rows = await db
     .select()
     .from(users)
-    .where(eq(users.role, "CLIENT"))
+    .where(clientFilter(q))
     .orderBy(desc(users.createdAt))
     .limit(limit);
   if (rows.length === 0) return [];

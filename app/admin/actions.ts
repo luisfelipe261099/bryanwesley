@@ -43,6 +43,7 @@ import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
 import { chargeSubscription } from "@/lib/payments";
 import { shopTimeToUtc, parseDateKey } from "@/lib/time";
 import { normalizePhone, isValidPhone } from "@/lib/phone";
+import { planClientImport } from "@/lib/import";
 import { nextRenewal } from "@/lib/subscriptions";
 
 export type Result = { ok: true; message?: string } | { ok: false; error: string };
@@ -700,85 +701,110 @@ export async function cancelSubscription(userId: number): Promise<Result> {
  * Aceita CSV com cabeçalho: nome,telefone[,email]. Linhas inválidas são
  * relatadas em vez de derrubar a importação inteira.
  */
-export async function importClients(csv: string): Promise<
-  Result & { imported?: number; skipped?: string[] }
-> {
+export type ImportResult = Result & {
+  criados?: number;
+  atualizados?: number;
+  skipped?: string[];
+};
+
+/** Quantos registros por INSERT/SELECT. Segura o tamanho do pacote SQL. */
+const LOTE = 200;
+
+function chunk<T>(arr: T[], n: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
+
+/**
+ * Importa a base do sistema antigo.
+ *
+ * A leitura e as decisões ficam em lib/import.ts (testável); aqui é só o
+ * banco — e em lote: uma base de mil clientes daria uns três mil
+ * round-trips ao TiDB linha a linha e estouraria o tempo da função.
+ */
+export async function importClients(csv: string): Promise<ImportResult> {
   try {
     await admin();
-    const lines = csv
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    if (lines.length === 0) return { ok: false, error: "Arquivo vazio." };
+    const plano = planClientImport(csv);
+    if (!plano.ok) return { ok: false, error: plano.error };
+    const { candidatos } = plano;
+    const skipped = [...plano.skipped];
 
-    // Descarta o cabeçalho quando presente.
-    const first = lines[0].toLowerCase();
-    const rows =
-      first.includes("nome") || first.includes("telefone")
-        ? lines.slice(1)
-        : lines;
-
-    let imported = 0;
-    const skipped: string[] = [];
-
-    for (const line of rows) {
-      const cols = line.split(/[;,\t]/).map((c) => c.trim().replace(/^"|"$/g, ""));
-      const [name, rawPhone, email] = cols;
-      if (!name || !rawPhone) {
-        skipped.push(`${line} — nome ou telefone ausente`);
-        continue;
-      }
-      if (!isValidPhone(rawPhone)) {
-        skipped.push(`${name} — telefone inválido (${rawPhone})`);
-        continue;
-      }
-      const phone = normalizePhone(rawPhone);
-      const mail = email && email.includes("@") ? email.toLowerCase() : null;
-
-      // ON DUPLICATE KEY cego casaria também pelo índice único de e-mail e
-      // renomearia a conta de outra pessoa (inclusive a do admin). Aqui a
-      // chave é só o telefone, e o e-mail só entra se estiver livre.
-      const existing = await db.query.users.findFirst({
-        where: eq(users.phone, phone),
-      });
-      const donoDoEmail = mail
-        ? await db.query.users.findFirst({ where: eq(users.email, mail) })
-        : null;
-      const emailLivre = !donoDoEmail || donoDoEmail.id === existing?.id;
-      if (mail && !emailLivre) {
-        skipped.push(`${name} — e-mail ${mail} já é de outra conta; importado sem e-mail`);
-      }
-
-      if (existing) {
-        // Conta com senha é de alguém que já usa o sistema: não se mexe.
-        if (!existing.passwordHash) {
-          await db
-            .update(users)
-            .set({
-              name,
-              ...(mail && emailLivre && !existing.email ? { email: mail } : {}),
-            })
-            .where(eq(users.id, existing.id));
-        }
-        imported++;
-        continue;
-      }
-      await db.insert(users).values({
-        name,
-        phone,
-        email: emailLivre ? mail : null,
-        role: "CLIENT",
-      });
-      imported++;
+    // Quem já está na base, buscado de uma vez.
+    const existentes = new Map<string, typeof users.$inferSelect>();
+    for (const lote of chunk(candidatos.map((c) => c.phone), LOTE)) {
+      const achados = await db.select().from(users).where(inArray(users.phone, lote));
+      for (const u of achados) existentes.set(u.phone, u);
     }
 
-    return { ...done(`${imported} cliente(s) importado(s).`), imported, skipped };
+    // E-mail tem índice único: um que já seja de outra conta não pode
+    // entrar, senão o INSERT do lote inteiro falha.
+    const emails = candidatos.map((c) => c.email).filter((e): e is string => !!e);
+    const donoDoEmail = new Map<string, number>();
+    for (const lote of chunk(emails, LOTE)) {
+      const achados = await db
+        .select({ id: users.id, email: users.email })
+        .from(users)
+        .where(inArray(users.email, lote));
+      for (const u of achados) if (u.email) donoDoEmail.set(u.email, u.id);
+    }
+
+    const novos: { name: string; phone: string; email: string | null }[] = [];
+    const atualizar: { id: number; name: string; email: string | null }[] = [];
+
+    for (const c of candidatos) {
+      const atual = existentes.get(c.phone);
+      const dono = c.email ? donoDoEmail.get(c.email) : undefined;
+      const emailLivre = !dono || dono === atual?.id;
+      if (c.email && !emailLivre) {
+        skipped.push(`${c.name} — e-mail ${c.email} já é de outra conta; importado sem e-mail`);
+      }
+      const email = emailLivre ? c.email : null;
+
+      if (!atual) {
+        novos.push({ name: c.name, phone: c.phone, email });
+        continue;
+      }
+      // Conta com senha é de alguém que já usa o sistema: não se mexe.
+      if (atual.passwordHash) continue;
+      const precisaNome = atual.name !== c.name;
+      const precisaEmail = !!email && !atual.email;
+      if (precisaNome || precisaEmail) {
+        atualizar.push({ id: atual.id, name: c.name, email: precisaEmail ? email : null });
+      }
+    }
+
+    for (const lote of chunk(novos, LOTE)) {
+      await db.insert(users).values(
+        lote.map((n) => ({
+          name: n.name,
+          phone: n.phone,
+          email: n.email,
+          role: "CLIENT" as const,
+        }))
+      );
+    }
+    for (const u of atualizar) {
+      await db
+        .update(users)
+        .set({ name: u.name, ...(u.email ? { email: u.email } : {}) })
+        .where(eq(users.id, u.id));
+    }
+
+    const partes = [`${novos.length} cliente(s) novo(s)`];
+    if (atualizar.length) partes.push(`${atualizar.length} atualizado(s)`);
+    if (skipped.length) partes.push(`${skipped.length} linha(s) de fora`);
+    return {
+      ...done(partes.join(", ") + "."),
+      criados: novos.length,
+      atualizados: atualizar.length,
+      skipped,
+    };
   } catch (e) {
     return fail(e);
   }
 }
-
-// ───────────────────────── Identidade da barbearia ─────────────────────────
 
 export async function saveShopInfo(input: {
   shopName: string;

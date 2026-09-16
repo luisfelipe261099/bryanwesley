@@ -1,6 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useSyncExternalStore, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import {
+  subscribeImportReport,
+  getImportReport,
+  getServerImportReport,
+  setImportReport,
+  clearImportReport,
+} from "@/lib/import-report";
 import {
   CalendarClock,
   Crown,
@@ -47,29 +55,40 @@ type ClientRow = {
 export function ClientesManager({
   clients,
   plans,
+  busca,
+  total,
+  mostrando,
 }: {
   clients: ClientRow[];
   plans: { id: number; name: string }[];
+  /** Termo em vigor, vindo da URL. */
+  busca: string;
+  /** Quantos clientes o filtro encontrou no banco. */
+  total: number;
+  /** Quantos vieram nesta página. */
+  mostrando: number;
 }) {
-  const [q, setQ] = useState("");
-  const filtered = clients.filter(
-    (c) =>
-      c.name.toLowerCase().includes(q.toLowerCase()) ||
-      c.phone.includes(q.replace(/\D/g, ""))
-  );
+  const filtered = clients;
 
   return (
     <div className="space-y-5">
       <ImportBox />
 
-      <Card title="Clientes" desc={`${clients.length} cadastrado(s)`}>
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Buscar por nome ou telefone…"
-          aria-label="Buscar cliente"
-          className="mb-4 w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none placeholder:text-steel-400/60 focus:border-electric/60"
-        />
+      <Card
+        title="Clientes"
+        desc={
+          busca
+            ? `${total} encontrado(s) para “${busca}”`
+            : `${total} cadastrado(s)`
+        }
+      >
+        <BuscaClientes inicial={busca} />
+        {mostrando < total && (
+          <p className="-mt-2 mb-4 text-xs text-steel-400">
+            Mostrando os {mostrando} mais recentes. Use a busca para chegar nos
+            outros {total - mostrando}.
+          </p>
+        )}
 
         {filtered.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-steel-400">
@@ -364,25 +383,107 @@ function Cobrar({ userId }: { userId: number }) {
   );
 }
 
+/**
+ * Busca de cliente.
+ *
+ * O termo vai para a URL e a consulta acontece no banco: com quase mil
+ * cadastros importados, filtrar só a página carregada esconderia a maioria
+ * das pessoas.
+ */
+function BuscaClientes({ inicial }: { inicial: string }) {
+  const router = useRouter();
+  const [q, setQ] = useState(inicial);
+  const [pending, start] = useTransition();
+
+  function buscar(termo: string) {
+    start(() => {
+      router.push(termo.trim() ? `/admin/clientes?q=${encodeURIComponent(termo.trim())}` : "/admin/clientes");
+    });
+  }
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        buscar(q);
+      }}
+      className="mb-4 flex gap-2"
+    >
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Buscar por nome ou telefone…"
+        aria-label="Buscar cliente"
+        className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none placeholder:text-steel-400/60 focus:border-electric/60"
+      />
+      <button
+        type="submit"
+        disabled={pending}
+        className="btn-royal label flex-none rounded-xl px-5 text-white disabled:opacity-50"
+      >
+        {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Buscar"}
+      </button>
+      {inicial && (
+        <button
+          type="button"
+          onClick={() => {
+            setQ("");
+            buscar("");
+          }}
+          className="label flex-none rounded-xl border border-white/12 px-4 text-steel-300 hover:text-white"
+        >
+          Limpar
+        </button>
+      )}
+    </form>
+  );
+}
+
 function ImportBox() {
   const [csv, setCsv] = useState("");
   const [msg, setMsg] = useState<Msg>(null);
-  const [skipped, setSkipped] = useState<string[]>([]);
   const [pending, start] = useTransition();
+  // Fora do React: a ação revalida a rota e um useState seria apagado
+  // junto com a lista de quem ficou de fora — justamente o que o dono
+  // precisa ler depois de importar.
+  const relatorio = useSyncExternalStore(
+    subscribeImportReport,
+    getImportReport,
+    getServerImportReport
+  );
+  const skipped = relatorio?.skipped ?? [];
 
   function run() {
     setMsg(null);
-    setSkipped([]);
+    clearImportReport();
     start(async () => {
       const res = await importClients(csv);
       if (res.ok) {
         setMsg({ ok: true, text: res.message ?? "Importado." });
-        setSkipped(res.skipped ?? []);
+        setImportReport({
+          criados: res.criados ?? 0,
+          atualizados: res.atualizados ?? 0,
+          skipped: res.skipped ?? [],
+        });
         setCsv("");
       } else {
         setMsg({ ok: false, text: res.error });
       }
     });
+  }
+
+  function baixarRelatorio() {
+    const linhas = [
+      `Importação: ${relatorio?.criados ?? 0} novo(s), ${relatorio?.atualizados ?? 0} atualizado(s)`,
+      `${skipped.length} linha(s) de fora:`,
+      ...skipped,
+    ].join("\n");
+    const url = URL.createObjectURL(new Blob([linhas], { type: "text/plain;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "importacao-clientes.txt";
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -393,7 +494,7 @@ function ImportBox() {
   return (
     <Card
       title="Importar clientes do sistema antigo"
-      desc="CSV com as colunas nome, telefone e (opcional) e-mail. Quem já existe é atualizado pelo telefone, sem duplicar."
+      desc="Envie o CSV como ele sai do outro sistema: as colunas podem vir em qualquer ordem (nome, telefone e e-mail são reconhecidos pelo cabeçalho) e o separador pode ser vírgula, ponto e vírgula ou tab. O telefone é a chave: quem já existe é atualizado, sem duplicar."
       icon={<Upload className="h-5 w-5" />}
     >
       <input
@@ -407,7 +508,7 @@ function ImportBox() {
         rows={5}
         value={csv}
         onChange={(e) => setCsv(e.target.value)}
-        placeholder={"nome,telefone,email\nJoão Silva,(11) 99999-0000,joao@email.com"}
+        placeholder={"nome,telefone,email\nJoão Silva,(41) 99999-0000,joao@email.com\n\nOu cole o arquivo inteiro do sistema antigo — as colunas extras são ignoradas."}
         className="w-full resize-none rounded-xl border border-white/10 bg-surface-2 px-4 py-3 font-mono text-xs text-white outline-none placeholder:text-steel-400/60 focus:border-electric/60"
       />
       <button
@@ -443,6 +544,14 @@ function ImportBox() {
               <li key={i}>{s}</li>
             ))}
           </ul>
+          <button
+            type="button"
+            onClick={baixarRelatorio}
+            className="label mt-3 inline-flex items-center gap-2 rounded-full border border-amber-400/30 px-4 py-2 text-amber-200 hover:bg-amber-400/10"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Baixar a lista
+          </button>
         </div>
       )}
     </Card>
