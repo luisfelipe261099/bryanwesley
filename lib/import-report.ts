@@ -8,6 +8,8 @@
 // sobrevive ao remonte.
 // ───────────────────────────────────────────────────────────
 export type RelatorioImportacao = {
+  /** O resumo que a ação escreveu, para mostrar do jeito que veio. */
+  message: string;
   criados: number;
   atualizados: number;
   skipped: string[];

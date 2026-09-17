@@ -15,6 +15,7 @@ import {
   plans,
   planServices,
   planRequests,
+  payments,
   services,
   recurringSlots,
   subscriptions,
@@ -287,35 +288,130 @@ export async function barberTodaySummary(barberId: number) {
  * no navegador só encontraria quem estivesse na primeira página. O termo
  * vai para o SQL, e `total` é a contagem real, não o tamanho da página.
  */
-export async function countClients(q?: string) {
+export type SituacaoCliente =
+  | "todos"
+  | "assinantes"
+  | "inadimplentes"
+  | "avulsos"
+  | "sem-telefone"
+  | "com-conta"
+  | "fixo";
+
+export type OrdemCliente = "recentes" | "nome" | "visitas" | "ultima-visita";
+
+export type FiltroClientes = {
+  q?: string;
+  situacao?: SituacaoCliente;
+  ordem?: OrdemCliente;
+  limit?: number;
+  offset?: number;
+};
+
+/** Quantos atendimentos concluídos a pessoa tem — usado para ordenar. */
+const visitasDe = sql<number>`(select count(*) from ${appointments}
+  where ${appointments.clientUserId} = ${users.id}
+    and ${appointments.status} = 'CONCLUIDO')`;
+
+/** Quando foi o último — nulo para quem nunca veio. */
+const ultimaVisitaDe = sql<Date | null>`(select max(${appointments.startsAt}) from ${appointments}
+  where ${appointments.clientUserId} = ${users.id}
+    and ${appointments.status} = 'CONCLUIDO')`;
+
+const temAssinatura = (status: "ATIVA" | "INADIMPLENTE") =>
+  sql`exists (select 1 from ${subscriptions}
+    where ${subscriptions.userId} = ${users.id}
+      and ${subscriptions.status} = ${status})`;
+
+function clientFilter(f: FiltroClientes) {
+  const termo = (f.q ?? "").trim();
+  const partes = [eq(users.role, "CLIENT")];
+
+  if (termo) {
+    const digitos = termo.replace(/\D/g, "");
+    // Busca por nome ou por telefone — o telefone é guardado só com dígitos.
+    const porNome = like(users.name, `%${termo}%`);
+    partes.push(
+      digitos.length >= 3 ? or(porNome, like(users.phone, `%${digitos}%`))! : porNome
+    );
+  }
+
+  switch (f.situacao) {
+    case "assinantes":
+      partes.push(temAssinatura("ATIVA"));
+      break;
+    case "inadimplentes":
+      // Vencido de verdade: quem já renovou tem uma ATIVA e não conta.
+      partes.push(temAssinatura("INADIMPLENTE"), sql`not ${temAssinatura("ATIVA")}`);
+      break;
+    case "avulsos":
+      partes.push(sql`not ${temAssinatura("ATIVA")}`);
+      break;
+    case "sem-telefone":
+      partes.push(like(users.phone, "00%"));
+      break;
+    case "com-conta":
+      partes.push(sql`${users.passwordHash} is not null`);
+      break;
+    case "fixo":
+      partes.push(
+        sql`exists (select 1 from ${recurringSlots}
+          where ${recurringSlots.userId} = ${users.id}
+            and ${recurringSlots.active} = true)`
+      );
+      break;
+    default:
+      break;
+  }
+
+  return and(...partes);
+}
+
+/**
+ * Quantos clientes o filtro encontra no banco.
+ *
+ * A base importada do sistema antigo passa de novecentas pessoas: filtrar
+ * no navegador só encontraria quem estivesse na primeira página. O termo e
+ * a situação vão para o SQL, e `total` é a contagem real, não o tamanho da
+ * página.
+ */
+export async function countClients(f: FiltroClientes = {}) {
   const [row] = await db
     .select({ n: sql<number>`count(*)` })
     .from(users)
-    .where(clientFilter(q));
+    .where(clientFilter(f));
   return Number(row?.n ?? 0);
 }
 
-function clientFilter(q?: string) {
-  const termo = (q ?? "").trim();
-  if (!termo) return eq(users.role, "CLIENT");
-  const digitos = termo.replace(/\D/g, "");
-  // Busca por nome ou por telefone — o telefone é guardado só com dígitos.
-  const porNome = like(users.name, `%${termo}%`);
-  return and(
-    eq(users.role, "CLIENT"),
-    digitos.length >= 3
-      ? or(porNome, like(users.phone, `%${digitos}%`))
-      : porNome
-  );
+/**
+ * O id entra sempre como desempate.
+ *
+ * A importação cadastra centenas de pessoas no mesmo instante: só por
+ * data, o banco pode devolver empates em ordens diferentes a cada
+ * consulta — e aí a mesma pessoa apareceria em duas páginas enquanto
+ * outra não apareceria em nenhuma.
+ */
+function ordenacao(ordem: OrdemCliente = "recentes") {
+  switch (ordem) {
+    case "nome":
+      return [asc(users.name), asc(users.id)];
+    case "visitas":
+      return [desc(visitasDe), desc(users.createdAt), desc(users.id)];
+    case "ultima-visita":
+      // Quem nunca veio vai para o fim, não para o topo.
+      return [sql`${ultimaVisitaDe} is null`, desc(ultimaVisitaDe), desc(users.id)];
+    default:
+      return [desc(users.createdAt), desc(users.id)];
+  }
 }
 
-export async function listClients(limit = 50, q?: string) {
+export async function listClients(f: FiltroClientes = {}) {
   const rows = await db
     .select()
     .from(users)
-    .where(clientFilter(q))
-    .orderBy(desc(users.createdAt))
-    .limit(limit);
+    .where(clientFilter(f))
+    .orderBy(...ordenacao(f.ordem))
+    .limit(f.limit ?? 50)
+    .offset(f.offset ?? 0);
   if (rows.length === 0) return [];
   const ids = rows.map((u) => u.id);
 
@@ -350,6 +446,11 @@ export async function listClients(limit = 50, q?: string) {
     const mine = appts.filter((a) => a.clientUserId === u.id);
     const done = mine.filter((a) => a.status === "CONCLUIDO");
     const last = done.sort((a, b) => b.startsAt.getTime() - a.startsAt.getTime())[0];
+    const proximos = mine.filter(
+      (a) =>
+        a.startsAt.getTime() > Date.now() &&
+        ["PENDENTE", "CONFIRMADO", "EM_ANDAMENTO"].includes(a.status)
+    ).length;
     const mySubs = subs.filter((s) => s.sub.userId === u.id);
     const active = mySubs.find((s) => s.sub.status === "ATIVA");
     const overdue = mySubs.find((s) => s.sub.status === "INADIMPLENTE");
@@ -362,6 +463,8 @@ export async function listClients(limit = 50, q?: string) {
       renewsAt: active?.sub.renewsAt ?? null,
       visits: done.length,
       lastVisit: last?.startsAt ?? null,
+      /** Horários futuros ainda em aberto — o que interessa no atendimento. */
+      upcoming: proximos,
       hasAccount: !!u.passwordHash,
       hasFixedSlot: comFixo.has(u.id),
       // Importado sem telefone: aparece com aviso e pede para completar.
@@ -369,6 +472,83 @@ export async function listClients(limit = 50, q?: string) {
     };
   });
 }
+
+/**
+ * Tudo que a ficha do cliente mostra, numa consulta só por assunto.
+ *
+ * O painel precisava abrir o cliente para agendar, ver o histórico, o
+ * plano e os pagamentos; antes essas informações só existiam espalhadas
+ * pelas telas do próprio cliente.
+ */
+export async function clientDetail(id: number) {
+  const pessoa = await db.query.users.findFirst({ where: eq(users.id, id) });
+  if (!pessoa || pessoa.role !== "CLIENT") return null;
+
+  const [proximos, historico, concluidos, assinaturas, pagamentos, fixos] =
+    await Promise.all([
+      upcomingForUser(id, 20),
+      historyForUser(id, 20),
+      countForUser(id),
+      db
+        .select({ sub: subscriptions, plan: plans })
+        .from(subscriptions)
+        .innerJoin(plans, eq(plans.id, subscriptions.planId))
+        .where(eq(subscriptions.userId, id))
+        .orderBy(desc(subscriptions.id)),
+      db
+        .select()
+        .from(payments)
+        .where(eq(payments.userId, id))
+        .orderBy(desc(payments.createdAt))
+        .limit(20),
+      db
+        .select({ slot: recurringSlots, barber: barbers, user: users })
+        .from(recurringSlots)
+        .innerJoin(barbers, eq(barbers.id, recurringSlots.barberId))
+        .innerJoin(users, eq(users.id, barbers.userId))
+        .where(and(eq(recurringSlots.userId, id), eq(recurringSlots.active, true))),
+    ]);
+
+  const ativa = assinaturas.find((a) => a.sub.status === "ATIVA");
+  const vencida = !ativa
+    ? assinaturas.find((a) => a.sub.status === "INADIMPLENTE")
+    : undefined;
+
+  const gasto = historico
+    .filter((a) => a.status === "CONCLUIDO")
+    .reduce((acc, a) => acc + a.totalCents, 0);
+
+  return {
+    cliente: {
+      id: pessoa.id,
+      name: pessoa.name,
+      phone: pessoa.phone,
+      email: pessoa.email,
+      createdAt: pessoa.createdAt,
+      hasAccount: !!pessoa.passwordHash,
+      phonePending: isPlaceholderPhone(pessoa.phone),
+    },
+    proximos,
+    historico,
+    concluidos,
+    /** Soma do que já pagou nos atendimentos que aparecem no histórico. */
+    gasto,
+    assinatura: ativa ?? vencida ?? null,
+    assinaturas,
+    pagamentos,
+    fixo: fixos[0]
+      ? {
+          frequency: fixos[0].slot.frequency,
+          weekday: fixos[0].slot.weekday,
+          dayOfMonth: fixos[0].slot.dayOfMonth,
+          minutesOfDay: fixos[0].slot.minutesOfDay,
+          barberName: fixos[0].user.name,
+        }
+      : null,
+  };
+}
+
+export type ClientDetail = NonNullable<Awaited<ReturnType<typeof clientDetail>>>;
 
 // ───────────────────────── Admin ─────────────────────────
 

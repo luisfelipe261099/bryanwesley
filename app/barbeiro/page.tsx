@@ -27,18 +27,11 @@ import { formatBRL, formatDuration } from "@/lib/money";
 import { formatShopTime, shopToday, addDays, labelWeekday, labelFullDate } from "@/lib/time";
 import { formatPhone } from "@/lib/phone";
 import { AppointmentActions } from "./AgendaActions";
+import { appointmentStatus as statusStyles } from "@/lib/status";
 import { CheckinBox } from "./CheckinBox";
 
 export const dynamic = "force-dynamic";
 
-const statusStyles: Record<string, { label: string; cls: string }> = {
-  CONCLUIDO: { label: "Concluído", cls: "bg-neon/10 text-neon" },
-  CONFIRMADO: { label: "Confirmado", cls: "bg-electric/10 text-electric" },
-  EM_ANDAMENTO: { label: "Em andamento", cls: "bg-royal/20 text-electric" },
-  PENDENTE: { label: "Pendente", cls: "bg-amber-400/10 text-amber-300" },
-  CANCELADO: { label: "Cancelado", cls: "bg-white/5 text-steel-400" },
-  NO_SHOW: { label: "Faltou", cls: "bg-amber-400/10 text-amber-300" },
-};
 
 export default async function BarbeiroPanel({
   searchParams,

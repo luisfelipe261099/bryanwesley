@@ -83,25 +83,22 @@ async function main() {
 
   console.log("\n4. Fixo não impede horário avulso");
   const { createBooking } = await import("../lib/appointments");
-  const outroDia = addDays(shopToday(), 3);
+  // Procura o próximo dia em que a loja abre: fixar "daqui a 3 dias"
+  // fazia o teste falhar nas semanas em que essa data caía no domingo.
   let extra = null;
-  try {
-    extra = await createBooking({
-      serviceIds: [corte.id], dateKey: outroDia, time: "15:30",
-      barberId: null, clientName: cliente.name, clientPhone: cliente.phone,
-      userId: cliente.id,
-    });
-  } catch (e) { /* dia fechado, tenta outro */ }
-  if (!extra) {
-    const outro2 = addDays(shopToday(), 4);
+  let motivo = "";
+  for (let i = 1; i <= 10 && !extra; i++) {
+    const dia = addDays(shopToday(), i);
+    if (weekdayOf(dia) === wd) continue; // nesse dia o fixo já ocupa a agenda
     try {
       extra = await createBooking({
-        serviceIds: [corte.id], dateKey: outro2, time: "15:30",
+        serviceIds: [corte.id], dateKey: dia, time: "15:30",
         barberId: null, clientName: cliente.name, clientPhone: cliente.phone,
         userId: cliente.id,
       });
-    } catch (e) { console.log("     (não foi possível: " + (e as Error).message + ")"); }
+    } catch (e) { motivo = (e as Error).message; }
   }
+  if (!extra) console.log("     (não foi possível: " + motivo + ")");
   ok("membro com fixo ainda agenda avulso", !!extra);
 
 

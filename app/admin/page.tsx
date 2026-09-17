@@ -30,19 +30,13 @@ import {
 } from "@/lib/time";
 import { shopFrom } from "@/lib/shop";
 import { openPlanRequests } from "@/lib/queries";
+import { appointmentStatus as statusStyles } from "@/lib/status";
 import { ApptControls } from "./AgendaHoje";
 import { PlanRequests } from "./PlanRequests";
 
 export const dynamic = "force-dynamic";
 
-const statusStyles: Record<string, { label: string; cls: string; dot: string }> = {
-  CONCLUIDO: { label: "Concluído", cls: "bg-neon/10 text-neon", dot: "bg-neon" },
-  CONFIRMADO: { label: "Confirmado", cls: "bg-electric/10 text-electric", dot: "bg-electric" },
-  EM_ANDAMENTO: { label: "Em andamento", cls: "bg-royal/20 text-electric", dot: "bg-electric" },
-  PENDENTE: { label: "Pendente", cls: "bg-amber-400/10 text-amber-300", dot: "bg-amber-400" },
-  CANCELADO: { label: "Cancelado", cls: "bg-white/5 text-steel-400", dot: "bg-steel-400" },
-  NO_SHOW: { label: "Faltou", cls: "bg-amber-400/10 text-amber-300", dot: "bg-amber-400" },
-};
+
 
 export default async function AdminDashboard({
   searchParams,

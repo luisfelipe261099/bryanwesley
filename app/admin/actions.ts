@@ -28,6 +28,7 @@ import { cancelFutureOccurrences } from "@/lib/recurring";
 import { isNextControlFlow } from "@/lib/errors";
 import { hashPassword } from "@/lib/auth/password";
 import {
+  createBooking,
   transitionAppointment,
   rescheduleBooking,
   BookingError,
@@ -633,6 +634,56 @@ export async function updateClient(input: {
     return done(
       phone !== atual.phone ? "Cadastro atualizado." : "Nome atualizado."
     );
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Marca um horário em nome do cliente, pelo balcão.
+ *
+ * O nome e o telefone saem do cadastro — digitar de novo criaria um
+ * segundo registro para a mesma pessoa, já que o telefone é a chave. Quem
+ * entrou sem telefone precisa ser completado antes: sem número não há como
+ * mandar lembrete nem confirmar.
+ */
+export async function bookForClient(input: {
+  userId: number;
+  serviceIds: number[];
+  dateKey: string;
+  time: string;
+  barberId: number | null;
+  notes?: string;
+}): Promise<Result> {
+  try {
+    await admin();
+    const cliente = await db.query.users.findFirst({
+      where: eq(users.id, input.userId),
+    });
+    if (!cliente || cliente.role !== "CLIENT") {
+      return { ok: false, error: "Cliente não encontrado." };
+    }
+    if (isPlaceholderPhone(cliente.phone)) {
+      return {
+        ok: false,
+        error: "Complete o WhatsApp deste cliente antes de marcar um horário.",
+      };
+    }
+    if (input.serviceIds.length === 0) {
+      return { ok: false, error: "Escolha ao menos um serviço." };
+    }
+
+    const appt = await createBooking({
+      serviceIds: input.serviceIds,
+      dateKey: input.dateKey,
+      time: input.time,
+      barberId: input.barberId,
+      clientName: cliente.name,
+      clientPhone: cliente.phone,
+      notes: input.notes,
+      userId: cliente.id,
+    });
+    return done(`Horário marcado. Código ${appt.code}.`);
   } catch (e) {
     return fail(e);
   }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   subscribeImportReport,
@@ -11,35 +12,19 @@ import {
 } from "@/lib/import-report";
 import {
   CalendarClock,
+  ChevronLeft,
+  ChevronRight,
   Crown,
   Download,
-  KeyRound,
-  Link2,
   Loader2,
   Phone,
-  RefreshCw,
   Upload,
   UserCheck,
   X,
 } from "lucide-react";
-import {
-  Card,
-  notify,
-  Feedback,
-  SelectInput,
-  type Msg,
-  TextInput,
-} from "@/components/admin/Feedback";
+import { Card, Feedback, type Msg } from "@/components/admin/Feedback";
 import { formatPhone } from "@/lib/phone";
-import {
-  createSubscriptionCharge,
-  importClients,
-  updateClient,
-  subscribeClient,
-  cancelSubscription,
-  renewSubscription,
-  resetUserPassword,
-} from "../actions";
+import { importClients } from "../actions";
 
 type ClientRow = {
   id: number;
@@ -50,137 +35,229 @@ type ClientRow = {
   renewsAt: string | null;
   visits: number;
   lastVisit: string | null;
+  upcoming: number;
   hasAccount: boolean;
   hasFixedSlot: boolean;
   phonePending: boolean;
 };
 
+/** Os recortes que o balcão pede no dia a dia. */
+const SITUACOES = [
+  { valor: "todos", label: "Todos" },
+  { valor: "assinantes", label: "Assinantes" },
+  { valor: "inadimplentes", label: "Plano vencido" },
+  { valor: "avulsos", label: "Avulsos" },
+  { valor: "sem-telefone", label: "Sem telefone" },
+  { valor: "com-conta", label: "Com conta no app" },
+  { valor: "fixo", label: "Horário fixo" },
+] as const;
+
+const ORDENS = [
+  { valor: "recentes", label: "Mais recentes" },
+  { valor: "nome", label: "Nome (A–Z)" },
+  { valor: "visitas", label: "Mais visitas" },
+  { valor: "ultima-visita", label: "Última visita" },
+] as const;
+
+type Situacao = (typeof SITUACOES)[number]["valor"];
+type Ordem = (typeof ORDENS)[number]["valor"];
+
+/** Monta a URL da lista preservando o que já estava aplicado. */
+function urlDaLista(atual: {
+  busca: string;
+  situacao: Situacao;
+  ordem: Ordem;
+  pagina: number;
+}) {
+  const p = new URLSearchParams();
+  if (atual.busca) p.set("q", atual.busca);
+  if (atual.situacao !== "todos") p.set("situacao", atual.situacao);
+  if (atual.ordem !== "recentes") p.set("ordem", atual.ordem);
+  if (atual.pagina > 1) p.set("pagina", String(atual.pagina));
+  const qs = p.toString();
+  return qs ? `/admin/clientes?${qs}` : "/admin/clientes";
+}
+
 export function ClientesManager({
   clients,
-  plans,
   busca,
+  situacao,
+  ordem,
+  pagina,
+  porPagina,
   total,
-  mostrando,
 }: {
   clients: ClientRow[];
-  plans: { id: number; name: string }[];
   /** Termo em vigor, vindo da URL. */
   busca: string;
+  situacao: Situacao;
+  ordem: Ordem;
+  pagina: number;
+  porPagina: number;
   /** Quantos clientes o filtro encontrou no banco. */
   total: number;
-  /** Quantos vieram nesta página. */
-  mostrando: number;
 }) {
-  const filtered = clients;
+  const router = useRouter();
+  const [navegando, start] = useTransition();
+  const estado = { busca, situacao, ordem, pagina };
+
+  // Mudar filtro ou ordem volta para a primeira página: manter a página
+  // anterior deixaria a tela vazia sem explicar por quê.
+  function aplicar(mudanca: Partial<typeof estado>) {
+    start(() => {
+      router.push(urlDaLista({ ...estado, pagina: 1, ...mudanca }));
+    });
+  }
+
+  const primeiro = total === 0 ? 0 : (pagina - 1) * porPagina + 1;
+  const ultimo = Math.min(pagina * porPagina, total);
+  const ultimaPagina = Math.max(1, Math.ceil(total / porPagina));
+
+  const exportar = (() => {
+    const p = new URLSearchParams();
+    if (busca) p.set("q", busca);
+    if (situacao !== "todos") p.set("situacao", situacao);
+    if (ordem !== "recentes") p.set("ordem", ordem);
+    const qs = p.toString();
+    return qs ? `/api/relatorios/clientes?${qs}` : "/api/relatorios/clientes";
+  })();
 
   return (
     <div className="space-y-5">
-      <ImportBox />
+      <ImportBox exportar={exportar} filtrando={!!busca || situacao !== "todos"} />
 
       <Card
         title="Clientes"
         desc={
-          busca
-            ? `${total} encontrado(s) para “${busca}”`
-            : `${total} cadastrado(s)`
+          total === 0
+            ? "Nenhum cliente para este filtro."
+            : `Mostrando ${primeiro}–${ultimo} de ${total}`
         }
       >
-        <BuscaClientes inicial={busca} />
-        {mostrando < total && (
-          <p className="-mt-2 mb-4 text-xs text-steel-400">
-            Mostrando os {mostrando} mais recentes. Use a busca para chegar nos
-            outros {total - mostrando}.
-          </p>
-        )}
+        <BuscaClientes
+          inicial={busca}
+          onBuscar={(termo) => aplicar({ busca: termo })}
+        />
 
-        {filtered.length === 0 ? (
+        <div className="mb-4 flex flex-wrap items-center gap-1.5">
+          {SITUACOES.map((s) => (
+            <button
+              key={s.valor}
+              type="button"
+              onClick={() => aplicar({ situacao: s.valor })}
+              aria-pressed={situacao === s.valor}
+              className={`label rounded-full border px-3 py-2 transition-colors ${
+                situacao === s.valor
+                  ? "border-electric/45 bg-electric/12 text-electric"
+                  : "border-white/10 text-steel-300 hover:border-white/25 hover:text-white"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+          <label className="ml-auto flex items-center gap-2 text-xs text-steel-400">
+            Ordenar
+            <select
+              value={ordem}
+              onChange={(e) => aplicar({ ordem: e.target.value as Ordem })}
+              aria-label="Ordenar clientes"
+              className="rounded-xl border border-white/10 bg-surface-2 px-3 py-2 text-sm text-white outline-none [color-scheme:dark] focus:border-electric/60"
+            >
+              {ORDENS.map((o) => (
+                <option key={o.valor} value={o.valor}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {clients.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-steel-400">
             Nenhum cliente encontrado.
           </p>
         ) : (
-          <ul className="space-y-2">
-            {filtered.map((c) => (
-              <ClientRowItem key={c.id} client={c} plans={plans} />
+          <ul className={`space-y-2 ${navegando ? "opacity-60" : ""}`}>
+            {clients.map((c) => (
+              <ClientRowItem key={c.id} client={c} />
             ))}
           </ul>
+        )}
+
+        {total > porPagina && (
+          <nav
+            aria-label="Páginas de clientes"
+            className="mt-4 flex items-center justify-between gap-3 border-t border-white/8 pt-4"
+          >
+            <PaginaBtn
+              href={urlDaLista({ ...estado, pagina: pagina - 1 })}
+              desabilitado={pagina <= 1}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Anterior
+            </PaginaBtn>
+            <span className="text-xs text-steel-400">
+              Página {pagina} de {ultimaPagina}
+            </span>
+            <PaginaBtn
+              href={urlDaLista({ ...estado, pagina: pagina + 1 })}
+              desabilitado={pagina >= ultimaPagina}
+            >
+              Próxima
+              <ChevronRight className="h-3.5 w-3.5" />
+            </PaginaBtn>
+          </nav>
         )}
       </Card>
     </div>
   );
 }
 
-function ClientRowItem({
-  client,
-  plans,
+function PaginaBtn({
+  href,
+  desabilitado,
+  children,
 }: {
-  client: ClientRow;
-  plans: { id: number; name: string }[];
+  href: string;
+  desabilitado: boolean;
+  children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
-  const [planId, setPlanId] = useState(String(plans[0]?.id ?? ""));
-  const [cycle, setCycle] = useState<"MENSAL" | "ANUAL">("MENSAL");
-  const [msg, setMsg] = useState<Msg>(null);
-  const [pending, start] = useTransition();
-
-  function assinar() {
-    setMsg(null);
-    start(async () => {
-      const res = await subscribeClient({
-        userId: client.id,
-        planId: Number(planId),
-        cycle,
-      });
-      setMsg(notify(res, "Ativada."));
-      if (res.ok) setOpen(false);
-    });
+  const classe =
+    "label inline-flex items-center gap-1.5 rounded-full border px-4 py-2.5";
+  if (desabilitado) {
+    return (
+      <span
+        aria-disabled="true"
+        className={`${classe} border-white/8 text-steel-400/50`}
+      >
+        {children}
+      </span>
+    );
   }
-
-  function cancelar() {
-    start(async () => {
-      const res = await cancelSubscription(client.id);
-      if (!res.ok) setMsg({ ok: false, text: res.error });
-    });
-  }
-
-  function renovar() {
-    setMsg(null);
-    start(async () => {
-      const res = await renewSubscription(client.id);
-      setMsg(notify(res, "Renovada."));
-    });
-  }
-
-  const [editOpen, setEditOpen] = useState(false);
-  const [nome, setNome] = useState(client.name);
-  const [fone, setFone] = useState(client.phonePending ? "" : client.phone);
-  function salvarCadastro() {
-    setMsg(null);
-    start(async () => {
-      const res = await updateClient({ userId: client.id, name: nome, phone: fone });
-      setMsg(notify(res, "Cadastro atualizado."));
-      if (res.ok) setEditOpen(false);
-    });
-  }
-
-  const [pwOpen, setPwOpen] = useState(false);
-  const [pw, setPw] = useState("");
-  function redefinir() {
-    setMsg(null);
-    start(async () => {
-      const res = await resetUserPassword({ userId: client.id, password: pw });
-      setMsg(notify(res, "Senha redefinida."));
-      if (res.ok) {
-        setPw("");
-        setPwOpen(false);
-      }
-    });
-  }
-
   return (
-    <li className="rounded-2xl border border-white/6 bg-white/[0.02] p-3.5">
-      {/* No celular as ações vão para baixo: lado a lado elas espremiam
-          o nome do cliente até ele sumir. */}
-      <div className="flex flex-wrap items-start gap-3">
+    <Link
+      href={href}
+      className={`${classe} border-white/12 text-steel-300 hover:border-electric/40 hover:text-white`}
+    >
+      {children}
+    </Link>
+  );
+}
+
+/**
+ * Uma linha da lista.
+ *
+ * O cartão inteiro abre a ficha: assinatura, agendamento, pagamentos e
+ * senha moram lá, onde há espaço para mostrar o que já aconteceu antes de
+ * mexer. Aqui fica só o que ajuda a reconhecer a pessoa.
+ */
+function ClientRowItem({ client }: { client: ClientRow }) {
+  return (
+    <li>
+      <Link
+        href={`/admin/clientes/${client.id}`}
+        className="flex flex-wrap items-start gap-3 rounded-2xl border border-white/6 bg-white/[0.02] p-3.5 transition-colors hover:border-electric/35 hover:bg-white/[0.04]"
+      >
         <span className="grid h-10 w-10 flex-none place-items-center rounded-full bg-royal-grad font-display text-base text-white">
           {client.name.charAt(0)}
         </span>
@@ -217,7 +294,9 @@ function ClientRowItem({
           >
             <Phone className="h-3 w-3 flex-none" />
             <span className="truncate">
-              {client.phonePending ? "Sem telefone — completar" : formatPhone(client.phone)}
+              {client.phonePending
+                ? "Sem telefone — completar"
+                : formatPhone(client.phone)}
             </span>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -243,215 +322,22 @@ function ClientRowItem({
             </span>
           </div>
         </div>
-        <div className="flex w-full flex-row flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:flex-none sm:flex-col sm:items-end">
-          <button
-            type="button"
-            onClick={() => setPwOpen((v) => !v)}
-            aria-label="Redefinir senha"
-            title="Redefinir senha"
-            className="grid h-8 w-8 place-items-center rounded-full border border-white/12 text-steel-400 transition-colors hover:border-electric/40 hover:text-electric"
-          >
-            <KeyRound className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setEditOpen((v) => !v)}
-            title={client.phonePending ? "Completar o telefone" : "Editar nome e telefone"}
-            className={`label rounded-full border px-3 py-2 ${
-              client.phonePending
-                ? "border-amber-400/40 bg-amber-400/10 text-amber-200"
-                : "border-white/12 text-steel-300 hover:text-white"
-            }`}
-          >
-            {editOpen ? "Fechar" : client.phonePending ? "Completar" : "Editar"}
-          </button>
-          {client.plan || client.overduePlan ? (
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={renovar}
-                disabled={pending}
-                title="Registrar pagamento e renovar"
-                className="label inline-flex items-center gap-1 rounded-full border border-electric/40 bg-electric/10 px-3 py-2 text-electric disabled:opacity-50"
-              >
-                {pending ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-3 w-3" />
-                )}
-                Renovar
-              </button>
-              <Cobrar userId={client.id} />
-              {client.plan && (
-                <button
-                  type="button"
-                  onClick={cancelar}
-                  disabled={pending}
-                  aria-label="Cancelar plano"
-                  title="Cancelar plano"
-                  className="grid h-8 w-8 place-items-center rounded-full border border-white/12 text-steel-400 transition-colors hover:border-red-400/50 hover:text-red-200 disabled:opacity-50"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
+        <div className="flex w-full flex-none items-center justify-between gap-2 sm:w-auto sm:flex-col sm:items-end sm:justify-start">
+          {client.upcoming > 0 ? (
+            <span className="label inline-flex items-center gap-1 rounded-full bg-neon/10 px-2.5 py-1.5 text-neon">
+              <CalendarClock className="h-3 w-3" />
+              {client.upcoming} marcado(s)
+            </span>
           ) : (
-            <button
-              type="button"
-              onClick={() => setOpen((v) => !v)}
-              className="label rounded-full border border-electric/40 bg-electric/10 px-3 py-2 text-electric"
-            >
-              {open ? "Fechar" : "Assinar"}
-            </button>
+            <span className="text-xs text-steel-400/70">sem horário marcado</span>
           )}
+          <span className="label inline-flex items-center gap-1 rounded-full border border-white/12 px-3 py-2 text-steel-300">
+            Abrir ficha
+            <ChevronRight className="h-3.5 w-3.5" />
+          </span>
         </div>
-      </div>
-
-      {editOpen && (
-        <div className="mt-3 grid gap-3 border-t border-white/8 pt-3 sm:grid-cols-[1fr_1fr_auto]">
-          <TextInput
-            label="Nome"
-            value={nome}
-            onChange={(e) => setNome(e.target.value)}
-          />
-          <TextInput
-            label="WhatsApp"
-            inputMode="tel"
-            placeholder="(41) 99999-0000"
-            value={fone}
-            onChange={(e) => setFone(e.target.value)}
-          />
-          <div className="flex items-end gap-2">
-            <button
-              type="button"
-              onClick={salvarCadastro}
-              disabled={pending}
-              className="btn-royal label rounded-xl px-4 py-3 text-white disabled:opacity-40"
-            >
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Salvar"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setEditOpen(false);
-                setNome(client.name);
-                setFone(client.phonePending ? "" : client.phone);
-                setMsg(null);
-              }}
-              className="label rounded-xl border border-white/12 px-4 py-3 text-steel-300 hover:text-white"
-            >
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
-
-      {pwOpen && (
-        <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-white/8 pt-3">
-          <input
-            type="text"
-            value={pw}
-            onChange={(e) => setPw(e.target.value)}
-            placeholder="Nova senha (mínimo 6)"
-            aria-label="Nova senha"
-            className="min-w-0 flex-1 rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none placeholder:text-steel-400/60 focus:border-electric/60"
-          />
-          <button
-            type="button"
-            onClick={redefinir}
-            disabled={pending || pw.trim().length < 6}
-            className="btn-royal label rounded-xl px-4 py-3 text-white disabled:opacity-40"
-          >
-            Definir senha
-          </button>
-        </div>
-      )}
-
-      {open && (
-        <div className="mt-3 grid gap-3 border-t border-white/8 pt-3 sm:grid-cols-3">
-          <SelectInput
-            label="Plano"
-            value={planId}
-            onChange={(e) => setPlanId(e.target.value)}
-          >
-            {plans.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </SelectInput>
-          <SelectInput
-            label="Ciclo"
-            value={cycle}
-            onChange={(e) => setCycle(e.target.value as "MENSAL" | "ANUAL")}
-          >
-            <option value="MENSAL">Mensal</option>
-            <option value="ANUAL">Anual</option>
-          </SelectInput>
-          <div className="flex items-end">
-            <button
-              type="button"
-              onClick={assinar}
-              disabled={pending}
-              className="btn-royal label inline-flex w-full items-center justify-center gap-2 rounded-xl py-3 text-white disabled:opacity-50"
-            >
-              {pending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Ativar assinatura
-            </button>
-          </div>
-        </div>
-      )}
-      <Feedback msg={msg} />
+      </Link>
     </li>
-  );
-}
-
-function Cobrar({ userId }: { userId: number }) {
-  const [pending, start] = useTransition();
-  const [url, setUrl] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  if (url) {
-    return (
-      <a
-        href={url}
-        target="_blank"
-        rel="noreferrer"
-        className="label inline-flex items-center gap-1.5 rounded-full border border-neon/40 bg-neon/10 px-3 py-2 text-neon"
-      >
-        <Link2 className="h-3 w-3" />
-        Abrir cobrança
-      </a>
-    );
-  }
-
-  return (
-    <span className="flex flex-col items-end gap-1">
-      <button
-        type="button"
-        disabled={pending}
-        title="Gerar link de pagamento do próximo ciclo"
-        onClick={() => {
-          setErr(null);
-          start(async () => {
-            const r = await createSubscriptionCharge(userId);
-            if (r.ok) setUrl(r.url);
-            else setErr(r.error);
-          });
-        }}
-        className="label inline-flex items-center gap-1.5 rounded-full border border-white/12 px-3 py-2 text-steel-300 hover:border-electric/45 hover:text-white disabled:opacity-50"
-      >
-        {pending ? (
-          <Loader2 className="h-3 w-3 animate-spin" />
-        ) : (
-          <Link2 className="h-3 w-3" />
-        )}
-        Cobrar
-      </button>
-      {err && (
-        <span className="max-w-[220px] text-right text-xs text-amber-200">{err}</span>
-      )}
-    </span>
   );
 }
 
@@ -462,15 +348,18 @@ function Cobrar({ userId }: { userId: number }) {
  * cadastros importados, filtrar só a página carregada esconderia a maioria
  * das pessoas.
  */
-function BuscaClientes({ inicial }: { inicial: string }) {
-  const router = useRouter();
+function BuscaClientes({
+  inicial,
+  onBuscar,
+}: {
+  inicial: string;
+  onBuscar: (termo: string) => void;
+}) {
   const [q, setQ] = useState(inicial);
   const [pending, start] = useTransition();
 
   function buscar(termo: string) {
-    start(() => {
-      router.push(termo.trim() ? `/admin/clientes?q=${encodeURIComponent(termo.trim())}` : "/admin/clientes");
-    });
+    start(() => onBuscar(termo.trim()));
   }
 
   return (
@@ -511,7 +400,14 @@ function BuscaClientes({ inicial }: { inicial: string }) {
   );
 }
 
-function ImportBox() {
+function ImportBox({
+  exportar,
+  filtrando,
+}: {
+  /** Endereço do CSV já com a busca e o filtro em vigor. */
+  exportar: string;
+  filtrando: boolean;
+}) {
   const [csv, setCsv] = useState("");
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, start] = useTransition();
@@ -531,8 +427,11 @@ function ImportBox() {
     start(async () => {
       const res = await importClients(csv);
       if (res.ok) {
-        setMsg({ ok: true, text: res.message ?? "Importado." });
+        // O resumo vai para o store junto com o relatório: a ação revalida
+        // a rota, isso remonta a árvore e um useState seria apagado —
+        // exatamente a mensagem que diz quantos entraram.
         setImportReport({
+          message: res.message ?? "Importado.",
           criados: res.criados ?? 0,
           atualizados: res.atualizados ?? 0,
           skipped: res.skipped ?? [],
@@ -546,7 +445,7 @@ function ImportBox() {
 
   function baixarRelatorio() {
     const linhas = [
-      `Importação: ${relatorio?.criados ?? 0} novo(s), ${relatorio?.atualizados ?? 0} atualizado(s)`,
+      `Importação: ${relatorio?.message ?? ""}`,
       `${skipped.length} linha(s) de fora:`,
       ...skipped,
     ].join("\n");
@@ -597,13 +496,18 @@ function ImportBox() {
         Importar
       </button>
       <a
-        href="/api/relatorios/clientes"
+        href={exportar}
+        title={
+          filtrando
+            ? "Baixa só quem está aparecendo no filtro"
+            : "Baixa a base inteira"
+        }
         className="btn-outline label ml-3 inline-flex items-center gap-2 rounded-full px-5 py-3 text-electric"
       >
         <Download className="h-4 w-4" />
-        Exportar
+        {filtrando ? "Exportar o filtro" : "Exportar"}
       </a>
-      <Feedback msg={msg} />
+      <Feedback msg={relatorio ? { ok: true, text: relatorio.message } : msg} />
 
       {skipped.length > 0 && (
         <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/[0.07] p-3.5">

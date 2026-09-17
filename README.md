@@ -44,7 +44,8 @@ Utilitários em [`app/globals.css`](app/globals.css): `.glass`, `.btn-royal`,
 | `/admin/agenda` | `ADMIN` | Dados da barbearia, regras da agenda e bloqueios |
 | `/admin/equipe` | `ADMIN` | Barbeiros, jornada própria, metas e faixas de comissão |
 | `/admin/catalogo` | `ADMIN` | Serviços e planos de assinatura |
-| `/admin/clientes` | `ADMIN` | Clientes, assinaturas, cobrança, senha, importar/exportar |
+| `/admin/clientes` | `ADMIN` | Lista com busca, filtros por situação, ordenação, paginação e importar/exportar |
+| `/admin/clientes/[id]` | `ADMIN` | Ficha: cadastro, marcar horário, histórico, plano e pagamentos |
 | `/admin/relatorios` | `ADMIN` | Fechamento mensal por barbeiro + CSV |
 | `/admin/notificacoes` | `ADMIN` | Fila de mensagens, reenvio e disparo manual |
 | `/api/health` | Monitor | Disponibilidade e latência do banco |
@@ -197,24 +198,27 @@ Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
 ## Testes
 
 ```bash
-npm test                  # 164 verificações
+npm test                  # 200 verificações
 npm run test:agenda       # 34 — motor de agenda, jornada por barbeiro, faixas de meta
 npm run test:fixo         # 17 — horário fixo, ocorrência cancelada, transição concorrente
 npm run test:seguranca    # 18 — teto de agendamentos, webhook, redirect, CSV, sessão
 npm run test:despacho     # 35 — trava da varredura, mensagem vencida, renovação, erro do driver
 npm run test:import       # 60 — leitura do CSV, colunas fora de ordem, telefone compartilhado,
                           #      cliente sem telefone e número reservado
+npm run test:clientes     # 36 — busca, filtros por situação, ordenação, paginação e ficha
 ```
 
-Há ainda um roteiro de navegador (Playwright) com 124 verificações de ponta a
+Há ainda um roteiro de navegador (Playwright) com 158 verificações de ponta a
 ponta: agendamento de visitante, login, todas as telas do admin, check-in por
 código, endpoint do cron protegido, tomada de conta com prova por código, nav
 por papel, troca de senha, assinatura pelo site, remarcação, relatórios,
 download dos CSVs, heartbeat disparado pelo painel, redirect com sessão
 expirada, foco preso no modal, toggle do catálogo x banco, desativação de
 barbeiro (com a guarda de auto-desativação do admin), redefinição de senha da
-equipe pelo painel, importação da base de clientes e cadastro sem telefone
-(marcado na lista, completado pelo painel, sem duplicar na reimportação).
+equipe pelo painel, importação da base de clientes, cadastro sem telefone
+(marcado na lista, completado pela ficha, sem duplicar na reimportação),
+paginação e filtros da lista de clientes e a ficha do cliente — marcar
+horário pelo balcão, concluir o atendimento, ativar e cancelar plano.
 
 Cobrem disponibilidade, bloqueios, antecedência, reserva dupla, corrida de
 concorrência, ciclo de vida do atendimento, fechamento da comissão e a
