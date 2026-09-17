@@ -25,7 +25,9 @@ const links = [
 export function AdminNav() {
   const path = usePathname();
   return (
-    <nav className="mb-6 flex gap-2 overflow-x-auto pb-1">
+    // Vaza até a borda da tela no celular: o chip cortado na lateral é o
+    // que mostra que a lista continua para o lado.
+    <nav className="rail mb-6 -mx-5 px-5 lg:mx-0 lg:px-0">
       {links.map((l) => {
         const on = path === l.href;
         return (

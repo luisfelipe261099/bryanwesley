@@ -65,6 +65,37 @@ body {
   background: #33405a;
 }
 
+/* Trilho de chips que rola com o dedo.
+   Sem barra de rolagem à mostra (no celular ela nem aparece) e com
+   encaixe: o conteúdo que sobra fica claro pelo corte na borda, em vez de
+   sumir atrás de um card que cresceu além da tela. */
+.rail {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  padding-bottom: 0.25rem;
+}
+.rail::-webkit-scrollbar {
+  display: none;
+}
+.rail > * {
+  flex: none;
+  scroll-snap-align: start;
+}
+
+/* Alvo de toque no celular.
+   Os chips de ação usam texto de 11px e ficavam com 29px de altura — fácil
+   errar com o dedo. Só vale para quem já é botão/link com a classe .label,
+   então o interruptor e os cartões continuam do tamanho que são. */
+@media (pointer: coarse) {
+  button.label,
+  a.label {
+    min-height: 38px;
+  }
+}
+
 /* Controles de formulário sempre escuros e legíveis */
 select,
 input,

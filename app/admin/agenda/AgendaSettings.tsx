@@ -308,7 +308,7 @@ export function BlocksManager({
                   type="button"
                   onClick={() => drop(b.id)}
                   aria-label="Remover bloqueio"
-                  className="flex-none text-amber-200/70 transition-colors hover:text-white"
+                  className="grid h-10 w-10 flex-none place-items-center rounded-full text-amber-200/70 transition-colors hover:bg-white/5 hover:text-white"
                 >
                   <X className="h-4 w-4" />
                 </button>

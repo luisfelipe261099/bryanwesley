@@ -208,7 +208,7 @@ npm run test:import       # 60 — leitura do CSV, colunas fora de ordem, telefo
 npm run test:clientes     # 36 — busca, filtros por situação, ordenação, paginação e ficha
 ```
 
-Há ainda um roteiro de navegador (Playwright) com 158 verificações de ponta a
+Há ainda um roteiro de navegador (Playwright) com 207 verificações de ponta a
 ponta: agendamento de visitante, login, todas as telas do admin, check-in por
 código, endpoint do cron protegido, tomada de conta com prova por código, nav
 por papel, troca de senha, assinatura pelo site, remarcação, relatórios,
@@ -219,6 +219,10 @@ equipe pelo painel, importação da base de clientes, cadastro sem telefone
 (marcado na lista, completado pela ficha, sem duplicar na reimportação),
 paginação e filtros da lista de clientes e a ficha do cliente — marcar
 horário pelo balcão, concluir o atendimento, ativar e cancelar plano.
+
+Uma parte do roteiro cuida só do celular: em 320, 360 e 390 pixels, nenhuma
+tela pode ter rolagem lateral nem conteúdo cortado fora de um trilho que
+rola, e o menu do celular precisa cobrir a página inteira.
 
 Cobrem disponibilidade, bloqueios, antecedência, reserva dupla, corrida de
 concorrência, ciclo de vida do atendimento, fechamento da comissão e a

@@ -593,7 +593,7 @@ function TierRemove({ id }: { id: number }) {
         })
       }
       aria-label="Remover faixa"
-      className="flex-none text-steel-400 transition-colors hover:text-red-200 disabled:opacity-40"
+      className="grid h-10 w-10 flex-none place-items-center rounded-full text-steel-400 transition-colors hover:bg-white/5 hover:text-red-200 disabled:opacity-40"
     >
       {pending ? (
         <Loader2 className="h-4 w-4 animate-spin" />

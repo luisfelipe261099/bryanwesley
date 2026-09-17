@@ -115,8 +115,10 @@ export default async function AdminDashboard({
       </Reveal>
 
       {/* KPIs */}
-      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Reveal delay={0.04}>
+      {/* Dois por linha já no celular: um embaixo do outro, os quatro
+          números custavam meia tela de rolagem cada. */}
+      <div className="mt-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        <Reveal delay={0.04} className="h-full">
           <Kpi
             icon={DollarSign}
             label="Faturamento hoje"
@@ -124,7 +126,7 @@ export default async function AdminDashboard({
             hint={`${kpi.concluidosHoje} atendimento(s) concluído(s)`}
           />
         </Reveal>
-        <Reveal delay={0.08}>
+        <Reveal delay={0.08} className="h-full">
           <Kpi
             icon={Repeat}
             label="MRR (assinaturas)"
@@ -132,7 +134,7 @@ export default async function AdminDashboard({
             hint={`${kpi.assinantesAtivos} membro(s) ativo(s)`}
           />
         </Reveal>
-        <Reveal delay={0.12}>
+        <Reveal delay={0.12} className="h-full">
           <Kpi
             icon={Activity}
             label="Ocupação de hoje"
@@ -140,7 +142,7 @@ export default async function AdminDashboard({
             hint={`${Math.round(minutosVendidos / 60)}h vendidas`}
           />
         </Reveal>
-        <Reveal delay={0.16}>
+        <Reveal delay={0.16} className="h-full">
           <Kpi
             icon={Wallet}
             label="Comissões do mês"
@@ -150,22 +152,30 @@ export default async function AdminDashboard({
         </Reveal>
       </div>
 
+      {/* min-w-0 nos filhos: um item de grid tem min-width:auto, então o
+          trilho de dias esticaria a coluna além da tela e o conteúdo sairia
+          cortado pela borda. */}
       <div className="mt-5 grid gap-5 lg:grid-cols-[1.4fr_1fr]">
         {/* Agenda de hoje */}
-        <Reveal>
+        <Reveal className="min-w-0">
           <div className="glass rounded-3xl p-6">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-display text-lg text-white">
                 {dateKey === today ? "Agenda de hoje" : "Agenda"}
               </h2>
-              <span className="label capitalize text-steel-400">
-                {labelFullDate(dateKey)} · {minutesToHHMM(settings.openMinute)}—
-                {minutesToHHMM(settings.closeMinute)}
+              {/* Dois pedaços: no celular a linha quebra entre a data e o
+                  horário, em vez de partir "09:00—20:00" no meio. */}
+              <span className="label flex flex-wrap gap-x-2 capitalize text-steel-400">
+                <span>{labelFullDate(dateKey)}</span>
+                <span className="whitespace-nowrap">
+                  {minutesToHHMM(settings.openMinute)}—
+                  {minutesToHHMM(settings.closeMinute)}
+                </span>
               </span>
             </div>
 
             {/* Navegar dias sem sair do painel */}
-            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+            <div className="rail mt-4 -mx-6 px-6">
               {dias.map((d) => {
                 const on = d === dateKey;
                 return (
@@ -239,7 +249,7 @@ export default async function AdminDashboard({
                   return (
                     <li
                       key={a.id}
-                      className="flex items-center gap-3 rounded-2xl border border-white/6 bg-white/[0.02] p-3 transition-colors hover:border-electric/30 sm:gap-4 sm:p-3.5"
+                      className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-white/6 bg-white/[0.02] p-3 transition-colors hover:border-electric/30 sm:flex-nowrap sm:gap-4 sm:p-3.5"
                     >
                       <div className="flex w-14 flex-none flex-col items-center">
                         <span className="font-display text-base leading-none text-white sm:text-lg">
@@ -250,7 +260,7 @@ export default async function AdminDashboard({
                         </span>
                       </div>
                       <div className="hidden h-10 w-px bg-white/8 sm:block" />
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1 basis-[55%]">
                         <div className="flex items-center gap-2">
                           <span className="truncate font-semibold text-white">
                             {a.clientName}
@@ -264,7 +274,9 @@ export default async function AdminDashboard({
                           {a.barber.shortName}
                         </span>
                       </div>
-                      <div className="flex flex-none flex-col items-end gap-1.5">
+                      {/* No celular o preço, a situação e os botões vão para
+                          baixo: lado a lado eles empurravam o nome para fora. */}
+                      <div className="flex w-full flex-row flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-none sm:flex-col sm:items-end sm:gap-1.5">
                         <span className="text-sm font-semibold tabular-nums text-white">
                           {a.kind === "ASSINANTE"
                             ? "Plano"
@@ -286,7 +298,7 @@ export default async function AdminDashboard({
           </div>
         </Reveal>
 
-        <div className="flex flex-col gap-5">
+        <div className="flex min-w-0 flex-col gap-5">
           {/* Faturamento da semana */}
           <Reveal delay={0.06}>
             <div className="glass rounded-3xl p-6">
@@ -297,6 +309,13 @@ export default async function AdminDashboard({
               <div className="mt-2 font-display text-3xl text-white">
                 {formatBRL(totalSemana)}
               </div>
+              {/* Semana inteira zerada vira uma frase: o gráfico vazio era
+                  um bloco de 160px de nada no meio da tela. */}
+              {totalSemana === 0 ? (
+                <p className="mt-4 rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-steel-400">
+                  Nenhum atendimento concluído nos últimos 7 dias.
+                </p>
+              ) : (
               <div className="mt-6 flex h-40 items-end justify-between gap-2">
                 {semana.map((d) => {
                   const hPx = Math.max(
@@ -323,6 +342,7 @@ export default async function AdminDashboard({
                   );
                 })}
               </div>
+              )}
             </div>
           </Reveal>
 
@@ -381,12 +401,15 @@ export default async function AdminDashboard({
             {equipe.map((t) => (
               <li
                 key={t.barber.id}
-                className="flex items-center gap-3 rounded-2xl border border-white/6 bg-white/[0.02] p-3.5"
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-white/6 bg-white/[0.02] p-3.5"
               >
                 <span className="grid h-10 w-10 flex-none place-items-center rounded-full bg-royal-grad font-display text-base text-white">
                   {t.barber.user.name.charAt(0)}
                 </span>
-                <div className="min-w-0 flex-1">
+                {/* No celular o nome fica com a linha inteira: com o
+                    faturamento ao lado sobravam 85px e todo mundo virava
+                    "Master Barbe…". */}
+                <div className="min-w-0 flex-1 basis-[55%]">
                   <p className="truncate font-medium text-white">
                     {t.barber.user.name}
                   </p>
@@ -394,7 +417,7 @@ export default async function AdminDashboard({
                     {t.barber.title} · {t.atendimentos} atendimento(s)
                   </p>
                 </div>
-                <div className="flex-none text-right">
+                <div className="flex w-full flex-none items-baseline justify-between gap-2 sm:w-auto sm:block sm:text-right">
                   <p className="font-display text-base text-white">
                     {formatBRL(t.baseCents)}
                   </p>
@@ -433,13 +456,17 @@ function Kpi({
   hint: string;
 }) {
   return (
-    <div className="glass glass-hover rounded-2xl p-5">
-      <span className="grid h-10 w-10 place-items-center rounded-xl border border-electric/25 bg-electric/10 text-electric">
-        <Icon className="h-5 w-5" strokeWidth={1.75} />
+    <div className="glass glass-hover h-full rounded-2xl p-4 sm:p-5">
+      <span className="grid h-9 w-9 place-items-center rounded-xl border border-electric/25 bg-electric/10 text-electric sm:h-10 sm:w-10">
+        <Icon className="h-4 w-4 sm:h-5 sm:w-5" strokeWidth={1.75} />
       </span>
-      <div className="mt-4 font-display text-2xl text-white">{value}</div>
-      <div className="mt-1 text-sm text-steel-400">{label}</div>
-      <div className="mt-1.5 text-xs text-steel-400/80">{hint}</div>
+      <div className="mt-3 font-display text-xl text-white sm:mt-4 sm:text-2xl">
+        {value}
+      </div>
+      <div className="mt-1 text-[13px] text-steel-400 sm:text-sm">{label}</div>
+      <div className="mt-1 text-[11px] leading-snug text-steel-400/80 sm:mt-1.5 sm:text-xs">
+        {hint}
+      </div>
     </div>
   );
 }

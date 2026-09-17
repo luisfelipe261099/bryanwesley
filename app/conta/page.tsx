@@ -29,7 +29,7 @@ export default async function Conta() {
       <main className="mx-auto max-w-2xl px-5 pb-28 pt-24 lg:px-8">
         <Link
           href={HOME[session.role]}
-          className="inline-flex items-center gap-2 text-sm text-steel-400 hover:text-electric"
+          className="-ml-2 inline-flex items-center gap-2 rounded-full px-2 py-2.5 text-sm text-steel-400 hover:text-electric"
         >
           <ArrowLeft className="h-4 w-4" />
           Voltar ao painel

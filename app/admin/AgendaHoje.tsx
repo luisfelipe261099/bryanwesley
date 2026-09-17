@@ -74,7 +74,7 @@ function IconBtn({
       type="button"
       {...props}
       aria-label={props.title}
-      className={`grid h-8 w-8 place-items-center rounded-full border transition-colors disabled:opacity-40 ${
+      className={`grid h-10 w-10 place-items-center rounded-full border transition-colors disabled:opacity-40 sm:h-9 sm:w-9 ${
         tone === "ok"
           ? "border-electric/40 text-electric hover:bg-electric/10"
           : "border-white/12 text-steel-400 hover:border-red-400/50 hover:text-red-200"

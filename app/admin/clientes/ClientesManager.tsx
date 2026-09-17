@@ -187,7 +187,7 @@ export function ClientesManager({
         {total > porPagina && (
           <nav
             aria-label="Páginas de clientes"
-            className="mt-4 flex items-center justify-between gap-3 border-t border-white/8 pt-4"
+            className="mt-4 flex flex-wrap items-center justify-center gap-3 border-t border-white/8 pt-4 sm:justify-between"
           >
             <PaginaBtn
               href={urlDaLista({ ...estado, pagina: pagina - 1 })}
@@ -196,7 +196,9 @@ export function ClientesManager({
               <ChevronLeft className="h-3.5 w-3.5" />
               Anterior
             </PaginaBtn>
-            <span className="text-xs text-steel-400">
+            {/* Em tela estreita a contagem vai para a própria linha: entre
+                os dois botões ela empurrava "Próxima" para fora. */}
+            <span className="order-first w-full text-center text-xs text-steel-400 sm:order-none sm:w-auto">
               Página {pagina} de {ultimaPagina}
             </span>
             <PaginaBtn

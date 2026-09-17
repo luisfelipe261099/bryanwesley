@@ -59,7 +59,10 @@ export async function Footer() {
             © {new Date().getFullYear()} Bryan Wesley Barbearia. Todos os
             direitos reservados.
           </span>
-          <Link href="/privacidade" className="text-steel-400/70 hover:text-electric">
+          <Link
+            href="/privacidade"
+            className="inline-block py-2 text-steel-400/70 hover:text-electric"
+          >
             Política de privacidade
           </Link>
         </div>
