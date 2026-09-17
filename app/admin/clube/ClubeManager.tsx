@@ -25,6 +25,7 @@ import {
   cancelSubscription,
   createSubscriptionCharge,
   renewSubscription,
+  subscribeClient,
 } from "../actions";
 
 type Assinante = {
@@ -249,7 +250,7 @@ export function ClubeManager({
         ) : (
           <ul className={`space-y-2 ${navegando ? "opacity-60" : ""}`}>
             {assinantes.map((a) => (
-              <LinhaAssinante key={a.subscriptionId} assinante={a} />
+              <LinhaAssinante key={a.subscriptionId} assinante={a} planos={planos} />
             ))}
           </ul>
         )}
@@ -310,11 +311,41 @@ function Numero({
   );
 }
 
-function LinhaAssinante({ assinante }: { assinante: Assinante }) {
+function LinhaAssinante({
+  assinante,
+  planos,
+}: {
+  assinante: Assinante;
+  planos: PlanoEditavel[];
+}) {
   const [msg, setMsg] = useState<Msg>(null);
   const [cobranca, setCobranca] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const st = subscriptionStatus[assinante.status];
+
+  const [trocando, setTrocando] = useState(false);
+  const [novoPlano, setNovoPlano] = useState(String(assinante.planId));
+  const [novoCiclo, setNovoCiclo] = useState<"MENSAL" | "ANUAL">(
+    assinante.cycle === "ANUAL" ? "ANUAL" : "MENSAL"
+  );
+
+  /**
+   * Mudar de plano é assinar de novo: a ação encerra a assinatura atual e
+   * abre outra, então o histórico guarda os dois — útil para saber desde
+   * quando a pessoa é do Gold.
+   */
+  function trocar() {
+    setMsg(null);
+    start(async () => {
+      const res = await subscribeClient({
+        userId: assinante.userId,
+        planId: Number(novoPlano),
+        cycle: novoCiclo,
+      });
+      setMsg(notify(res, "Plano trocado."));
+      if (res.ok) setTrocando(false);
+    });
+  }
 
   function renovar() {
     setMsg(null);
@@ -416,6 +447,13 @@ function LinhaAssinante({ assinante }: { assinante: Assinante }) {
                   Cobrar
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => setTrocando((v) => !v)}
+                className="label rounded-full border border-white/12 px-3 py-2 text-steel-300 hover:border-electric/45 hover:text-white"
+              >
+                {trocando ? "Fechar" : "Trocar plano"}
+              </button>
               {assinante.status === "ATIVA" && (
                 <button
                   type="button"
@@ -437,6 +475,48 @@ function LinhaAssinante({ assinante }: { assinante: Assinante }) {
           </Link>
         </div>
       </div>
+      {trocando && (
+        <div className="mt-3 grid gap-3 border-t border-white/8 pt-3 sm:grid-cols-[1fr_1fr_auto]">
+          <label className="block">
+            <span className="label mb-2 block text-steel-400">Plano</span>
+            <select
+              value={novoPlano}
+              onChange={(e) => setNovoPlano(e.target.value)}
+              aria-label="Novo plano"
+              className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none [color-scheme:dark] focus:border-electric/60"
+            >
+              {planos.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="label mb-2 block text-steel-400">Ciclo</span>
+            <select
+              value={novoCiclo}
+              onChange={(e) => setNovoCiclo(e.target.value as "MENSAL" | "ANUAL")}
+              aria-label="Novo ciclo"
+              className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none [color-scheme:dark] focus:border-electric/60"
+            >
+              <option value="MENSAL">Mensal</option>
+              <option value="ANUAL">Anual</option>
+            </select>
+          </label>
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={trocar}
+              disabled={pending}
+              className="btn-royal label inline-flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3 text-white disabled:opacity-50"
+            >
+              {pending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Confirmar troca
+            </button>
+          </div>
+        </div>
+      )}
       <Feedback msg={msg} />
     </li>
   );
