@@ -636,6 +636,125 @@ export async function teamPerformance() {
 }
 
 /** Pedidos de plano feitos pelo site e ainda não resolvidos. */
+// ───────────────────────── Clube (assinaturas) ─────────────────────────
+
+export type SituacaoAssinante = "ativos" | "vencidos" | "cancelados" | "todos";
+
+export type FiltroAssinantes = {
+  situacao?: SituacaoAssinante;
+  planId?: number | null;
+  q?: string;
+  limit?: number;
+  offset?: number;
+};
+
+/** Quanto um ciclo vale por mês — anual já entra rateado. */
+function mensalDe(cycle: string, plan: { priceCents: number; annualPriceCents: number }) {
+  return cycle === "ANUAL" ? plan.annualPriceCents : plan.priceCents;
+}
+
+function filtroAssinantes(f: FiltroAssinantes) {
+  const partes = [];
+  if (f.situacao === "ativos") partes.push(eq(subscriptions.status, "ATIVA"));
+  if (f.situacao === "vencidos") partes.push(eq(subscriptions.status, "INADIMPLENTE"));
+  if (f.situacao === "cancelados") partes.push(eq(subscriptions.status, "CANCELADA"));
+  if (f.planId) partes.push(eq(subscriptions.planId, f.planId));
+
+  const termo = (f.q ?? "").trim();
+  if (termo) {
+    const digitos = termo.replace(/\D/g, "");
+    const porNome = like(users.name, `%${termo}%`);
+    partes.push(
+      digitos.length >= 3 ? or(porNome, like(users.phone, `%${digitos}%`))! : porNome
+    );
+  }
+  return partes.length ? and(...partes) : undefined;
+}
+
+/**
+ * Painel do Clube: quanto entra por mês e quem está dentro.
+ *
+ * A receita recorrente soma o valor mensal de cada assinatura ativa — o
+ * plano anual entra pelo valor por mês, senão um único anual faria o
+ * número parecer doze vezes maior do que a barbearia recebe no mês.
+ */
+export async function clubOverview() {
+  const rows = await db
+    .select({ sub: subscriptions, plan: plans })
+    .from(subscriptions)
+    .innerJoin(plans, eq(plans.id, subscriptions.planId));
+
+  const ativos = rows.filter((r) => r.sub.status === "ATIVA");
+  const vencidos = rows.filter((r) => r.sub.status === "INADIMPLENTE");
+  const cancelados = rows.filter((r) => r.sub.status === "CANCELADA");
+  const mrrCents = ativos.reduce((acc, r) => acc + mensalDe(r.sub.cycle, r.plan), 0);
+
+  const porPlano = new Map<number, { planId: number; name: string; ativos: number; mrrCents: number }>();
+  for (const r of ativos) {
+    const atual = porPlano.get(r.plan.id) ?? {
+      planId: r.plan.id,
+      name: r.plan.name,
+      ativos: 0,
+      mrrCents: 0,
+    };
+    atual.ativos += 1;
+    atual.mrrCents += mensalDe(r.sub.cycle, r.plan);
+    porPlano.set(r.plan.id, atual);
+  }
+
+  // Quem vence nos próximos sete dias: é a cobrança que o dono precisa
+  // fazer antes de virar inadimplência.
+  const limite = new Date(Date.now() + 7 * 86400000);
+  const vencendo = ativos.filter((r) => r.sub.renewsAt <= limite).length;
+
+  return {
+    mrrCents,
+    ativos: ativos.length,
+    vencidos: vencidos.length,
+    cancelados: cancelados.length,
+    vencendo,
+    porPlano: [...porPlano.values()].sort((a, b) => b.mrrCents - a.mrrCents),
+  };
+}
+
+export async function countSubscribers(f: FiltroAssinantes = {}) {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(subscriptions)
+    .innerJoin(users, eq(users.id, subscriptions.userId))
+    .where(filtroAssinantes(f));
+  return Number(row?.n ?? 0);
+}
+
+export async function listSubscribers(f: FiltroAssinantes = {}) {
+  const rows = await db
+    .select({ sub: subscriptions, user: users, plan: plans })
+    .from(subscriptions)
+    .innerJoin(users, eq(users.id, subscriptions.userId))
+    .innerJoin(plans, eq(plans.id, subscriptions.planId))
+    .where(filtroAssinantes(f))
+    // Vencendo primeiro: é quem precisa de ação.
+    .orderBy(asc(subscriptions.renewsAt), desc(subscriptions.id))
+    .limit(f.limit ?? 25)
+    .offset(f.offset ?? 0);
+
+  return rows.map((r) => ({
+    subscriptionId: r.sub.id,
+    userId: r.user.id,
+    name: r.user.name,
+    phone: r.user.phone,
+    phonePending: isPlaceholderPhone(r.user.phone),
+    planId: r.plan.id,
+    planName: r.plan.name,
+    status: r.sub.status,
+    cycle: r.sub.cycle,
+    monthlyCents: mensalDe(r.sub.cycle, r.plan),
+    startedAt: r.sub.startedAt,
+    renewsAt: r.sub.renewsAt,
+    canceledAt: r.sub.canceledAt,
+  }));
+}
+
 export async function openPlanRequests() {
   const rows = await db
     .select({ req: planRequests, user: users, plan: plans })

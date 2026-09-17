@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   Scissors,
   Gem,
@@ -20,7 +21,9 @@ function itemsFor(role: Role | null): Item[] {
       { href: "/agendar", label: "Agendar", icon: Scissors, key: "inicio" },
       { href: "/barbeiro", label: "Barbeiro", icon: UserRound, key: "barbeiro" },
       { href: "/admin", label: "Admin", icon: BarChart3, key: "admin" },
-      { href: "/planos", label: "Clube VIP", icon: Gem, key: "clube" },
+      // Admin cai na gestão, não na vitrine: é de lá que ele muda preço e
+      // cuida dos membros (a vitrine fica a um clique, dentro da tela).
+      { href: "/admin/clube", label: "Clube VIP", icon: Gem, key: "clube" },
     ];
   }
   if (role === "BARBER") {
@@ -53,6 +56,15 @@ export function BottomNav({
   role: Role | null;
 }) {
   const items = itemsFor(role);
+  // O destaque segue o endereço aberto: o painel inteiro passa "admin",
+  // mas dentro dele /admin/clube é a aba do Clube.
+  const path = usePathname();
+  const atual =
+    [...items]
+      // Do mais específico para o mais genérico: /admin/clube antes de
+      // /admin, senão a aba do painel roubaria o destaque.
+      .sort((a, b) => b.href.length - a.href.length)
+      .find((i) => i.href !== "/" && path.startsWith(i.href))?.key ?? active;
   return (
     <nav
       aria-label="Navegação principal"
@@ -60,7 +72,7 @@ export function BottomNav({
     >
       <ul className="mx-auto flex max-w-lg items-stretch justify-between px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
         {items.map((item) => {
-          const on = item.key === active;
+          const on = item.key === atual;
           return (
             <li key={item.key} className="flex-1">
               <Link

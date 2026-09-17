@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  Gem,
   CalendarCog,
   Users,
   Tags,
@@ -18,6 +19,7 @@ const links = [
   { href: "/admin/equipe", label: "Equipe", icon: UserRound },
   { href: "/admin/catalogo", label: "Catálogo", icon: Tags },
   { href: "/admin/clientes", label: "Clientes", icon: Users },
+  { href: "/admin/clube", label: "Clube VIP", icon: Gem },
   { href: "/admin/relatorios", label: "Relatórios", icon: FileBarChart },
   { href: "/admin/notificacoes", label: "Mensagens", icon: MessageCircle },
 ];

@@ -1,4 +1,5 @@
-import { Check, Minus, HelpCircle } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, Check, Minus, HelpCircle } from "lucide-react";
 import { Background } from "@/components/Background";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
@@ -64,6 +65,21 @@ export default async function Planos() {
       <Navbar logged={!!session} unit={info.unit} />
 
       <main className="mx-auto max-w-7xl px-5 pb-10 pt-28 lg:px-8 lg:pt-36">
+        {/* Admin abrindo a vitrine tem um caminho direto para mexer nela. */}
+        {session?.role === "ADMIN" && (
+          <Link
+            href="/admin/clube"
+            className="glass mb-8 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-electric/25 px-5 py-4 transition-colors hover:border-electric/50"
+          >
+            <span className="text-sm text-steel-300">
+              Você está vendo a vitrine como o cliente vê.
+            </span>
+            <span className="label inline-flex items-center gap-1.5 text-electric">
+              Gerenciar planos e membros
+              <ArrowRight className="h-3.5 w-3.5" />
+            </span>
+          </Link>
+        )}
         <Reveal>
           <div className="mx-auto max-w-2xl text-center">
             <span className="label text-electric">Membros privados</span>

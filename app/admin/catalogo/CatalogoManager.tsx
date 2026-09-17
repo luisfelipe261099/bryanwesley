@@ -12,7 +12,8 @@ import {
 } from "@/components/admin/Feedback";
 import { toast } from "@/lib/toast";
 import { formatBRL } from "@/lib/money";
-import { saveService, savePlan, toggleService } from "../actions";
+import { saveService, toggleService } from "../actions";
+import { PlanoForm } from "../PlanoForm";
 
 type ServiceRow = {
   id: number;
@@ -71,7 +72,7 @@ export function CatalogoManager({
       >
         <div className="space-y-5">
           {plans.map((p) => (
-            <PlanForm key={p.id} plan={p} services={services} />
+            <PlanoForm key={p.id} plan={p} services={services} />
           ))}
         </div>
       </Card>
@@ -294,156 +295,6 @@ function NewService() {
           Cancelar
         </button>
       </div>
-      <Feedback msg={msg} />
-    </div>
-  );
-}
-
-function PlanForm({
-  plan,
-  services,
-}: {
-  plan: PlanRow;
-  services: ServiceRow[];
-}) {
-  const [f, setF] = useState({
-    ...plan,
-    price: reais(plan.priceCents),
-    annual: reais(plan.annualPriceCents),
-    featuresText: plan.features.join("\n"),
-  });
-  const [msg, setMsg] = useState<Msg>(null);
-  const [pending, start] = useTransition();
-
-  function save() {
-    setMsg(null);
-    start(async () => {
-      const res = await savePlan({
-        id: plan.id,
-        name: f.name,
-        kicker: f.kicker,
-        tagline: f.tagline,
-        priceCents: cents(f.price),
-        annualPriceCents: cents(f.annual),
-        features: f.featuresText.split("\n").map((x) => x.trim()).filter(Boolean),
-        highlight: f.highlight,
-        badge: f.badge || null,
-        active: f.active,
-        serviceIds: f.serviceIds,
-      });
-      setMsg(notify(res, "Salvo."));
-    });
-  }
-
-  return (
-    <div className="rounded-2xl border border-white/8 bg-white/[0.02] p-4">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <TextInput
-          label="Nome"
-          value={f.name}
-          onChange={(e) => setF({ ...f, name: e.target.value })}
-        />
-        <TextInput
-          label="Mensal (R$)"
-          inputMode="decimal"
-          value={f.price}
-          onChange={(e) => setF({ ...f, price: e.target.value })}
-        />
-        <TextInput
-          label="Anual — por mês (R$)"
-          inputMode="decimal"
-          value={f.annual}
-          onChange={(e) => setF({ ...f, annual: e.target.value })}
-        />
-        <TextInput
-          label="Rótulo superior"
-          value={f.kicker}
-          onChange={(e) => setF({ ...f, kicker: e.target.value })}
-        />
-        <TextInput
-          label="Selo"
-          value={f.badge ?? ""}
-          onChange={(e) => setF({ ...f, badge: e.target.value })}
-        />
-        <TextInput
-          label="Chamada"
-          value={f.tagline}
-          onChange={(e) => setF({ ...f, tagline: e.target.value })}
-        />
-      </div>
-
-      <label className="mt-3 block">
-        <span className="label mb-2 block text-steel-400">
-          Benefícios (um por linha)
-        </span>
-        <textarea
-          rows={4}
-          value={f.featuresText}
-          onChange={(e) => setF({ ...f, featuresText: e.target.value })}
-          className="w-full resize-none rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-sm text-white outline-none focus:border-electric/60"
-        />
-      </label>
-
-      <div className="mt-3">
-        <span className="label mb-2 block text-steel-400">
-          Serviços inclusos no plano
-        </span>
-        <div className="flex flex-wrap gap-2">
-          {services.map((s) => {
-            const on = f.serviceIds.includes(s.id);
-            return (
-              <button
-                key={s.id}
-                type="button"
-                aria-pressed={on}
-                onClick={() =>
-                  setF({
-                    ...f,
-                    serviceIds: on
-                      ? f.serviceIds.filter((x) => x !== s.id)
-                      : [...f.serviceIds, s.id],
-                  })
-                }
-                className={`label rounded-full px-3.5 py-2.5 transition-colors ${
-                  on
-                    ? "border border-electric/50 bg-electric/10 text-electric"
-                    : "border border-white/12 text-steel-400 hover:border-white/30"
-                }`}
-              >
-                {s.name}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <Toggle
-          checked={f.highlight}
-          onChange={(v) => setF({ ...f, highlight: v })}
-          label="Destaque da vitrine"
-          hint="Só um plano pode ser o destaque"
-        />
-        <Toggle
-          checked={f.active}
-          onChange={(v) => setF({ ...f, active: v })}
-          label="Disponível para assinar"
-        />
-      </div>
-
-      <button
-        type="button"
-        onClick={save}
-        disabled={pending}
-        className="btn-royal label mt-4 inline-flex items-center gap-2 rounded-full px-5 py-3 text-white disabled:opacity-50"
-      >
-        {pending ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <Save className="h-4 w-4" />
-        )}
-        Salvar plano · {formatBRL(cents(f.price))}/mês
-      </button>
       <Feedback msg={msg} />
     </div>
   );
