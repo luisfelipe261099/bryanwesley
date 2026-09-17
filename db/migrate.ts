@@ -39,6 +39,34 @@ function connOptions(connectionString: string): mysql.ConnectionOptions {
 }
 
 /**
+ * Conecta insistindo um pouco.
+ *
+ * O TiDB Serverless hiberna quando fica sem uso: a primeira conexão
+ * depois disso pode estourar o tempo enquanto o cluster acorda. Sem
+ * insistir, um deploy falha por causa de um cluster adormecido e o
+ * código novo simplesmente não sobe.
+ */
+async function conectar(opts: mysql.ConnectionOptions, tentativas = 5) {
+  let ultima: unknown;
+  for (let i = 0; i < tentativas; i++) {
+    try {
+      return await mysql.createConnection({ connectTimeout: 20000, ...opts });
+    } catch (e) {
+      ultima = e;
+      const code = (e as { code?: string }).code;
+      // Erro de credencial ou de nome não melhora esperando.
+      if (code && !["ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "EAI_AGAIN", "PROTOCOL_CONNECTION_LOST"].includes(code)) {
+        throw e;
+      }
+      const espera = 2000 * 2 ** i;
+      console.log(`Banco não respondeu (${code ?? "erro"}); nova tentativa em ${espera / 1000}s`);
+      await new Promise((r) => setTimeout(r, espera));
+    }
+  }
+  throw ultima;
+}
+
+/**
  * Garante que o schema exista antes de migrar.
  *
  * Num cluster novo do TiDB só vem o banco `test`: apontar a
@@ -52,7 +80,7 @@ async function ensureDatabase() {
   if (!/^[A-Za-z0-9_]+$/.test(name)) {
     throw new Error(`Nome de banco inválido na DATABASE_URL: ${name}`);
   }
-  const conn = await mysql.createConnection({ ...opts, database: undefined });
+  const conn = await conectar({ ...opts, database: undefined });
   await conn.query(
     `CREATE DATABASE IF NOT EXISTS \`${name}\` ` +
       "CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci"
@@ -62,7 +90,7 @@ async function ensureDatabase() {
 
 async function main() {
   await ensureDatabase();
-  const conn = await mysql.createConnection(connOptions(url!));
+  const conn = await conectar(connOptions(url!));
 
   await conn.query(`CREATE TABLE IF NOT EXISTS __migrations (
     name VARCHAR(190) PRIMARY KEY,
