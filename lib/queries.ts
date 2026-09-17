@@ -56,12 +56,20 @@ export async function listServices() {
     .orderBy(asc(services.sortOrder));
 }
 
-export async function listPlans(): Promise<PlanWithCovers[]> {
+/**
+ * Planos da vitrine.
+ *
+ * `todos` inclui os desativados, e só o painel usa: sem isso, desativar um
+ * plano o fazia sumir também da tela de edição — não havia como reativar.
+ */
+export async function listPlans(
+  opts: { todos?: boolean } = {}
+): Promise<PlanWithCovers[]> {
   const rows = await db
     .select()
     .from(plans)
-    .where(eq(plans.active, true))
-    .orderBy(asc(plans.sortOrder));
+    .where(opts.todos ? undefined : eq(plans.active, true))
+    .orderBy(asc(plans.sortOrder), asc(plans.id));
   if (rows.length === 0) return [];
 
   const covers = await db

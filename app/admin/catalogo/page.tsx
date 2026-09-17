@@ -10,7 +10,7 @@ export default async function AdminCatalogo() {
   // Inclui inativos: o admin precisa poder reativar.
   const [services, plans] = await Promise.all([
     db.select().from(servicesTable).orderBy(asc(servicesTable.sortOrder)),
-    listPlans(),
+    listPlans({ todos: true }),
   ]);
 
   return (

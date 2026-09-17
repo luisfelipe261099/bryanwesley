@@ -104,7 +104,10 @@ export function ClubeManager({
 }) {
   const router = useRouter();
   const [navegando, start] = useTransition();
+  const [verDesativados, setVerDesativados] = useState(false);
   const estado = { situacao, planId, busca, pagina };
+  const ativos = planos.filter((p) => p.active);
+  const desativados = planos.filter((p) => !p.active);
 
   function aplicar(mudanca: Partial<typeof estado>) {
     start(() => router.push(urlDoClube({ ...estado, pagina: 1, ...mudanca })));
@@ -179,10 +182,42 @@ export function ClubeManager({
         icon={<Gem className="h-5 w-5" />}
       >
         <div className="space-y-5">
-          {planos.map((p) => (
+          {ativos.map((p) => (
             <PlanoForm key={p.id} plan={p} services={servicos} />
           ))}
         </div>
+
+        {/* Desativado não aparece na vitrine, mas continua aqui: é assim
+            que dá para voltar atrás. */}
+        {desativados.length > 0 && (
+          <div className="mt-5 border-t border-white/8 pt-5">
+            <button
+              type="button"
+              onClick={() => setVerDesativados((v) => !v)}
+              className="label inline-flex items-center gap-1.5 text-steel-300 hover:text-white"
+            >
+              {verDesativados ? "Esconder" : "Ver"} {desativados.length} plano(s)
+              desativado(s)
+              <ChevronRight
+                className={`h-3.5 w-3.5 transition-transform ${
+                  verDesativados ? "rotate-90" : ""
+                }`}
+              />
+            </button>
+            {verDesativados && (
+              <div className="mt-4 space-y-5">
+                <p className="text-sm text-steel-400">
+                  Estes planos não aparecem na vitrine. Ligue “Disponível para
+                  assinar” e salve para voltar a vender.
+                </p>
+                {desativados.map((p) => (
+                  <PlanoForm key={p.id} plan={p} services={servicos} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="mt-5 border-t border-white/8 pt-5">
           <NovoPlano services={servicos} />
         </div>

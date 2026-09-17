@@ -210,7 +210,7 @@ npm run test:clientes     # 36 — busca, filtros por situação, ordenação, p
 npm run test:clube        # 23 — receita recorrente, filtros dos membros, renovar e cancelar
 ```
 
-Há ainda um roteiro de navegador (Playwright) com 227 verificações de ponta a
+Há ainda um roteiro de navegador (Playwright) com 230 verificações de ponta a
 ponta: agendamento de visitante, login, todas as telas do admin, check-in por
 código, endpoint do cron protegido, tomada de conta com prova por código, nav
 por papel, troca de senha, assinatura pelo site, remarcação, relatórios,
@@ -222,8 +222,8 @@ equipe pelo painel, importação da base de clientes, cadastro sem telefone
 paginação e filtros da lista de clientes, a ficha do cliente — marcar
 horário pelo balcão, concluir o atendimento, ativar e cancelar plano — e a
 gestão do Clube: mudar o preço de um plano e ver o valor novo na vitrine,
-criar plano, filtrar os membros, registrar renovação e trocar o plano de
-um membro.
+criar plano, desativar e reativar, filtrar os membros, registrar renovação
+e trocar o plano de um membro.
 
 Uma parte do roteiro cuida só do celular: em 320, 360 e 390 pixels, nenhuma
 tela pode ter rolagem lateral nem conteúdo cortado fora de um trilho que

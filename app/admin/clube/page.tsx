@@ -34,7 +34,7 @@ export default async function AdminClube({
   const filtro = { situacao, planId, q };
   const [resumo, planos, servicos, pedidos, total] = await Promise.all([
     clubOverview(),
-    listPlans(),
+    listPlans({ todos: true }),
     db.select().from(servicesTable).orderBy(asc(servicesTable.sortOrder)),
     openPlanRequests(),
     countSubscribers(filtro),
