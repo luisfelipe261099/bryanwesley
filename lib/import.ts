@@ -6,17 +6,30 @@
 // assim esta parte, que é onde moram as decisões, roda em teste.
 // ───────────────────────────────────────────────────────────
 import { parseCsv, mapHeader } from "./csv";
-import { normalizePhone, isValidPhone, formatPhone } from "./phone";
+import { normalizePhone, isValidPhone, formatPhone, isPlaceholderPhone } from "./phone";
 
 export type ClienteImportado = {
   name: string;
+  /** Vazio quando o cadastro antigo não tinha telefone utilizável. */
   phone: string;
   email: string | null;
+  /** Entra na base com telefone reservado, para o dono completar depois. */
+  pendente?: true;
 };
 
 export type PlanoImportacao =
   | { ok: false; error: string }
   | { ok: true; candidatos: ClienteImportado[]; skipped: string[] };
+
+/** Nome comparável: sem acento, sem caixa, sem espaço sobrando. */
+export function chaveNome(nome: string) {
+  return nome
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 /** "Ana Paula" e "Ana Paula Souza" são a mesma pessoa; "Ana" e "Bruno" não. */
 export function semelhante(a: string, b: string) {
@@ -44,6 +57,12 @@ export function planClientImport(csv: string): PlanoImportacao {
 
   const skipped: string[] = [];
   const porTelefone = new Map<string, ClienteImportado>();
+  // Sem telefone a chave possível é o nome: duas linhas iguais no mesmo
+  // arquivo são a mesma pessoa cadastrada duas vezes, não duas pessoas.
+  const pendentes = new Map<string, ClienteImportado>();
+
+  const emailDe = (raw: string) =>
+    raw.includes("@") ? raw.toLowerCase() : null;
 
   corpo.forEach((cols, i) => {
     const linhaNum = i + (temCabecalho ? 2 : 1);
@@ -56,16 +75,36 @@ export function planClientImport(csv: string): PlanoImportacao {
       skipped.push(`Linha ${linhaNum}: sem nome (${rawPhone || "sem telefone"})`);
       return;
     }
-    if (!rawPhone) {
-      skipped.push(`Linha ${linhaNum}: ${name} — sem telefone`);
-      return;
-    }
-    if (!isValidPhone(rawPhone)) {
-      skipped.push(`Linha ${linhaNum}: ${name} — telefone inválido (${rawPhone})`);
+    // Sem telefone utilizável a pessoa entra assim mesmo, com número
+    // reservado: perder o cliente da base é pior do que ter um cadastro
+    // para completar. Quem atribui o número é a ação, que conhece os que
+    // já existem.
+    if (!rawPhone || !isValidPhone(rawPhone)) {
+      const motivo = !rawPhone
+        ? "sem telefone no cadastro antigo"
+        : `telefone incompleto (${rawPhone})`;
+      const chave = chaveNome(name);
+      if (pendentes.has(chave)) {
+        skipped.push(`Linha ${linhaNum}: ${name} — repetido sem telefone, já entrou`);
+        return;
+      }
+      pendentes.set(chave, { name, phone: "", email: emailDe(rawEmail), pendente: true });
+      skipped.push(`Linha ${linhaNum}: ${name} — ${motivo}; entrou para completar depois`);
       return;
     }
 
     const phone = normalizePhone(rawPhone);
+    if (isPlaceholderPhone(phone)) {
+      // Número da faixa reservada veio no arquivo: trata como pendente.
+      const chave = chaveNome(name);
+      if (pendentes.has(chave)) {
+        skipped.push(`Linha ${linhaNum}: ${name} — repetido sem telefone, já entrou`);
+        return;
+      }
+      pendentes.set(chave, { name, phone: "", email: emailDe(rawEmail), pendente: true });
+      skipped.push(`Linha ${linhaNum}: ${name} — telefone reservado pelo sistema; entrou para completar depois`);
+      return;
+    }
     const jaVisto = porTelefone.get(phone);
     if (jaVisto) {
       // Telefone é o login: um número, um cadastro. Duas pessoas no mesmo
@@ -81,16 +120,22 @@ export function planClientImport(csv: string): PlanoImportacao {
       return;
     }
 
-    porTelefone.set(phone, {
-      name,
-      phone,
-      email: rawEmail.includes("@") ? rawEmail.toLowerCase() : null,
-    });
+    porTelefone.set(phone, { name, phone, email: emailDe(rawEmail) });
   });
 
-  const candidatos = [...porTelefone.values()];
+  const candidatos = [...porTelefone.values(), ...pendentes.values()];
   if (candidatos.length === 0) {
     return { ok: false, error: "Nenhuma linha com nome e telefone válidos." };
+  }
+  // Nenhum telefone válido no arquivo inteiro quase sempre significa coluna
+  // errada — sem esta trava, um CSV de outra coisa viraria centenas de
+  // cadastros pendentes que alguém teria de apagar um a um.
+  if (porTelefone.size === 0) {
+    return {
+      ok: false,
+      error:
+        "Nenhuma linha tem telefone válido. Confira se a coluna de telefone está certa no arquivo — do jeito que está, a importação criaria cadastros vazios.",
+    };
   }
   return { ok: true, candidatos, skipped };
 }

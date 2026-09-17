@@ -2,8 +2,14 @@
 // telefone com código do país e telefone compartilhado.
 import "../db/load-env";
 import { parseCsv, mapHeader } from "../lib/csv";
-import { planClientImport, semelhante } from "../lib/import";
-import { normalizePhone, isValidPhone } from "../lib/phone";
+import { planClientImport, semelhante, chaveNome } from "../lib/import";
+import {
+  normalizePhone,
+  isValidPhone,
+  formatPhone,
+  isPlaceholderPhone,
+  nextPlaceholderPhone,
+} from "../lib/phone";
 import { readFileSync, existsSync } from "node:fs";
 
 let p = 0, f = 0;
@@ -94,13 +100,70 @@ function main() {
     );
     ok("plano montado", r.ok === true);
     if (r.ok) {
-      ok("só o válido entra", r.candidatos.length === 1 && r.candidatos[0].name === "Bom");
-      ok("e-mail vira minúsculo", r.candidatos[0].email === "bom@x.com", String(r.candidatos[0].email));
+      const comFone = r.candidatos.filter((c) => !c.pendente);
+      ok("só um tem telefone de verdade", comFone.length === 1 && comFone[0].name === "Bom");
+      ok("e-mail vira minúsculo", comFone[0].email === "bom@x.com", String(comFone[0].email));
+      ok("sem telefone e telefone curto entram como pendentes", r.candidatos.filter((c) => c.pendente).length === 2);
       ok("relata sem telefone", r.skipped.some((s) => /Sem Fone.*sem telefone/.test(s)));
       ok("relata sem nome", r.skipped.some((s) => /sem nome/.test(s)));
-      ok("relata telefone inválido", r.skipped.some((s) => /Curto.*inválido/.test(s)));
+      ok("relata telefone incompleto", r.skipped.some((s) => /Curto.*incompleto/.test(s)));
+      ok("linha sem nome nenhum fica de fora de verdade", !r.candidatos.some((c) => c.name === ""));
       ok("aponta o número da linha", r.skipped.every((s) => /^Linha \d+:/.test(s)), r.skipped.join(" | "));
     }
+  }
+
+  console.log("\n5b. Sem telefone entra para completar depois");
+  {
+    const r = planClientImport(
+      ["nome,telefone", "Sem Fone,", "Curto,(41) 991-4468", "Bom,(41) 99999-0000"].join("\n")
+    );
+    ok("plano montado", r.ok === true);
+    if (r.ok) {
+      ok("os três entram", r.candidatos.length === 3, String(r.candidatos.length));
+      const pend = r.candidatos.filter((c) => c.pendente);
+      ok("dois marcados como pendentes", pend.length === 2, String(pend.length));
+      ok("pendente vai sem telefone", pend.every((c) => c.phone === ""));
+      ok("o válido não é pendente", r.candidatos.some((c) => c.name === "Bom" && !c.pendente));
+      ok("o aviso diz que entrou", r.skipped.every((x) => /completar depois/.test(x)), r.skipped.join(" | "));
+    }
+  }
+
+  console.log("\n5c. Número reservado não vale como telefone de verdade");
+  {
+    ok("reconhece o reservado", isPlaceholderPhone("00000000001"));
+    ok("número comum não é reservado", !isPlaceholderPhone("41999990000"));
+    ok("reservado nunca é válido para agendar/entrar", !isValidPhone("00000000001"));
+    ok("aparece como 'Sem telefone'", formatPhone("00000000001") === "Sem telefone");
+    ok("numera a partir do que já existe", nextPlaceholderPhone(["00000000001", "00000000007"]) === "00000000008");
+    ok("primeiro da base", nextPlaceholderPhone([]) === "00000000001");
+    ok("ignora telefones reais ao numerar", nextPlaceholderPhone(["41999990000"]) === "00000000001");
+
+    // Um reservado que venha no arquivo não pode virar cadastro "real".
+    const r = planClientImport("nome,telefone\nEsperto,00000000001\nReal,(41) 99999-0000");
+    ok("reservado vindo no arquivo vira pendente", r.ok && r.candidatos.some((c) => c.name === "Esperto" && c.pendente === true), JSON.stringify(r).slice(0, 140));
+  }
+
+  console.log("\n5b. Mesma pessoa sem telefone duas vezes");
+  {
+    const r = planClientImport(
+      "nome,telefone\nReal,(41) 99999-0000\nJoão da Silva,\nJOAO DA SILVA ,\nOutro Nome,"
+    );
+    ok("plano montado", r.ok === true);
+    if (r.ok) {
+      const pend = r.candidatos.filter((c) => c.pendente);
+      ok(
+        "linha repetida sem telefone não vira dois cadastros",
+        pend.length === 2,
+        pend.map((c) => c.name).join(" | ")
+      );
+      ok(
+        "avisa que a repetida ficou de fora",
+        r.skipped.some((m) => /repetido sem telefone/i.test(m)),
+        r.skipped.join(" | ")
+      );
+    }
+    ok("chaveNome ignora acento e caixa", chaveNome("João  DA Silva ") === chaveNome("joao da silva"));
+    ok("chaveNome não junta nomes diferentes", chaveNome("Ana") !== chaveNome("Ana Paula"));
   }
 
   console.log("\n6. Erros de arquivo");
@@ -110,7 +173,9 @@ function main() {
     const soCabecalho = planClientImport("nome,telefone");
     ok("só cabeçalho", !soCabecalho.ok && /cabeçalho/i.test(soCabecalho.error));
     const semColunas = planClientImport("cpf,cidade\n123,Curitiba\n456,Pinhais");
-    ok("sem coluna de nome/telefone", !semColunas.ok && /nome e telefone/i.test(semColunas.error), JSON.stringify(semColunas));
+    ok("arquivo sem nenhum telefone válido é recusado", !semColunas.ok && /telefone válido/i.test(semColunas.error), JSON.stringify(semColunas));
+    const semCabecalho = planClientImport("cpf,cidade\n123,Curitiba");
+    ok("não cria cadastro vazio a partir de arquivo errado", !semCabecalho.ok);
   }
 
   // O arquivo real do cliente, quando estiver por perto.
@@ -121,9 +186,11 @@ function main() {
     ok("plano montado", r.ok === true);
     if (r.ok) {
       console.log(`     ${r.candidatos.length} cadastros · ${r.skipped.length} linhas de fora`);
-      ok("todos com telefone de 10 ou 11 dígitos", r.candidatos.every((c) => [10, 11].includes(c.phone.length)));
-      ok("nenhum telefone repetido", new Set(r.candidatos.map((c) => c.phone)).size === r.candidatos.length);
-      const mails = r.candidatos.map((c) => c.email).filter(Boolean);
+      const comFone = r.candidatos.filter((c) => !c.pendente);
+      console.log(`     ${comFone.length} com telefone · ${r.candidatos.length - comFone.length} para completar`);
+      ok("todos com telefone de 10 ou 11 dígitos", comFone.every((c) => [10, 11].includes(c.phone.length)));
+      ok("nenhum telefone repetido", new Set(comFone.map((c) => c.phone)).size === comFone.length);
+      const mails = comFone.map((c) => c.email).filter(Boolean);
       ok("nenhum e-mail repetido", new Set(mails).size === mails.length);
       ok("nome nunca vazio", r.candidatos.every((c) => c.name.length > 0));
     }

@@ -27,6 +27,7 @@ import {
   type User,
 } from "@/db/schema";
 import { BLOCKING_STATUSES } from "./schedule";
+import { isPlaceholderPhone } from "./phone";
 import {
   shopTimeToUtc,
   parseDateKey,
@@ -363,6 +364,8 @@ export async function listClients(limit = 50, q?: string) {
       lastVisit: last?.startsAt ?? null,
       hasAccount: !!u.passwordHash,
       hasFixedSlot: comFixo.has(u.id),
+      // Importado sem telefone: aparece com aviso e pede para completar.
+      phonePending: isPlaceholderPhone(u.phone),
     };
   });
 }

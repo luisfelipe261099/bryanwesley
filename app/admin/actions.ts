@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, inArray, sql as rawSql } from "drizzle-orm";
+import { and, eq, inArray, like, sql as rawSql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
 import {
@@ -42,8 +42,8 @@ import {
 import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
 import { chargeSubscription } from "@/lib/payments";
 import { shopTimeToUtc, parseDateKey } from "@/lib/time";
-import { normalizePhone, isValidPhone } from "@/lib/phone";
-import { planClientImport } from "@/lib/import";
+import { normalizePhone, isValidPhone, nextPlaceholderPhone, isPlaceholderPhone } from "@/lib/phone";
+import { planClientImport, chaveNome } from "@/lib/import";
 import { nextRenewal } from "@/lib/subscriptions";
 
 export type Result = { ok: true; message?: string } | { ok: false; error: string };
@@ -588,6 +588,56 @@ export async function savePlan(
 // ───────────────────────── Clientes ─────────────────────────
 
 /** Assina um cliente num plano (uso interno até o gateway entrar). */
+/**
+ * Corrige o cadastro de um cliente.
+ *
+ * Existe principalmente para completar quem veio do sistema antigo sem
+ * telefone: o número é a chave, então trocá-lo exige conferir se já não é
+ * de outra pessoa. Conta com senha própria não tem o nome mexido por aqui.
+ */
+export async function updateClient(input: {
+  userId: number;
+  name: string;
+  phone: string;
+}): Promise<Result> {
+  try {
+    await admin();
+    const name = input.name.trim();
+    if (name.length < 2) return { ok: false, error: "Informe o nome do cliente." };
+
+    const atual = await db.query.users.findFirst({ where: eq(users.id, input.userId) });
+    if (!atual) return { ok: false, error: "Cliente não encontrado." };
+    if (atual.role !== "CLIENT") {
+      return { ok: false, error: "Use a tela de Equipe para editar quem trabalha aqui." };
+    }
+
+    const bruto = input.phone.trim();
+    let phone = atual.phone;
+    if (bruto) {
+      if (!isValidPhone(bruto)) {
+        return { ok: false, error: "Telefone inválido. Use DDD + número." };
+      }
+      phone = normalizePhone(bruto);
+      if (phone !== atual.phone) {
+        const dono = await db.query.users.findFirst({ where: eq(users.phone, phone) });
+        if (dono && dono.id !== atual.id) {
+          return {
+            ok: false,
+            error: `Esse telefone já é de ${dono.name}. Um número, um cadastro.`,
+          };
+        }
+      }
+    }
+
+    await db.update(users).set({ name, phone }).where(eq(users.id, input.userId));
+    return done(
+      phone !== atual.phone ? "Cadastro atualizado." : "Nome atualizado."
+    );
+  } catch (e) {
+    return fail(e);
+  }
+}
+
 export async function subscribeClient(input: {
   userId: number;
   planId: number;
@@ -750,10 +800,34 @@ export async function importClients(csv: string): Promise<ImportResult> {
       for (const u of achados) if (u.email) donoDoEmail.set(u.email, u.id);
     }
 
+    // Quem já está na base com número reservado: serve para continuar a
+    // numeração e, pelo nome, para reimportar a mesma planilha não criar
+    // um segundo cadastro vazio da mesma pessoa (sem telefone, o nome é a
+    // única chave que existe).
+    const jaPendentes = await db
+      .select({ name: users.name, phone: users.phone })
+      .from(users)
+      .where(like(users.phone, "00%"));
+    const reservados = jaPendentes.map((u) => u.phone);
+    const nomesPendentes = new Set(jaPendentes.map((u) => chaveNome(u.name)));
+
     const novos: { name: string; phone: string; email: string | null }[] = [];
     const atualizar: { id: number; name: string; email: string | null }[] = [];
 
     for (const c of candidatos) {
+      if (c.pendente) {
+        // Já entrou numa importação anterior e continua esperando telefone:
+        // criar de novo só daria trabalho de apagar depois.
+        if (nomesPendentes.has(chaveNome(c.name))) {
+          skipped.push(`${c.name} — já está na base esperando telefone`);
+          continue;
+        }
+        const phone = nextPlaceholderPhone(reservados);
+        reservados.push(phone);
+        nomesPendentes.add(chaveNome(c.name));
+        novos.push({ name: c.name, phone, email: null });
+        continue;
+      }
       const atual = existentes.get(c.phone);
       const dono = c.email ? donoDoEmail.get(c.email) : undefined;
       const emailLivre = !dono || dono === atual?.id;
@@ -792,9 +866,11 @@ export async function importClients(csv: string): Promise<ImportResult> {
         .where(eq(users.id, u.id));
     }
 
+    const pendentes = novos.filter((n) => isPlaceholderPhone(n.phone)).length;
     const partes = [`${novos.length} cliente(s) novo(s)`];
     if (atualizar.length) partes.push(`${atualizar.length} atualizado(s)`);
-    if (skipped.length) partes.push(`${skipped.length} linha(s) de fora`);
+    if (pendentes) partes.push(`${pendentes} sem telefone, para completar`);
+    if (skipped.length) partes.push(`${skipped.length} aviso(s)`);
     return {
       ...done(partes.join(", ") + "."),
       criados: novos.length,

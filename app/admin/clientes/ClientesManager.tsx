@@ -28,11 +28,13 @@ import {
   Feedback,
   SelectInput,
   type Msg,
+  TextInput,
 } from "@/components/admin/Feedback";
 import { formatPhone } from "@/lib/phone";
 import {
   createSubscriptionCharge,
   importClients,
+  updateClient,
   subscribeClient,
   cancelSubscription,
   renewSubscription,
@@ -50,6 +52,7 @@ type ClientRow = {
   lastVisit: string | null;
   hasAccount: boolean;
   hasFixedSlot: boolean;
+  phonePending: boolean;
 };
 
 export function ClientesManager({
@@ -147,6 +150,18 @@ function ClientRowItem({
     });
   }
 
+  const [editOpen, setEditOpen] = useState(false);
+  const [nome, setNome] = useState(client.name);
+  const [fone, setFone] = useState(client.phonePending ? "" : client.phone);
+  function salvarCadastro() {
+    setMsg(null);
+    start(async () => {
+      const res = await updateClient({ userId: client.id, name: nome, phone: fone });
+      setMsg(notify(res, "Cadastro atualizado."));
+      if (res.ok) setEditOpen(false);
+    });
+  }
+
   const [pwOpen, setPwOpen] = useState(false);
   const [pw, setPw] = useState("");
   function redefinir() {
@@ -195,9 +210,15 @@ function ClientRowItem({
               </span>
             )}
           </div>
-          <div className="mt-0.5 flex items-center gap-1 text-xs text-steel-400">
+          <div
+            className={`mt-0.5 flex items-center gap-1 text-xs ${
+              client.phonePending ? "text-amber-300" : "text-steel-400"
+            }`}
+          >
             <Phone className="h-3 w-3 flex-none" />
-            <span className="truncate">{formatPhone(client.phone)}</span>
+            <span className="truncate">
+              {client.phonePending ? "Sem telefone — completar" : formatPhone(client.phone)}
+            </span>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {client.plan ? (
@@ -231,6 +252,18 @@ function ClientRowItem({
             className="grid h-8 w-8 place-items-center rounded-full border border-white/12 text-steel-400 transition-colors hover:border-electric/40 hover:text-electric"
           >
             <KeyRound className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditOpen((v) => !v)}
+            title={client.phonePending ? "Completar o telefone" : "Editar nome e telefone"}
+            className={`label rounded-full border px-3 py-2 ${
+              client.phonePending
+                ? "border-amber-400/40 bg-amber-400/10 text-amber-200"
+                : "border-white/12 text-steel-300 hover:text-white"
+            }`}
+          >
+            {editOpen ? "Fechar" : client.phonePending ? "Completar" : "Editar"}
           </button>
           {client.plan || client.overduePlan ? (
             <div className="flex items-center gap-1.5">
@@ -273,6 +306,45 @@ function ClientRowItem({
           )}
         </div>
       </div>
+
+      {editOpen && (
+        <div className="mt-3 grid gap-3 border-t border-white/8 pt-3 sm:grid-cols-[1fr_1fr_auto]">
+          <TextInput
+            label="Nome"
+            value={nome}
+            onChange={(e) => setNome(e.target.value)}
+          />
+          <TextInput
+            label="WhatsApp"
+            inputMode="tel"
+            placeholder="(41) 99999-0000"
+            value={fone}
+            onChange={(e) => setFone(e.target.value)}
+          />
+          <div className="flex items-end gap-2">
+            <button
+              type="button"
+              onClick={salvarCadastro}
+              disabled={pending}
+              className="btn-royal label rounded-xl px-4 py-3 text-white disabled:opacity-40"
+            >
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Salvar"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditOpen(false);
+                setNome(client.name);
+                setFone(client.phonePending ? "" : client.phone);
+                setMsg(null);
+              }}
+              className="label rounded-xl border border-white/12 px-4 py-3 text-steel-300 hover:text-white"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
 
       {pwOpen && (
         <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-white/8 pt-3">
