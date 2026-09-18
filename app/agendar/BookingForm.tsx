@@ -56,6 +56,10 @@ export function BookingForm({
 
   const [slots, setSlots] = useState<Slot[]>([]);
   const [closed, setClosed] = useState(false);
+  const [motivo, setMotivo] = useState<string | null>(null);
+  const [erroAgenda, setErroAgenda] = useState<string | null>(null);
+  /** Muda para forçar uma nova consulta depois de uma falha. */
+  const [tentativa, setTentativa] = useState(0);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -75,11 +79,13 @@ export function BookingForm({
     }
     let cancelled = false;
     setLoadingSlots(true);
+    setErroAgenda(null);
     fetchAvailability({ dateKey, durationMin: totalMin, barberId })
       .then((res) => {
         if (cancelled) return;
         setSlots(res.slots);
         setClosed(res.closed);
+        setMotivo(res.motivo ?? null);
         // Se o horário escolhido deixou de existir, limpa a seleção.
         setTime((current) =>
           current && res.slots.some((s) => s.time === current && s.available)
@@ -87,11 +93,22 @@ export function BookingForm({
             : null
         );
       })
+      .catch(() => {
+        // Sem tratamento, a consulta que falha (rede caiu, servidor fora)
+        // deixava a lista vazia e a tela dizia "nenhum horário livre" —
+        // o cliente desistia achando que o dia estava lotado.
+        if (cancelled) return;
+        setSlots([]);
+        setClosed(false);
+        setErroAgenda(
+          "Não foi possível carregar os horários. Verifique sua conexão e tente de novo."
+        );
+      })
       .finally(() => !cancelled && setLoadingSlots(false));
     return () => {
       cancelled = true;
     };
-  }, [dateKey, totalMin, barberId]);
+  }, [dateKey, totalMin, barberId, tentativa]);
 
   const canConfirm =
     selected.length > 0 &&
@@ -276,9 +293,24 @@ export function BookingForm({
               <Loader2 className="h-4 w-4 animate-spin" />
               Consultando a agenda…
             </p>
+          ) : erroAgenda ? (
+            <div className="mt-5 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-5 text-center text-sm text-amber-200">
+              <p>{erroAgenda}</p>
+              <button
+                type="button"
+                onClick={() => setTentativa((n) => n + 1)}
+                className="btn-outline label mt-3 inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-electric"
+              >
+                Tentar de novo
+              </button>
+            </div>
           ) : closed ? (
             <p className="mt-5 rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-steel-400">
-              A barbearia não abre nesse dia.
+              {motivo === "folga"
+                ? "Esse profissional não atende nesse dia. Escolha outro dia ou outro barbeiro."
+                : motivo === "sem-equipe"
+                  ? "Nenhum profissional disponível nesse dia."
+                  : "A barbearia não abre nesse dia."}
             </p>
           ) : (
             <div className="mt-5 space-y-5">

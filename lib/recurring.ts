@@ -112,7 +112,16 @@ export async function materializeRecurring(
     const durationMin = svcs.reduce((a, s) => a + s.durationMin, 0);
 
     for (const dateKey of occurrencesFor(slot)) {
-      if (settings.closedWeekdays.includes(weekdayOf(dateKey))) continue;
+      if (settings.closedWeekdays.includes(weekdayOf(dateKey))) {
+        // Entra como conflito, não some em silêncio: um fixo mensal cujo
+        // dia caia sempre em domingo salvava dizendo "reservado" sem
+        // reservar nada.
+        report.conflitos.push({
+          dateKey,
+          motivo: "A barbearia não abre nesse dia.",
+        });
+        continue;
+      }
 
       const { year, month, day } = parseDateKey(dateKey);
       const startsAt = shopTimeToUtc(year, month, day, slot.minutesOfDay);

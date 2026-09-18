@@ -110,7 +110,13 @@ export async function runSeed() {
     else await db.insert(barbers).values({ slug: t.slug, ...bdata });
   }
   console.log(`✓ ${TEAM.length} membros da equipe`);
-  console.log(`\nLogin inicial — senha: ${defaultPassword}`);
+  // A senha não vai para o log: o log do build da Vercel fica guardado e
+  // visível para quem tem acesso ao projeto.
+  console.log(
+    process.env.SEED_PASSWORD
+      ? "\nLogin inicial — senha: a definida em SEED_PASSWORD."
+      : "\nLogin inicial — senha padrão do seed (veja db/seed.ts). Troque no primeiro acesso."
+  );
   for (const t of TEAM) console.log(`  ${t.email}  (${t.admin ? "ADMIN" : "BARBEIRO"})`);
 
   await pool.end();

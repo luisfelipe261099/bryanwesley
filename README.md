@@ -199,7 +199,7 @@ Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
 ## Testes
 
 ```bash
-npm test                  # 223 verificações
+npm test                  # 284 verificações
 npm run test:agenda       # 34 — motor de agenda, jornada por barbeiro, faixas de meta
 npm run test:fixo         # 17 — horário fixo, ocorrência cancelada, transição concorrente
 npm run test:seguranca    # 18 — teto de agendamentos, webhook, redirect, CSV, sessão
@@ -208,9 +208,14 @@ npm run test:import       # 60 — leitura do CSV, colunas fora de ordem, telefo
                           #      cliente sem telefone e número reservado
 npm run test:clientes     # 36 — busca, filtros por situação, ordenação, paginação e ficha
 npm run test:clube        # 23 — receita recorrente, filtros dos membros, renovar e cancelar
+npm run test:auditoria    # 15 — o que a primeira auditoria confirmou
+npm run test:auditoria2   # 46 — preço com ponto, redirect com caractere de controle,
+                          #      ocupação real do dia, economia do membro, comissão de
+                          #      cobertura parcial, remarcação sem janela sem horário,
+                          #      confirmação derrubada no cancelamento e freio da agenda
 ```
 
-Há ainda um roteiro de navegador (Playwright) com 230 verificações de ponta a
+Há ainda um roteiro de navegador (Playwright) com 245 verificações de ponta a
 ponta: agendamento de visitante, login, todas as telas do admin, check-in por
 código, endpoint do cron protegido, tomada de conta com prova por código, nav
 por papel, troca de senha, assinatura pelo site, remarcação, relatórios,
@@ -223,7 +228,10 @@ paginação e filtros da lista de clientes, a ficha do cliente — marcar
 horário pelo balcão, concluir o atendimento, ativar e cancelar plano — e a
 gestão do Clube: mudar o preço de um plano e ver o valor novo na vitrine,
 criar plano, desativar e reativar, filtrar os membros, registrar renovação
-e trocar o plano de um membro.
+e trocar o plano de um membro. A última parte cobre o painel do membro
+(cancelar o plano para o fim do ciclo e voltar atrás), o horário fixo preso
+à grade da agenda, a fila de mensagens separando "na fila" de "prontas para
+enviar" e a ocupação do dia com a capacidade real.
 
 Uma parte do roteiro cuida só do celular: em 320, 360 e 390 pixels, nenhuma
 tela pode ter rolagem lateral nem conteúdo cortado fora de um trilho que

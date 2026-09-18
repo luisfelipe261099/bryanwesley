@@ -150,7 +150,30 @@ async function main() {
       );
     }
     for (let i = inicio; i < statements.length; i++) {
-      await conn.query(statements[i]);
+      try {
+        await conn.query(statements[i]);
+      } catch (e) {
+        // O progresso é anotado DEPOIS do DDL: se a queda foi entre os
+        // dois, o statement retomado já está aplicado e o banco responde
+        // "já existe". Só o primeiro da retomada pode estar nessa
+        // situação — nos demais o erro é erro de verdade.
+        const code = (e as { code?: string }).code ?? "";
+        const jaAplicado =
+          i === inicio &&
+          st !== undefined &&
+          [
+            "ER_DUP_FIELDNAME",
+            "ER_DUP_KEYNAME",
+            "ER_TABLE_EXISTS_ERROR",
+            "ER_DUP_ENTRY",
+            "ER_MULTIPLE_PRI_KEY",
+            "ER_CANT_DROP_FIELD_OR_KEY",
+          ].includes(code);
+        if (!jaAplicado) throw e;
+        console.log(
+          `  ↷ ${i + 1}º statement já estava aplicado (${code}) — seguindo`
+        );
+      }
       await conn.query(
         "UPDATE __migrations SET statements_done = ? WHERE name = ?",
         [i + 1, file]

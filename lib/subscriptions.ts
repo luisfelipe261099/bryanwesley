@@ -4,21 +4,37 @@
 // registrar o pagamento. Quando o gateway entrar, a renovação vira
 // automática pelo webhook — a regra de expirar continua a mesma.
 // ───────────────────────────────────────────────────────────
-import { and, eq, lt } from "drizzle-orm";
+import { and, eq, isNotNull, lt } from "drizzle-orm";
 import { db } from "@/db/client";
 import { subscriptions } from "@/db/schema";
 
 export async function expireOverdueSubscriptions() {
+  const agora = new Date();
+
+  // Quem pediu para cancelar no site continua membro até o fim do ciclo
+  // que já pagou. Vencido o ciclo, a assinatura encerra de vez — virar
+  // INADIMPLENTE cobraria de quem avisou que estava saindo.
+  const [saiu] = await db
+    .update(subscriptions)
+    .set({ status: "CANCELADA" })
+    .where(
+      and(
+        eq(subscriptions.status, "ATIVA"),
+        lt(subscriptions.renewsAt, agora),
+        isNotNull(subscriptions.canceledAt)
+      )
+    );
+
   const [res] = await db
     .update(subscriptions)
     .set({ status: "INADIMPLENTE" })
     .where(
       and(
         eq(subscriptions.status, "ATIVA"),
-        lt(subscriptions.renewsAt, new Date())
+        lt(subscriptions.renewsAt, agora)
       )
     );
-  return res.affectedRows;
+  return res.affectedRows + saiu.affectedRows;
 }
 
 /**

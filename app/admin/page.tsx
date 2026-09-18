@@ -18,7 +18,7 @@ import {
   weeklyRevenue,
   teamPerformance,
 } from "@/lib/queries";
-import { getSettings } from "@/lib/schedule";
+import { getSettings, capacidadeDoDia } from "@/lib/schedule";
 import { formatBRL, formatCompactBRL, formatDuration } from "@/lib/money";
 import {
   formatShopTime,
@@ -73,17 +73,18 @@ export default async function AdminDashboard({
   };
   const maxSemana = Math.max(1, ...semana.map((d) => d.cents));
 
-  // Ocupação: minutos vendidos sobre minutos disponíveis hoje.
-  const minutosLoja =
-    (settings.closeMinute - settings.openMinute) *
-    Math.max(1, equipe.filter((e) => e.barber.active).length);
+  // Ocupação: minutos vendidos sobre a capacidade REAL do dia mostrado —
+  // com o barbeiro filtrado, a folga dele e a folga da loja. A conta
+  // antiga usava sempre a equipe inteira no horário cheio da loja, então
+  // filtrar um barbeiro (ou abrir um domingo) devolvia um número fictício.
+  const minutosLoja = await capacidadeDoDia(dateKey, barberFilter, settings);
   const minutosVendidos = agenda
     .filter((a) => !["CANCELADO", "NO_SHOW"].includes(a.status))
     .reduce((acc, a) => acc + a.durationMin, 0);
-  const ocupacao = Math.min(
-    100,
-    Math.round((minutosVendidos / minutosLoja) * 100)
-  );
+  const ocupacao =
+    minutosLoja > 0
+      ? Math.min(100, Math.round((minutosVendidos / minutosLoja) * 100))
+      : 0;
 
   return (
     <>
@@ -137,9 +138,13 @@ export default async function AdminDashboard({
         <Reveal delay={0.12} className="h-full">
           <Kpi
             icon={Activity}
-            label="Ocupação de hoje"
+            label={dateKey === today ? "Ocupação de hoje" : "Ocupação do dia"}
             value={`${ocupacao}%`}
-            hint={`${Math.round(minutosVendidos / 60)}h vendidas`}
+            hint={
+              minutosLoja > 0
+                ? `${Math.round(minutosVendidos / 60)}h de ${Math.round(minutosLoja / 60)}h`
+                : "Sem expediente nesse dia"
+            }
           />
         </Reveal>
         <Reveal delay={0.16} className="h-full">

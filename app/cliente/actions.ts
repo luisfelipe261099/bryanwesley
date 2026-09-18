@@ -10,6 +10,7 @@ import {
   users,
   plans,
   planRequests,
+  planServices,
 } from "@/db/schema";
 import { cookies } from "next/headers";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
@@ -22,7 +23,8 @@ import {
 } from "@/lib/appointments";
 import { chargeSubscription, isInfinitePayConfigured } from "@/lib/payments";
 import { materializeRecurring, cancelFutureOccurrences } from "@/lib/recurring";
-import { shopToday } from "@/lib/time";
+import { getSettings } from "@/lib/schedule";
+import { shopToday, minutesToHHMM } from "@/lib/time";
 
 export type ActionResult =
   | { ok: true; warning?: string }
@@ -94,6 +96,53 @@ export async function saveRecurringSlot(input: {
     return { ok: false, error: "Escolha ao menos um serviço." };
   }
 
+  // O que o plano cobre é decidido no servidor. A tela só oferece os
+  // serviços do plano, mas a ação era aceita com qualquer id — dava para
+  // reservar toda semana um serviço que o plano não paga.
+  const cobertos = await db
+    .select({ serviceId: planServices.serviceId })
+    .from(planServices)
+    .where(eq(planServices.planId, sub.planId));
+  const cobertosIds = cobertos.map((c) => c.serviceId);
+  const fora = input.serviceIds.filter((id) => !cobertosIds.includes(id));
+  if (fora.length > 0) {
+    return {
+      ok: false,
+      error:
+        "O horário fixo só reserva os serviços do seu plano. Para o resto, marque avulso.",
+    };
+  }
+
+  // Grade e jornada: o campo de hora é livre, e um fixo às 10:07 nunca
+  // aparecia na agenda de ninguém — materializava fora da grade e ficava
+  // invisível para quem procura horário.
+  const cfg = await getSettings();
+  const { minutesOfDay: hora } = input;
+  if (
+    hora < cfg.openMinute ||
+    hora >= cfg.closeMinute ||
+    (hora - cfg.openMinute) % cfg.slotMinutes !== 0
+  ) {
+    return {
+      ok: false,
+      error: `Escolha um horário da grade, de ${minutesToHHMM(cfg.openMinute)} às ${minutesToHHMM(cfg.closeMinute)}, de ${cfg.slotMinutes} em ${cfg.slotMinutes} minutos.`,
+    };
+  }
+  if (input.frequency === "SEMANAL") {
+    if (input.weekday === null || input.weekday < 0 || input.weekday > 6) {
+      return { ok: false, error: "Escolha o dia da semana." };
+    }
+    if (cfg.closedWeekdays.includes(input.weekday)) {
+      return { ok: false, error: "A barbearia não abre nesse dia da semana." };
+    }
+  } else if (
+    input.dayOfMonth === null ||
+    input.dayOfMonth < 1 ||
+    input.dayOfMonth > 28
+  ) {
+    return { ok: false, error: "Escolha um dia do mês entre 1 e 28." };
+  }
+
   // Um fixo por membro: salvar substitui o anterior. Mas o anterior só sai
   // depois que o novo estiver garantido — antes o sistema desligava o fixo
   // antigo e cancelava as semanas já reservadas ANTES de saber se o novo
@@ -143,6 +192,25 @@ export async function saveRecurringSlot(input: {
   // ocorrências do próprio membro não contam como conflito.
   const idsAntigos = antigos.map((a) => a.id);
   const report = await materializeRecurring({ slotId: novoId });
+
+  if (
+    report.criados === 0 &&
+    report.jaExistiam === 0 &&
+    report.conflitos.length === 0
+  ) {
+    // Nenhuma data, nenhum conflito: o fixo não reservaria nada nas
+    // próximas semanas e ficaria de enfeite na tela, "ativo" e vazio.
+    await db
+      .update(recurringSlots)
+      .set({ active: false })
+      .where(eq(recurringSlots.id, novoId));
+    revalidatePath("/cliente");
+    return {
+      ok: false,
+      error:
+        "Esse horário não gera reservas nas próximas semanas. Confira o dia escolhido.",
+    };
+  }
 
   if (report.criados === 0 && report.conflitos.length > 0) {
     // Nenhuma data coube: descarta só o fixo NOVO e devolve o membro ao
@@ -354,6 +422,7 @@ export async function requestPlan(input: {
       where: eq(subscriptions.userId, session.id),
       orderBy: (s, { desc }) => [desc(s.startedAt)],
     });
+    let novaId: number | null = null;
     if (existente) {
       await db
         .update(subscriptions)
@@ -366,22 +435,150 @@ export async function requestPlan(input: {
         })
         .where(eq(subscriptions.id, existente.id));
     } else {
-      await db.insert(subscriptions).values({
+      const [{ id }] = await db.insert(subscriptions).values({
         userId: session.id,
         planId: plan.id,
         cycle: input.cycle,
         status: "INADIMPLENTE",
         renewsAt: new Date(),
-      });
+      }).$returningId();
+      novaId = id;
     }
     const charge = await chargeSubscription(session.id, input.cycle);
     if (charge.ok) {
       revalidatePath("/cliente");
       return { ok: true, mode: "pagamento", url: charge.url };
     }
+
+    // O link não saiu (provedor fora do ar, chave errada): desfaz a
+    // assinatura que só existia para pendurar a cobrança. Deixá-la de pé
+    // marcava o cliente como inadimplente de um plano que ele nunca teve,
+    // e o painel do Clube passava a cobrar dele.
+    if (novaId) {
+      await db.delete(subscriptions).where(eq(subscriptions.id, novaId));
+    } else if (existente) {
+      await db
+        .update(subscriptions)
+        .set({
+          planId: existente.planId,
+          cycle: existente.cycle,
+          status: existente.status,
+          renewsAt: existente.renewsAt,
+          canceledAt: existente.canceledAt,
+        })
+        .where(eq(subscriptions.id, existente.id));
+    }
   }
 
   revalidatePath("/cliente");
   revalidatePath("/admin");
   return { ok: true, mode: "pedido" };
+}
+
+/**
+ * O cliente cancela o próprio plano — o site promete isso desde a
+ * vitrine ("cancele quando quiser"), e não havia botão nenhum: ele
+ * dependia de pedir pelo WhatsApp.
+ *
+ * Cancela para o fim do ciclo: o mês já foi pago, então os benefícios
+ * valem até a data de renovação e a varredura encerra a assinatura lá.
+ */
+export async function cancelMyPlan(): Promise<ActionResult> {
+  const session = await requireRole(["CLIENT", "ADMIN"]);
+  const sub = await db.query.subscriptions.findFirst({
+    where: and(
+      eq(subscriptions.userId, session.id),
+      inArray(subscriptions.status, ["ATIVA", "INADIMPLENTE"])
+    ),
+    orderBy: (s, { desc }) => [desc(s.startedAt)],
+  });
+  if (!sub) return { ok: false, error: "Você não tem plano ativo." };
+
+  if (sub.status === "INADIMPLENTE") {
+    // Vencida e não paga: encerra na hora, não há ciclo pago a respeitar.
+    await db
+      .update(subscriptions)
+      .set({ status: "CANCELADA", canceledAt: new Date() })
+      .where(eq(subscriptions.id, sub.id));
+    await soltarMeuFixo(session.id);
+    revalidatePath("/cliente");
+    revalidatePath("/admin");
+    return { ok: true, warning: "Plano encerrado." };
+  }
+
+  if (sub.canceledAt) {
+    return { ok: false, error: "Seu cancelamento já está agendado." };
+  }
+  await db
+    .update(subscriptions)
+    .set({ canceledAt: new Date() })
+    .where(eq(subscriptions.id, sub.id));
+  revalidatePath("/cliente");
+  revalidatePath("/admin");
+  const dia = sub.renewsAt.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+  });
+  return {
+    ok: true,
+    warning: `Cancelamento agendado. Você continua membro até ${dia}.`,
+  };
+}
+
+/** Mudou de ideia antes de o ciclo virar. */
+export async function resumeMyPlan(): Promise<ActionResult> {
+  const session = await requireRole(["CLIENT", "ADMIN"]);
+  const sub = await db.query.subscriptions.findFirst({
+    where: and(
+      eq(subscriptions.userId, session.id),
+      eq(subscriptions.status, "ATIVA")
+    ),
+  });
+  if (!sub?.canceledAt) {
+    return { ok: false, error: "Não há cancelamento agendado." };
+  }
+  await db
+    .update(subscriptions)
+    .set({ canceledAt: null })
+    .where(eq(subscriptions.id, sub.id));
+  revalidatePath("/cliente");
+  revalidatePath("/admin");
+  return { ok: true, warning: "Assinatura mantida." };
+}
+
+/** Gera de novo o link de pagamento de quem está vencido. */
+export async function payMyPlan(): Promise<SubscribeResult> {
+  const session = await requireRole(["CLIENT", "ADMIN"]);
+  const sub = await db.query.subscriptions.findFirst({
+    where: and(
+      eq(subscriptions.userId, session.id),
+      inArray(subscriptions.status, ["ATIVA", "INADIMPLENTE"])
+    ),
+    orderBy: (s, { desc }) => [desc(s.startedAt)],
+  });
+  if (!sub) return { ok: false, error: "Você não tem plano para pagar." };
+  if (!isInfinitePayConfigured()) {
+    return {
+      ok: false,
+      error: "Pagamento online ainda não está ligado. Acerte na barbearia.",
+    };
+  }
+  const charge = await chargeSubscription(session.id, sub.cycle);
+  if (!charge.ok) return { ok: false, error: charge.error };
+  revalidatePath("/cliente");
+  return { ok: true, mode: "pagamento", url: charge.url };
+}
+
+/** Sem plano, o horário fixo sai da agenda e a cadeira volta a ser vendida. */
+async function soltarMeuFixo(userId: number) {
+  const ativos = await db
+    .select({ id: recurringSlots.id })
+    .from(recurringSlots)
+    .where(and(eq(recurringSlots.userId, userId), eq(recurringSlots.active, true)));
+  if (ativos.length === 0) return;
+  await db
+    .update(recurringSlots)
+    .set({ active: false })
+    .where(and(eq(recurringSlots.userId, userId), eq(recurringSlots.active, true)));
+  await cancelFutureOccurrences(ativos.map((a) => a.id));
 }

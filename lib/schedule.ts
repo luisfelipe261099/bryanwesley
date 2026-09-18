@@ -3,7 +3,7 @@
 // Toda a disponibilidade sai do banco — jornada da loja, agendamentos
 // já gravados, bloqueios do admin e antecedência mínima.
 // ───────────────────────────────────────────────────────────
-import { and, eq, gte, lt, inArray, asc, sql as rawSql } from "drizzle-orm";
+import { and, eq, gte, lt, ne, inArray, asc, sql as rawSql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointments,
@@ -92,7 +92,12 @@ export function listOpenDays(s: Settings, count = 10): DayOption[] {
 type Busy = { start: number; end: number }; // instantes em ms
 
 /** Intervalos ocupados de um barbeiro no dia: atendimentos + bloqueios. */
-async function busyIntervals(dateKey: string, barberIds: number[]) {
+async function busyIntervals(
+  dateKey: string,
+  barberIds: number[],
+  /** Remarcação: o horário que vai sair do lugar não ocupa a si mesmo. */
+  ignorarAppointmentId?: number
+) {
   const { year, month, day } = parseDateKey(dateKey);
   const dayStart = shopTimeToUtc(year, month, day, 0);
   const dayEnd = shopTimeToUtc(year, month, day, 24 * 60);
@@ -110,7 +115,10 @@ async function busyIntervals(dateKey: string, barberIds: number[]) {
           inArray(appointments.barberId, barberIds),
           inArray(appointments.status, [...BLOCKING_STATUSES]),
           lt(appointments.startsAt, dayEnd),
-          gte(appointments.endsAt, dayStart)
+          gte(appointments.endsAt, dayStart),
+          ignorarAppointmentId
+            ? ne(appointments.id, ignorarAppointmentId)
+            : undefined
         )
       ),
     db
@@ -187,6 +195,47 @@ export async function workingWindows(
   return out;
 }
 
+/**
+ * Minutos de cadeira disponíveis num dia — a capacidade real.
+ * Respeita a folga semanal da loja, a jornada de cada profissional e o
+ * filtro de barbeiro: o painel dividia os minutos vendidos de UM barbeiro
+ * pelos minutos da equipe inteira, e a ocupação saía muito menor do que é.
+ */
+export async function capacidadeDoDia(
+  dateKey: string,
+  barberId?: number | null,
+  settings?: Settings
+) {
+  const s = settings ?? (await getSettings());
+  if (s.closedWeekdays.includes(weekdayOf(dateKey))) return 0;
+  const team = await getActiveBarbers();
+  const pool = barberId ? team.filter((b) => b.id === barberId) : team;
+  if (pool.length === 0) return 0;
+  const janelas = await workingWindows(
+    pool.map((b) => b.id),
+    weekdayOf(dateKey),
+    s
+  );
+  let total = 0;
+  for (const j of janelas.values()) {
+    if (j) total += Math.max(0, j.close - j.open);
+  }
+  return total;
+}
+
+/** Os horários da grade, do abre ao fecha ("HH:MM"). */
+export function gradeDeHorarios(s: {
+  openMinute: number;
+  closeMinute: number;
+  slotMinutes: number;
+}) {
+  const out: string[] = [];
+  for (let m = s.openMinute; m < s.closeMinute; m += s.slotMinutes) {
+    out.push(minutesToHHMM(m));
+  }
+  return out;
+}
+
 function overlaps(a: Busy, list: Busy[]) {
   return list.some((b) => a.start < b.end && b.start < a.end);
 }
@@ -203,6 +252,8 @@ export type Slot = {
 export type AvailabilityResult = {
   dateKey: string;
   closed: boolean;
+  /** Por que fechou: a loja não abre nesse dia, ou é a folga do barbeiro. */
+  motivo?: "loja-fechada" | "folga" | "sem-equipe";
   slots: Slot[];
 };
 
@@ -215,35 +266,51 @@ export async function getAvailability(opts: {
   durationMin: number;
   barberId?: number | null;
   settings?: Settings;
+  /**
+   * Balcão: o encaixe feito pela equipe não passa pela antecedência mínima,
+   * que existe para o cliente não marcar às 9h58 um horário das 10h. Quem
+   * está atrás do balcão sabe o que está fazendo.
+   */
+  ignorarAntecedencia?: boolean;
+  /** Remarcação: ignora o próprio agendamento ao montar a agenda. */
+  ignorarAppointmentId?: number;
 }): Promise<AvailabilityResult> {
   const s = opts.settings ?? (await getSettings());
   const { dateKey } = opts;
   const durationMin = Math.max(opts.durationMin, s.slotMinutes);
 
   if (s.closedWeekdays.includes(weekdayOf(dateKey))) {
-    return { dateKey, closed: true, slots: [] };
+    return { dateKey, closed: true, motivo: "loja-fechada", slots: [] };
   }
 
   const team = await getActiveBarbers();
   const pool = opts.barberId
     ? team.filter((b) => b.id === opts.barberId)
     : team;
-  if (pool.length === 0) return { dateKey, closed: true, slots: [] };
+  if (pool.length === 0) return { dateKey, closed: true, motivo: "sem-equipe", slots: [] };
 
   const ids = pool.map((b) => b.id);
   const weekday = weekdayOf(dateKey);
   const [busy, windows] = await Promise.all([
-    busyIntervals(dateKey, ids),
+    busyIntervals(dateKey, ids, opts.ignorarAppointmentId),
     workingWindows(ids, weekday, s),
   ]);
 
-  // Barbeiro escolhido folga hoje: dia fechado para ele.
+  // Barbeiro escolhido folga hoje: dia fechado para ele — mas dizer só
+  // "fechado" fazia a tela anunciar que a barbearia não abre, quando na
+  // verdade era a folga daquele profissional.
   if (opts.barberId && windows.get(opts.barberId) === null) {
-    return { dateKey, closed: true, slots: [] };
+    return { dateKey, closed: true, motivo: "folga", slots: [] };
   }
 
   const { year, month, day } = parseDateKey(dateKey);
-  const earliest = Date.now() + s.minAdvanceHours * 3600_000;
+  // Balcão: pula a antecedência mínima, mas não viaja no tempo — o
+  // horário que já passou continua fora. A tolerância de um slot deixa
+  // marcar o atendimento que está começando agora, que é o caso do
+  // encaixe de quem chegou na porta.
+  const earliest = opts.ignorarAntecedencia
+    ? Date.now() - s.slotMinutes * 60_000
+    : Date.now() + s.minAdvanceHours * 3600_000;
 
   const slots: Slot[] = [];
   for (

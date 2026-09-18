@@ -64,13 +64,23 @@ export async function login(
   // Mensagem genérica e tempo parecido: não revela se o usuário existe.
   const genericError = { error: "E-mail/telefone ou senha inválidos." };
 
-  // Conta travada por excesso de tentativas: nem confere a senha.
-  if (user?.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
-    const min = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60_000);
-    return {
-      error: `Muitas tentativas. Tente de novo em ${min} minuto(s).`,
-    };
-  }
+  // A trava não barra mais quem sabe a senha.
+  //
+  // Duas coisas estavam erradas aqui. A trava era conferida ANTES da
+  // senha, e respondia "muitas tentativas" — o que denuncia que a conta
+  // existe, bastando errar cinco vezes para descobrir quem é cliente.
+  // E, como travava por conta, cinco tentativas erradas no e-mail do dono
+  // deixavam o painel inacessível por 15 minutos, todas as vezes, de
+  // qualquer lugar do mundo. Quem apresenta a senha certa não está
+  // adivinhando: entra e a trava cai. Quem erra continua barrado —
+  // acertar por tentativa é o que a trava impede.
+  // Enquanto a trava vale, cada tentativa custa um segundo e meio. Isso
+  // mantém o freio contra quem fica adivinhando (bcrypt + espera deixam a
+  // taxa baixíssima) sem transformar a trava numa porta fechada na cara
+  // do dono da conta.
+  const travada =
+    !!user?.lockedUntil && user.lockedUntil.getTime() > Date.now();
+  if (travada) await new Promise((r) => setTimeout(r, 1500));
 
   const hash = user?.passwordHash ?? DUMMY_HASH;
   const ok = await verifyPassword(password, hash);
@@ -81,6 +91,8 @@ export async function login(
       const travaVencida =
         !!user.lockedUntil && user.lockedUntil.getTime() <= Date.now();
       const failed = (travaVencida ? 0 : user.failedLogins) + 1;
+      // Mensagem sempre a mesma, travado ou não: o texto do bloqueio
+      // servia de "esse cadastro existe".
       await db
         .update(users)
         .set({
@@ -95,6 +107,7 @@ export async function login(
     return genericError;
   }
 
+  // Senha certa numa conta travada: o dono voltou. Zera tudo e segue.
   if (user.failedLogins > 0 || user.lockedUntil) {
     await db
       .update(users)
@@ -158,6 +171,17 @@ export async function signup(
     // definindo uma senha pela primeira vez.
     if (existing.passwordHash) {
       return { error: "Já existe uma conta com esse WhatsApp. Faça login." };
+    }
+
+    // Só conta de cliente se assume por aqui. Um registro de barbeiro ou
+    // de admin sem senha (o seed cria a equipe, e uma conta pode ficar
+    // sem senha até o primeiro acesso) viraria acesso ao painel para quem
+    // soubesse o telefone da pessoa.
+    if (existing.role !== "CLIENT") {
+      return {
+        error:
+          "Esse WhatsApp é de uma conta da equipe. Fale com a barbearia para liberar o seu acesso.",
+      };
     }
 
     // Se esse telefone já tem agendamento, quem assume a conta precisa

@@ -11,7 +11,7 @@ import {
   type Msg,
 } from "@/components/admin/Feedback";
 import { toast } from "@/lib/toast";
-import { formatBRL } from "@/lib/money";
+import { formatBRL, parseMoneyToCents } from "@/lib/money";
 import { saveService, toggleService } from "../actions";
 import { PlanoForm } from "../PlanoForm";
 
@@ -40,8 +40,7 @@ type PlanRow = {
 };
 
 const reais = (cents: number) => (cents / 100).toFixed(2).replace(".", ",");
-const cents = (v: string) =>
-  Math.round(Number(v.replace(/\./g, "").replace(",", ".")) * 100);
+const cents = (v: string) => parseMoneyToCents(v);
 
 export function CatalogoManager({
   services,

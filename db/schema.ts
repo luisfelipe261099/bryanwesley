@@ -225,6 +225,11 @@ export const appointments = mysqlTable(
     codeIdx: uniqueIndex("appointments_code_unique").on(t.code),
     tokenIdx: uniqueIndex("appointments_checkin_token_idx").on(t.checkinToken),
     barberStartIdx: index("appointments_barber_start_idx").on(t.barberId, t.startsAt),
+    // Só a data: o painel do dono e os relatórios varrem por período sem
+    // filtrar barbeiro, e o índice composto não serve para isso.
+    startIdx: index("appointments_start_idx").on(t.startsAt),
+    // A varredura do horário fixo procura por este vínculo.
+    recurringIdx: index("appointments_recurring_idx").on(t.recurringSlotId),
     clientIdx: index("appointments_client_idx").on(t.clientUserId),
     phoneIdx: index("appointments_phone_idx").on(t.clientPhone),
   })
@@ -499,6 +504,14 @@ export const planRequests = mysqlTable(
   },
   (t) => ({ userIdx: index("plan_requests_user_idx").on(t.userId) })
 );
+
+// Freio simples por origem, para o que é aberto ao público (a agenda).
+// Uma linha por chave ("agendar:<ip>"), com a janela corrente.
+export const rateLimits = mysqlTable("rate_limits", {
+  chave: varchar("chave", { length: 80 }).notNull().primaryKey(),
+  hits: int("hits").notNull().default(0),
+  windowStart: tsNow("window_start"),
+});
 
 // ───────────────────────── Relações ─────────────────────────
 

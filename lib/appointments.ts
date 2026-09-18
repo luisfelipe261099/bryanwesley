@@ -3,7 +3,7 @@
 // A prevenção de horário duplicado é da constraint de exclusão
 // no banco; aqui traduzimos a violação para uma mensagem humana.
 // ───────────────────────────────────────────────────────────
-import { and, eq, gt, inArray, lt } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, ne } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointments,
@@ -24,7 +24,7 @@ import {
   cancelPendingNotifications,
 } from "./notifications";
 import { randomBytes } from "node:crypto";
-import { shopTimeToUtc, parseDateKey } from "./time";
+import { shopTimeToUtc, parseDateKey, shopToday, addDays as addDaysKey } from "./time";
 import { normalizePhone } from "./phone";
 import { dbErrorCode, dbErrorMessage } from "./errors";
 
@@ -63,14 +63,46 @@ export type CreateBookingInput = {
   skipConfirmation?: boolean;
   /** Horário fixo que está gerando esta ocorrência. */
   recurringSlotId?: number | null;
+  /**
+   * Veio do site, do cliente. Só o pedido público respeita a pausa da
+   * agenda, a antecedência mínima e o limite de dias à frente: pausar a
+   * agenda pública travava também o encaixe do balcão, a remarcação pelo
+   * painel e a materialização do horário fixo dos membros.
+   */
+  publicRequest?: boolean;
+  /**
+   * Preços e durações congelados (remarcação): o atendimento continua
+   * valendo o que foi combinado, mesmo que o catálogo tenha mudado.
+   */
+  frozenItems?: {
+    serviceId: number;
+    name: string;
+    priceCents: number;
+    durationMin: number;
+  }[];
+  /**
+   * Remarcação: o agendamento que está sendo movido não conta como
+   * conflito consigo mesmo, nem para o teto de horários em aberto.
+   */
+  ignoreAppointmentId?: number;
 };
 
 export async function createBooking(input: CreateBookingInput) {
   const settings = await getSettings();
-  if (!settings.acceptingBookings) {
+  if (input.publicRequest && !settings.acceptingBookings) {
     throw new BookingError(
       "A agenda está temporariamente fechada para novos agendamentos."
     );
+  }
+  if (input.publicRequest) {
+    // O limite de dias à frente só valia para os chips da tela: pela ação
+    // dava para reservar 2030.
+    const limite = addDaysKey(shopToday(), settings.maxAdvanceDays);
+    if (input.dateKey > limite) {
+      throw new BookingError(
+        `A agenda abre até ${settings.maxAdvanceDays} dias à frente. Escolha uma data mais próxima.`
+      );
+    }
   }
 
   if (input.serviceIds.length === 0) {
@@ -84,10 +116,35 @@ export async function createBooking(input: CreateBookingInput) {
     ),
   });
   if (chosen.length !== input.serviceIds.length) {
-    throw new BookingError("Algum serviço escolhido não está mais disponível.");
+    // Dizer qual saiu: "algum serviço" deixava o cliente clicando de novo
+    // no mesmo combo e recebendo o mesmo erro para sempre.
+    const encontrados = new Set(chosen.map((s) => s.id));
+    const faltando = await db.query.services.findMany({
+      where: inArray(
+        servicesTable.id,
+        input.serviceIds.filter((id) => !encontrados.has(id))
+      ),
+    });
+    const nomes = faltando.map((s) => s.name).join(", ");
+    throw new BookingError(
+      nomes
+        ? `${nomes} saiu do catálogo. Escolha outro serviço.`
+        : "Algum serviço escolhido não está mais disponível."
+    );
   }
 
-  const durationMin = chosen.reduce((acc, s) => acc + s.durationMin, 0);
+  // Na remarcação vale o que foi combinado, não o catálogo de hoje: o
+  // cliente só mudou de horário e não pode receber preço novo (nem ver a
+  // duração mudar) por causa de um reajuste no meio do caminho.
+  const congelado = new Map(
+    (input.frozenItems ?? []).map((i) => [i.serviceId, i])
+  );
+  const preco = (s: { id: number; priceCents: number }) =>
+    congelado.get(s.id)?.priceCents ?? s.priceCents;
+  const duracao = (s: { id: number; durationMin: number }) =>
+    congelado.get(s.id)?.durationMin ?? s.durationMin;
+
+  const durationMin = chosen.reduce((acc, s) => acc + duracao(s), 0);
   const phone = normalizePhone(input.clientPhone);
 
   // De quem é este telefone. Antes o plano só era procurado quando havia
@@ -132,7 +189,10 @@ export async function createBooking(input: CreateBookingInput) {
         and(
           eq(appointments.clientPhone, phone),
           inArray(appointments.status, ["PENDENTE", "CONFIRMADO"]),
-          gt(appointments.startsAt, new Date())
+          gt(appointments.startsAt, new Date()),
+          input.ignoreAppointmentId
+            ? ne(appointments.id, input.ignoreAppointmentId)
+            : undefined
         )
       );
     if (Number(abertos[0]?.total ?? 0) >= teto) {
@@ -144,10 +204,7 @@ export async function createBooking(input: CreateBookingInput) {
 
   const totalCents = allCovered
     ? 0
-    : chosen.reduce(
-        (acc, s) => acc + (coveredIds.has(s.id) ? 0 : s.priceCents),
-        0
-      );
+    : chosen.reduce((acc, s) => acc + (coveredIds.has(s.id) ? 0 : preco(s)), 0);
 
   // Confere a disponibilidade e resolve "mais rápido" para um barbeiro real.
   const availability = await getAvailability({
@@ -155,6 +212,11 @@ export async function createBooking(input: CreateBookingInput) {
     durationMin,
     barberId: input.barberId ?? null,
     settings,
+    ignorarAppointmentId: input.ignoreAppointmentId,
+    // Encaixe do balcão vale aqui também. Sem isto a tela da equipe
+    // oferecia o horário (ela consulta ignorando a antecedência) e a
+    // gravação recusava logo depois, dizendo que faltava antecedência.
+    ignorarAntecedencia: !input.publicRequest,
   });
   if (availability.closed) {
     throw new BookingError("A barbearia não abre nesse dia.");
@@ -171,13 +233,15 @@ export async function createBooking(input: CreateBookingInput) {
     );
   }
 
-  const barberId = input.barberId ?? slot.barberIds[0];
-  if (!barberId) throw new BookingError("Nenhum barbeiro livre nesse horário.");
-
-  const barber = await db.query.barbers.findFirst({
-    where: and(eq(barbers.id, barberId), eq(barbers.active, true)),
-  });
-  if (!barber) throw new BookingError("Barbeiro indisponível.");
+  // "Mais rápido" tem candidatos, não um escolhido. Fixar o primeiro
+  // livre fazia dois pedidos simultâneos disputarem a mesma cadeira, e o
+  // segundo ouvia "esse horário acabou de ser reservado" com a cadeira do
+  // lado vazia. Perdendo a disputa, o pedido tenta o próximo candidato.
+  const candidatos = input.barberId ? [input.barberId] : slot.barberIds;
+  if (candidatos.length === 0) {
+    throw new BookingError("Nenhum barbeiro livre nesse horário.");
+  }
+  let barberId = candidatos[0];
 
   const { year, month, day } = parseDateKey(input.dateKey);
   const startsAt = shopTimeToUtc(year, month, day, slot.minutes);
@@ -194,12 +258,20 @@ export async function createBooking(input: CreateBookingInput) {
     clientUserId = id;
   }
 
+  // Poucas tentativas cobrem a colisão rara do código de 6 letras, e a
+  // troca de candidato quando outro pedido leva a cadeira primeiro.
+  let candidato = 0;
+  for (let attempt = 0; attempt < 3 + candidatos.length; attempt++) {
+  barberId = candidatos[candidato];
+  const barber = await db.query.barbers.findFirst({
+    where: and(eq(barbers.id, barberId), eq(barbers.active, true)),
+  });
+  if (!barber) throw new BookingError("Barbeiro indisponível.");
+
   // Percentual do barbeiro congelado agora: se a meta dele mudar depois,
   // este atendimento mantém a divisão combinada no dia.
   const { pct: barberPct } = await resolveBarberPct(barberId);
 
-  // Poucas tentativas cobrem a colisão rara do código de 6 letras.
-  for (let attempt = 0; attempt < 3; attempt++) {
   try {
     const appt = await db.transaction(async (tx) => {
       // Trava por (barbeiro, dia): serializa as reservas concorrentes.
@@ -234,7 +306,12 @@ export async function createBooking(input: CreateBookingInput) {
             ]),
             // Operadores tipados: o Drizzle serializa o Date pelo tipo da coluna.
             lt(appointments.startsAt, endsAt),
-            gt(appointments.endsAt, startsAt)
+            gt(appointments.endsAt, startsAt),
+            // O horário que está sendo remarcado não conflita consigo
+            // mesmo: é ele que vai sair do lugar.
+            input.ignoreAppointmentId
+              ? ne(appointments.id, input.ignoreAppointmentId)
+              : undefined
           )
         )
         .limit(1)
@@ -271,9 +348,9 @@ export async function createBooking(input: CreateBookingInput) {
         chosen.map((s) => ({
           appointmentId: createdId,
           serviceId: s.id,
-          name: s.name,
-          priceCents: coveredIds.has(s.id) ? 0 : s.priceCents,
-          durationMin: s.durationMin,
+          name: congelado.get(s.id)?.name ?? s.name,
+          priceCents: coveredIds.has(s.id) ? 0 : preco(s),
+          durationMin: duracao(s),
         }))
       );
 
@@ -301,6 +378,12 @@ export async function createBooking(input: CreateBookingInput) {
       dbErrorMessage(err).includes("appointments_code_unique")
     ) {
       continue; // colisão do código curto: tenta de novo
+    }
+    // Perdeu a cadeira para outro pedido, mas havia mais de um livre:
+    // tenta o próximo em vez de recusar o cliente.
+    if (err instanceof BookingError && candidato + 1 < candidatos.length) {
+      candidato++;
+      continue;
     }
     throw err;
   }
@@ -338,43 +421,74 @@ export async function rescheduleBooking(input: {
     throw new BookingError("Não dá para remarcar: os serviços saíram do catálogo.");
   }
 
-  // Libera o horário antigo primeiro, senão ele bloquearia o novo quando
-  // for o mesmo barbeiro em horário próximo.
-  await db
+  // O novo horário nasce ANTES de o antigo cair.
+  //
+  // A ordem inversa (cancelar e depois criar) tinha um instante em que o
+  // cliente não tinha horário nenhum: uma queda entre as duas escritas —
+  // ou um erro fora do alcance do rollback — o deixava sem nada, e sem
+  // ninguém para avisar. Agora o pior caso é o oposto e reversível: dois
+  // horários marcados, que o painel mostra e a barbearia resolve. O
+  // próprio agendamento não conflita consigo mesmo (ignoreAppointmentId).
+  const novo = await createBooking({
+    serviceIds,
+    dateKey: input.dateKey,
+    time: input.time,
+    barberId: input.barberId ?? appt.barberId,
+    clientName: appt.clientName,
+    clientPhone: appt.clientPhone,
+    userId: appt.clientUserId,
+    notes: appt.notes ?? undefined,
+    skipConfirmation: true,
+    // O que foi combinado continua valendo, preço e duração.
+    frozenItems: items
+      .filter((i) => i.serviceId !== null)
+      .map((i) => ({
+        serviceId: i.serviceId as number,
+        name: i.name,
+        priceCents: i.priceCents,
+        durationMin: i.durationMin,
+      })),
+    // Remarcar uma ocorrência do horário fixo mantém o vínculo, senão a
+    // varredura seguinte enxerga a semana "livre" e reserva de novo.
+    recurringSlotId: appt.recurringSlotId,
+    ignoreAppointmentId: appt.id,
+  });
+
+  // Agora o antigo sai. O UPDATE é condicionado ao estado lido: se o
+  // barbeiro concluiu o atendimento no meio do caminho, a remarcação não
+  // pode apagar a conclusão — e aí quem sai é o horário novo.
+  const [liberado] = await db
     .update(appointments)
     .set({ status: "CANCELADO" })
-    .where(eq(appointments.id, appt.id));
-
-  try {
-    const novo = await createBooking({
-      serviceIds,
-      dateKey: input.dateKey,
-      time: input.time,
-      barberId: input.barberId ?? appt.barberId,
-      clientName: appt.clientName,
-      clientPhone: appt.clientPhone,
-      userId: appt.clientUserId,
-      notes: appt.notes ?? undefined,
-      skipConfirmation: true,
-    });
-    await cancelPendingNotifications(appt.id);
-    try {
-      await queueNotification({
-        kind: "AGENDAMENTO_REMARCADO",
-        appointment: novo,
-      });
-    } catch (e) {
-      console.error("Falha ao avisar remarcação:", e);
-    }
-    return novo;
-  } catch (err) {
-    // Não conseguiu o horário novo: devolve o antigo como estava.
+    .where(and(eq(appointments.id, appt.id), eq(appointments.status, appt.status)));
+  if (liberado.affectedRows === 0) {
     await db
       .update(appointments)
-      .set({ status: appt.status })
-      .where(eq(appointments.id, appt.id));
-    throw err;
+      .set({ status: "CANCELADO" })
+      .where(eq(appointments.id, novo.id));
+    await cancelPendingNotifications(novo.id);
+    throw new BookingError(
+      "Esse horário mudou de situação enquanto você remarcava. Abra de novo para ver como ficou."
+    );
   }
+
+  await cancelPendingNotifications(appt.id);
+  try {
+    // Com o nome do barbeiro: a remarcação pode ter trocado de
+    // profissional, e a mensagem sem nome deixava o cliente achando que
+    // continuava com o mesmo.
+    const prof = await db.query.barbers.findFirst({
+      where: eq(barbers.id, novo.barberId),
+    });
+    await queueNotification({
+      kind: "AGENDAMENTO_REMARCADO",
+      appointment: novo,
+      barberName: prof?.shortName,
+    });
+  } catch (e) {
+    console.error("Falha ao avisar remarcação:", e);
+  }
+  return novo;
 }
 
 /** Transições de estado permitidas, para não pular etapas. */

@@ -7,7 +7,7 @@ export const maxDuration = 60;
 /**
  * Despacho pelo cron da Vercel (vercel.json) ou por um agendador externo.
  * Protegido por CRON_SECRET — a Vercel envia o header Authorization
- * sozinha; agendadores que não enviam usam ?token=.
+ * sozinha; agendadores que não enviam usam o header x-cron-secret.
  *
  * O dia a dia é coberto pelo heartbeat do painel (/api/notificacoes/heartbeat);
  * esta rota é a rede de segurança para os dias em que ninguém abre o sistema.
@@ -23,9 +23,12 @@ async function handler(req: Request) {
     );
   }
   if (secret) {
+    // Só por cabeçalho. Na query string o segredo entra no log de acesso
+    // da Vercel e vaza pelo Referer — e log de acesso não é lugar de
+    // segredo. Agendador que não manda Authorization usa x-cron-secret.
     const auth = req.headers.get("authorization");
-    const token = new URL(req.url).searchParams.get("token");
-    if (auth !== `Bearer ${secret}` && token !== secret) {
+    const header = req.headers.get("x-cron-secret");
+    if (auth !== `Bearer ${secret}` && header !== secret) {
       return NextResponse.json({ error: "não autorizado" }, { status: 401 });
     }
   }

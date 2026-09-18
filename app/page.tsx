@@ -89,7 +89,12 @@ export default async function Home() {
   const unitLabel = info.unit;
   // "Unidade Cajuru" → "Cajuru", para o kicker da seção de equipe.
   const unitShort = info.unit.replace(/^Unidade\s+/i, "");
-  const next = combo ? await nextFreeSlot(combo.durationMin) : null;
+  // Agenda pausada pelo dono: a home não pode anunciar "Agenda aberta"
+  // nem um horário concreto — o cliente clicava em "Reservar este horário"
+  // e batia numa tela dizendo que a agenda está fechada.
+  const agendaAberta = settings.acceptingBookings;
+  const next =
+    combo && agendaAberta ? await nextFreeSlot(combo.durationMin) : null;
 
   return (
     <>
@@ -104,10 +109,17 @@ export default async function Home() {
               <Reveal>
                 <span className="chip inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-xs font-medium text-steel-300">
                   <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-neon opacity-75" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-neon" />
+                    {agendaAberta && (
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-neon opacity-75" />
+                    )}
+                    <span
+                      className={`relative inline-flex h-2 w-2 rounded-full ${
+                        agendaAberta ? "bg-neon" : "bg-amber-400"
+                      }`}
+                    />
                   </span>
-                  Agenda aberta · {unitLabel}
+                  {agendaAberta ? "Agenda aberta" : "Agenda pausada"} ·{" "}
+                  {unitLabel}
                 </span>
               </Reveal>
 
@@ -160,6 +172,7 @@ export default async function Home() {
             {/* Visual do hero */}
             <Reveal delay={0.15} className="relative">
               <HeroVisual
+                agendaAberta={agendaAberta}
                 time={next?.time ?? null}
                 weekday={next?.day.weekday ?? null}
                 dayLabel={next?.day.dayLabel ?? null}
@@ -396,6 +409,7 @@ function SectionHeading({
 }
 
 function HeroVisual({
+  agendaAberta,
   time,
   weekday,
   dayLabel,
@@ -403,6 +417,7 @@ function HeroVisual({
   duration,
   priceCents,
 }: {
+  agendaAberta: boolean;
   time: string | null;
   weekday: string | null;
   dayLabel: string | null;
@@ -422,7 +437,7 @@ function HeroVisual({
             }`}
           >
             <span className={`h-1.5 w-1.5 rounded-full ${time ? "bg-neon" : "bg-amber-400"}`} />
-            {time ? "Disponível" : "Agenda cheia"}
+            {time ? "Disponível" : agendaAberta ? "Agenda cheia" : "Agenda pausada"}
           </span>
         </div>
 
@@ -438,7 +453,11 @@ function HeroVisual({
                   <span className="capitalize">{weekday}</span>, {dayLabel}
                 </>
               ) : (
-                "Sem vaga nos próximos dias"
+                agendaAberta ? (
+                  "Sem vaga nos próximos dias"
+                ) : (
+                  "A agenda online está pausada"
+                )
               )}
             </div>
           </div>
@@ -457,7 +476,7 @@ function HeroVisual({
           href="/agendar"
           className="btn-royal label mt-5 flex items-center justify-center gap-2 rounded-xl py-4 text-white"
         >
-          Reservar este horário
+          {agendaAberta ? "Reservar este horário" : "Ver a agenda"}
           <ArrowRight className="h-4 w-4" />
         </Link>
       </div>

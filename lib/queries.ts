@@ -240,6 +240,53 @@ export async function activeSubscription(
 
 // ───────────────────────── Barbeiro ─────────────────────────
 
+/**
+ * Os números do cartão do membro: atendimentos no mês e quanto o plano já
+ * economizou. Contas no banco, sobre tudo — a tela fazia as duas sobre o
+ * histórico, que é uma amostra de 12, e a "economia" saía sempre R$ 0,00
+ * porque o item coberto é gravado com preço zero (é isso que o plano faz).
+ * A economia é o preço de tabela do que o plano cobriu.
+ */
+export async function memberStats(userId: number, ref = new Date()) {
+  const [[mes], [economia]] = await Promise.all([
+    db
+      .select({ total: count() })
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.clientUserId, userId),
+          eq(appointments.status, "CONCLUIDO"),
+          gte(appointments.startsAt, monthStart(ref)),
+          lt(appointments.startsAt, nextMonthStart(ref))
+        )
+      ),
+    db
+      .select({
+        soma: sql<number>`COALESCE(SUM(${services.priceCents}), 0)`,
+      })
+      .from(appointmentServices)
+      .innerJoin(
+        appointments,
+        eq(appointments.id, appointmentServices.appointmentId)
+      )
+      .innerJoin(
+        services,
+        eq(services.id, appointmentServices.serviceId)
+      )
+      .where(
+        and(
+          eq(appointments.clientUserId, userId),
+          eq(appointments.status, "CONCLUIDO"),
+          eq(appointmentServices.priceCents, 0)
+        )
+      ),
+  ]);
+  return {
+    atendimentosNoMes: Number(mes?.total ?? 0),
+    economiaCents: Number(economia?.soma ?? 0),
+  };
+}
+
 /** Comissão do barbeiro no mês corrente. */
 export async function barberMonthSummary(barberId: number, ref = new Date()) {
   const [row] = await db
@@ -497,11 +544,23 @@ export async function clientDetail(id: number) {
   const pessoa = await db.query.users.findFirst({ where: eq(users.id, id) });
   if (!pessoa || pessoa.role !== "CLIENT") return null;
 
-  const [proximos, historico, concluidos, assinaturas, pagamentos, fixos] =
+  const [proximos, historico, concluidos, totalGasto, assinaturas, pagamentos, fixos] =
     await Promise.all([
       upcomingForUser(id, 20),
       historyForUser(id, 20),
       countForUser(id),
+      // Soma TUDO que já foi concluído. Antes vinha do histórico, que é só
+      // uma amostra de 20: ao lado de um contador que conta todos, o
+      // "total gasto" ficava travado no valor dos últimos 20 atendimentos.
+      db
+        .select({ soma: sql<number>`COALESCE(SUM(${appointments.totalCents}), 0)` })
+        .from(appointments)
+        .where(
+          and(
+            eq(appointments.clientUserId, id),
+            eq(appointments.status, "CONCLUIDO")
+          )
+        ),
       db
         .select({ sub: subscriptions, plan: plans })
         .from(subscriptions)
@@ -527,9 +586,7 @@ export async function clientDetail(id: number) {
     ? assinaturas.find((a) => a.sub.status === "INADIMPLENTE")
     : undefined;
 
-  const gasto = historico
-    .filter((a) => a.status === "CONCLUIDO")
-    .reduce((acc, a) => acc + a.totalCents, 0);
+  const gasto = Number(totalGasto[0]?.soma ?? 0);
 
   return {
     cliente: {
@@ -544,7 +601,7 @@ export async function clientDetail(id: number) {
     proximos,
     historico,
     concluidos,
-    /** Soma do que já pagou nos atendimentos que aparecem no histórico. */
+    /** Soma de todos os atendimentos concluídos — não só os do histórico. */
     gasto,
     assinatura: ativa ?? vencida ?? null,
     assinaturas,

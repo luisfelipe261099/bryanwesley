@@ -153,9 +153,13 @@ export async function recordCommission(appointmentId: number) {
   // Assinante não paga no balcão, mas o barbeiro entregou serviço.
   // A base vira o preço de tabela do que foi feito — senão a comissão
   // de todo atendimento de plano seria zero.
+  // Cobertura parcial conta igual: um atendimento "corte do plano +
+  // barba paga" é gravado como AVULSO, e o total só tem a barba — o
+  // barbeiro cortava o cabelo de graça na conta da comissão.
+  const temItemCoberto = items.some((i) => i.priceCents === 0);
   let baseCents = appt.totalCents;
   if (
-    fromSubscription &&
+    (fromSubscription || temItemCoberto) &&
     settings.subscriptionCommissionBase === "PRECO_TABELA"
   ) {
     const ids = items

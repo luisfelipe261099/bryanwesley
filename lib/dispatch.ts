@@ -20,6 +20,7 @@ import { pendingNotifications, markSent, markFailed } from "./notifications";
 import { sendWhatsapp, isWhatsappConfigured } from "./providers/whatsapp";
 import { materializeRecurring, type MaterializeReport } from "./recurring";
 import { expireOverdueSubscriptions } from "./subscriptions";
+import { purgeRateLimits } from "./rate-limit";
 
 /** Intervalo mínimo entre varreduras disparadas pelo painel. */
 export const HEARTBEAT_INTERVAL_MS = 10 * 60_000;
@@ -27,12 +28,21 @@ export const HEARTBEAT_INTERVAL_MS = 10 * 60_000;
 /** Intervalo mínimo entre varreduras do cron/agendador externo. */
 export const CRON_INTERVAL_MS = 60_000;
 
+/**
+ * Tempo máximo gasto entregando mensagens numa varredura. A rota tem
+ * maxDuration de 60s; parar bem antes deixa margem para a última chamada
+ * ao provedor terminar e para a resposta sair.
+ */
+export const DISPATCH_BUDGET_MS = 30_000;
+
 export type DispatchReport = {
   configurado: boolean;
   enviadas: number;
   falhas: number;
   pendentes: number;
   descartadas: number;
+  /** A varredura parou no meio por tempo: o resto sai na próxima. */
+  interrompida: boolean;
   horariosFixos: MaterializeReport;
   assinaturasExpiradas: number;
 };
@@ -130,19 +140,34 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
   // os lembretes deles também saiam nesta rodada.
   const horariosFixos = await materializeRecurring();
 
+  // Janelas de freio já vencidas não servem para nada e a tabela cresceria
+  // para sempre.
+  await purgeRateLimits(new Date(Date.now() - 24 * 3600_000));
+
   const fila = await pendingNotifications(limit);
   const configurado = isWhatsappConfigured();
 
   let enviadas = 0;
   let falhas = 0;
+  let interrompida = false;
   if (configurado) {
+    const limiteDeTempo = Date.now() + DISPATCH_BUDGET_MS;
     for (const n of fila) {
+      // O envio é em série e cada chamada ao provedor pode demorar. Com a
+      // fila cheia, a função estourava o tempo da Vercel e era morta no
+      // meio de um envio — a mensagem saía e continuava PENDENTE, para
+      // sair de novo na próxima varredura. Parando antes do corte, o que
+      // sobrou fica para a rodada seguinte, inteiro.
+      if (Date.now() > limiteDeTempo) {
+        interrompida = true;
+        break;
+      }
       const res = await sendWhatsapp(n.phone, n.body);
       if (res.sent) {
         await markSent(n.id);
         enviadas++;
       } else {
-        await markFailed(n.id, res.reason, res.retryable ? n.attempts : 99);
+        await markFailed(n.id, res.reason, n.attempts, !res.retryable);
         falhas++;
       }
     }
@@ -155,6 +180,7 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
     falhas,
     pendentes: configurado ? fila.length - enviadas : fila.length,
     descartadas,
+    interrompida,
     horariosFixos,
     assinaturasExpiradas,
   };

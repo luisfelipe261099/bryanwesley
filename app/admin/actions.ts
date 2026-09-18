@@ -1,10 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, inArray, like, sql as rawSql } from "drizzle-orm";
+import { and, eq, gt, inArray, like, sql as rawSql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
 import {
+  appointments,
   barbers,
   commissionTiers,
   planRequests,
@@ -323,6 +324,30 @@ export async function updateBarber(input: {
     }
     if (input.active) return done("Barbeiro atualizado.");
 
+    // Os avulsos futuros dele não podem ficar de pé: ninguém vai atender,
+    // o cliente aparece na porta e o horário nem consta mais na agenda de
+    // quem ficou. São cancelados um a um (não em lote) porque cada
+    // cancelamento avisa o cliente pelo WhatsApp.
+    const futuros = await db
+      .select({ id: appointments.id })
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.barberId, input.id),
+          gt(appointments.startsAt, new Date()),
+          inArray(appointments.status, ["PENDENTE", "CONFIRMADO"])
+        )
+      );
+    let cancelados = 0;
+    for (const a of futuros) {
+      try {
+        await transitionAppointment(a.id, "CANCELADO");
+        cancelados++;
+      } catch (e) {
+        console.error("Falha ao cancelar agendamento do barbeiro desativado:", e);
+      }
+    }
+
     // Quem tinha fixo com ele fica sem: o fixo é desligado e as semanas
     // futuras saem da agenda. Sem isso o membro veria um fixo "ativo" que
     // nunca mais materializa, e o barbeiro sairia com a agenda ocupada.
@@ -332,7 +357,12 @@ export async function updateBarber(input: {
       .where(
         and(eq(recurringSlots.barberId, input.id), eq(recurringSlots.active, true))
       );
-    if (fixos.length === 0) return done("Barbeiro desativado e acesso encerrado.");
+    const aviso = cancelados
+      ? ` ${cancelados} agendamento(s) futuro(s) cancelado(s) — os clientes foram avisados.`
+      : "";
+    if (fixos.length === 0) {
+      return done(`Barbeiro desativado e acesso encerrado.${aviso}`);
+    }
     const ids = fixos.map((f) => f.id);
     await db
       .update(recurringSlots)
@@ -340,7 +370,7 @@ export async function updateBarber(input: {
       .where(inArray(recurringSlots.id, ids));
     const liberados = await cancelFutureOccurrences(ids);
     return done(
-      `Barbeiro desativado e acesso encerrado. ${ids.length} horário(s) fixo(s) desligado(s) e ${liberados} agendamento(s) liberado(s) — avise os membros.`
+      `Barbeiro desativado e acesso encerrado.${aviso} ${ids.length} horário(s) fixo(s) desligado(s) e ${liberados} agendamento(s) liberado(s) — avise os membros.`
     );
   } catch (e) {
     return fail(e);
@@ -365,7 +395,20 @@ export async function setBarberHours(input: {
             eq(barberHours.weekday, input.weekday)
           )
         );
-      return done("Jornada removida (volta a valer o horário da loja).");
+      // Com jornada própria em QUALQUER dia, o dia sem linha é folga
+      // (lib/schedule: workingWindows). A mensagem prometia o contrário —
+      // "volta a valer o horário da loja" — e o dono tirava o profissional
+      // da agenda sem perceber. Só quando não sobra nenhuma linha é que a
+      // loja volta a mandar.
+      const [{ n: restantes }] = await db
+        .select({ n: rawSql<number>`count(*)` })
+        .from(barberHours)
+        .where(eq(barberHours.barberId, input.barberId));
+      return done(
+        Number(restantes) > 0
+          ? "Dia em branco: folga desse profissional."
+          : "Jornada limpa — ele volta a seguir o horário da loja."
+      );
     }
     if (input.closeMinute <= input.openMinute) {
       return { ok: false, error: "O fim precisa ser depois do início." };
@@ -494,7 +537,27 @@ export async function toggleService(id: number, active: boolean): Promise<Result
   try {
     await admin();
     await db.update(services).set({ active }).where(eq(services.id, id));
-    return done(active ? "Serviço ativado." : "Serviço desativado.");
+    if (active) return done("Serviço ativado.");
+
+    // Horário fixo guarda a lista de serviços. Tirando um do catálogo, o
+    // fixo de quem o escolheu encolhe — e, se era o único, para de
+    // materializar sem avisar ninguém. O dono precisa saber agora, não
+    // pela reclamação do membro daqui a duas semanas.
+    const fixos = await db
+      .select({ id: recurringSlots.id, serviceIds: recurringSlots.serviceIds })
+      .from(recurringSlots)
+      .where(eq(recurringSlots.active, true));
+    const afetados = fixos.filter((f) => (f.serviceIds ?? []).includes(id));
+    const orfaos = afetados.filter(
+      (f) => (f.serviceIds ?? []).filter((x) => x !== id).length === 0
+    );
+    if (afetados.length === 0) return done("Serviço desativado.");
+    return done(
+      `Serviço desativado. ${afetados.length} horário(s) fixo(s) usavam ele` +
+        (orfaos.length
+          ? ` — ${orfaos.length} ficaram sem nenhum serviço e vão parar de reservar. Avise os membros.`
+          : " e passam a reservar só o resto.")
+    );
   } catch (e) {
     return fail(e);
   }
@@ -683,6 +746,8 @@ export async function bookForClient(input: {
       clientPhone: cliente.phone,
       notes: input.notes,
       userId: cliente.id,
+      // Encaixe do balcão: não é pedido público, então não esbarra na
+      // pausa da agenda nem na antecedência mínima.
     });
     return done(`Horário marcado. Código ${appt.code}.`);
   } catch (e) {
@@ -1087,6 +1152,11 @@ export async function flushNotifications(): Promise<Result> {
     const partes = [`${r.enviadas} mensagem(ns) enviada(s)`];
     if (r.falhas) partes.push(`${r.falhas} falha(s)`);
     if (r.descartadas) partes.push(`${r.descartadas} vencida(s) descartada(s)`);
+    if (r.interrompida) partes.push("o resto da fila sai na próxima varredura");
+    if (r.enviadas === 0 && r.falhas === 0 && r.pendentes === 0) {
+      // Fila só com lembrete do futuro: "0 enviada(s)" parecia erro.
+      partes.push("nada com hora marcada para agora");
+    }
     return done(partes.join(" · ") + ".");
   } catch (e) {
     return fail(e);

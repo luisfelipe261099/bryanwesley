@@ -22,7 +22,10 @@ export default async function Agendar() {
     getSettings(),
     listServices(),
     listTeam(),
-    listPlans(),
+    // Inclui os planos desativados: quem assinou um plano que saiu da
+    // vitrine continua membro, e o servidor continua cobrindo os serviços
+    // dele. Sem isso a tela cobrava o preço cheio de quem não ia pagar.
+    listPlans({ todos: true }),
   ]);
 
   const days = listOpenDays(settings, 10);

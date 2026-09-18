@@ -45,7 +45,14 @@ export function NotificacoesPanel({
   configured,
   ultimaVerificacao,
 }: {
-  stats: { pendentes: number; enviadas: number; erros: number; canceladas: number };
+  stats: {
+    pendentes: number;
+    /** Pendentes cuja hora já chegou — é o que "Enviar agora" manda. */
+    prontas: number;
+    enviadas: number;
+    erros: number;
+    canceladas: number;
+  };
   rows: NotifRow[];
   configured: boolean;
   /** "há 3 min" ou null quando a fila nunca foi varrida. */
@@ -80,8 +87,9 @@ export function NotificacoesPanel({
         cada 10 minutos — e o cron da Vercel cobre os dias sem movimento.
       </p>
 
-      <div className="grid gap-4 sm:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
         <Stat label="Na fila" value={stats.pendentes} tone="amber" />
+        <Stat label="Prontas para enviar" value={stats.prontas} tone="amber" />
         <Stat label="Enviadas" value={stats.enviadas} tone="neon" />
         <Stat label="Com erro" value={stats.erros} tone="red" />
         <Stat label="Canceladas" value={stats.canceladas} tone="steel" />
@@ -109,7 +117,7 @@ export function NotificacoesPanel({
           ) : (
             <Send className="h-4 w-4" />
           )}
-          Enviar agora ({stats.pendentes})
+          Enviar agora ({stats.prontas})
         </button>
         <Feedback msg={msg} />
 

@@ -37,11 +37,14 @@ export function HorarioFixo({
   services,
   existing,
   closedWeekdays,
+  horarios,
 }: {
   team: { id: number; name: string }[];
   services: { id: number; name: string }[];
   existing: Existing;
   closedWeekdays: number[];
+  /** Horários da grade ("HH:MM"), do abre ao fecha. */
+  horarios: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [freq, setFreq] = useState<"SEMANAL" | "MENSAL">(
@@ -49,7 +52,12 @@ export function HorarioFixo({
   );
   const [weekday, setWeekday] = useState(existing?.weekday ?? 4);
   const [dayOfMonth, setDayOfMonth] = useState(existing?.dayOfMonth ?? 5);
-  const [time, setTime] = useState(hhmm(existing?.minutesOfDay ?? 600));
+  // Só a grade: com campo de hora livre dava para reservar 10:07, que
+  // nunca aparece na agenda de ninguém.
+  const [time, setTime] = useState(() => {
+    const atual = hhmm(existing?.minutesOfDay ?? 600);
+    return horarios.includes(atual) ? atual : (horarios[0] ?? atual);
+  });
   const [barberId, setBarberId] = useState(existing?.barberId ?? team[0]?.id);
   const [picked, setPicked] = useState<number[]>(
     existing?.serviceIds ?? (services[0] ? [services[0].id] : [])
@@ -172,12 +180,17 @@ export function HorarioFixo({
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block">
               <span className="label mb-2 block text-steel-400">Horário</span>
-              <input
-                type="time"
+              <select
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
                 className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none [color-scheme:dark] focus:border-electric/60"
-              />
+              >
+                {horarios.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="block">
               <span className="label mb-2 block text-steel-400">Barbeiro</span>

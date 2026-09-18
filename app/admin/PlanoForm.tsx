@@ -9,7 +9,7 @@ import {
   Toggle,
   type Msg,
 } from "@/components/admin/Feedback";
-import { formatBRL } from "@/lib/money";
+import { formatBRL, parseMoneyToCents } from "@/lib/money";
 import { savePlan } from "./actions";
 
 export type PlanoServico = { id: number; name: string };
@@ -44,8 +44,7 @@ const EM_BRANCO: PlanoEditavel = {
 };
 
 const reais = (cents: number) => (cents / 100).toFixed(2).replace(".", ",");
-const cents = (v: string) =>
-  Math.round(Number(v.replace(/\./g, "").replace(",", ".")) * 100) || 0;
+const cents = (v: string) => parseMoneyToCents(v);
 
 /**
  * Formulário de um plano.

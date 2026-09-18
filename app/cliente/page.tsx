@@ -18,13 +18,14 @@ import { BottomNav } from "@/components/BottomNav";
 import { Reveal } from "@/components/Reveal";
 import { requireRole } from "@/lib/auth";
 import { db } from "@/db/client";
-import { recurringSlots, planServices } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
-import { getSettings } from "@/lib/schedule";
+import { recurringSlots, planServices, subscriptions, plans } from "@/db/schema";
+import { and, desc, eq } from "drizzle-orm";
+import { getSettings, gradeDeHorarios } from "@/lib/schedule";
 import { listTeam, listServices } from "@/lib/queries";
 import { HorarioFixo } from "./HorarioFixo";
 import {
   activeSubscription,
+  memberStats,
   upcomingForUser,
   historyForUser,
   countForUser,
@@ -35,6 +36,7 @@ import { checkinQrSvg, publicBaseUrl } from "@/lib/qr";
 import { CheckinQR } from "./CheckinQR";
 import { CancelButton, EmptyState, ChangePassword } from "./MeusHorarios";
 import { Remarcar } from "./Remarcar";
+import { PagarPlano, CancelarPlano, ManterPlano } from "./MinhaAssinatura";
 import { listOpenDays } from "@/lib/schedule";
 import { KeyRound } from "lucide-react";
 
@@ -57,6 +59,12 @@ function countdown(date: Date) {
   return h > 0 ? `Em ${h}h ${m}min` : `Em ${m}min`;
 }
 
+/** "05/11" no fuso da loja. */
+function dataCurta(d: Date) {
+  const p = utcToShopParts(d);
+  return `${String(p.day).padStart(2, "0")}/${String(p.month).padStart(2, "0")}`;
+}
+
 export default async function ClienteDashboard({
   searchParams,
 }: {
@@ -64,9 +72,24 @@ export default async function ClienteDashboard({
 }) {
   const session = await requireRole(["CLIENT", "ADMIN"]);
 
-  const [subscription, upcoming, history, totalVisits, fixo, team, services, settings] =
+  const [subscription, vencida, stats, upcoming, history, totalVisits, fixo, team, services, settings] =
     await Promise.all([
       activeSubscription(session.id),
+      // Vencida também aparece: sem isso o membro inadimplente via a tela
+      // de quem nunca assinou, sem entender por que perdeu os benefícios.
+      db
+        .select({ sub: subscriptions, plan: plans })
+        .from(subscriptions)
+        .innerJoin(plans, eq(plans.id, subscriptions.planId))
+        .where(
+          and(
+            eq(subscriptions.userId, session.id),
+            eq(subscriptions.status, "INADIMPLENTE")
+          )
+        )
+        .orderBy(desc(subscriptions.startedAt))
+        .limit(1),
+      memberStats(session.id),
       upcomingForUser(session.id),
       historyForUser(session.id),
       countForUser(session.id),
@@ -112,17 +135,12 @@ export default async function ClienteDashboard({
     ? await checkinQrSvg(publicBaseUrl(), proximo.checkinToken)
     : null;
 
-  const atendimentosNoMes = history.filter((h) => {
-    const p = utcToShopParts(h.startsAt);
-    const now = utcToShopParts(new Date());
-    return (
-      h.status === "CONCLUIDO" && p.year === now.year && p.month === now.month
-    );
-  }).length;
-
-  const economiaNoMes = history
-    .filter((h) => h.kind === "ASSINANTE" && h.status === "CONCLUIDO")
-    .reduce((acc, h) => acc + h.items.reduce((a, i) => a + i.priceCents, 0), 0);
+  // Contas feitas no banco (lib/queries: memberStats). Feitas aqui sobre o
+  // histórico, elas olhavam só os últimos 12 atendimentos — e a "economia"
+  // dava sempre R$ 0,00, porque o item coberto pelo plano é gravado com
+  // preço zero.
+  const { atendimentosNoMes, economiaCents } = stats;
+  const planoVencido = !subscription ? vencida[0] : undefined;
 
   return (
     <>
@@ -286,7 +304,7 @@ export default async function ClienteDashboard({
                     />
                     <MiniStat
                       icon={Gift}
-                      value={formatBRL(economiaNoMes)}
+                      value={formatBRL(economiaCents)}
                       label="Economia acumulada"
                       accent
                     />
@@ -296,7 +314,54 @@ export default async function ClienteDashboard({
                       label="Visitas no total"
                     />
                   </div>
+
+                  <div className="relative mt-6 flex flex-wrap gap-3">
+                    {subscription.canceledAt ? (
+                      <>
+                        <p className="w-full text-sm text-amber-200">
+                          Cancelamento agendado: você continua membro até{" "}
+                          {dataCurta(subscription.renewsAt)}.
+                        </p>
+                        <ManterPlano />
+                      </>
+                    ) : (
+                      <CancelarPlano />
+                    )}
+                  </div>
                 </>
+              ) : planoVencido ? (
+                <div className="relative">
+                  <span className="label text-amber-300">Assinatura vencida</span>
+                  <h2 className="mt-2 font-display text-2xl text-white">
+                    {planoVencido.plan.name}
+                  </h2>
+                  <p className="mt-2 max-w-md text-sm leading-relaxed text-steel-400">
+                    O ciclo venceu e os benefícios estão pausados. Acerte o
+                    pagamento para voltar a ter o plano valendo — ou encerre,
+                    se preferir.
+                  </p>
+                  <div className="mt-6 grid grid-cols-3 gap-4 border-t border-white/8 pt-6">
+                    <MiniStat
+                      icon={Scissors}
+                      value={String(atendimentosNoMes)}
+                      label="Atendimentos no mês"
+                    />
+                    <MiniStat
+                      icon={Gift}
+                      value={formatBRL(economiaCents)}
+                      label="Economia acumulada"
+                    />
+                    <MiniStat
+                      icon={History}
+                      value={String(totalVisits)}
+                      label="Visitas no total"
+                    />
+                  </div>
+                  <div className="mt-6 flex flex-wrap gap-3">
+                    <PagarPlano rotulo="Regularizar agora" />
+                    <CancelarPlano />
+                  </div>
+                </div>
               ) : (
                 <div className="relative">
                   <span className="label text-electric">Clube VIP</span>
@@ -418,6 +483,7 @@ export default async function ClienteDashboard({
                     : null
                 }
                 closedWeekdays={settings.closedWeekdays}
+                horarios={gradeDeHorarios(settings)}
               />
             </div>
           </Reveal>

@@ -29,17 +29,35 @@ export function Remarcar({
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
   useEffect(() => {
     if (!open || !dateKey) return;
     let cancelled = false;
     setLoading(true);
+    setAviso(null);
     fetchAvailability({ dateKey, durationMin, barberId: who })
       .then((r) => {
         if (cancelled) return;
         setSlots(r.slots);
         setTime(null);
+        // Dia fechado devolve lista vazia. Sem esta mensagem, o modal
+        // ficava em branco: nem horários, nem explicação, nem saída.
+        setAviso(
+          r.closed
+            ? r.motivo === "folga"
+              ? "Esse profissional não atende nesse dia. Escolha outro dia ou outro barbeiro."
+              : r.motivo === "sem-equipe"
+                ? "Nenhum profissional disponível nesse dia."
+                : "A barbearia não abre nesse dia."
+            : null
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSlots([]);
+        setAviso("Não foi possível carregar os horários. Tente de novo.");
       })
       .finally(() => !cancelled && setLoading(false));
     return () => {
@@ -121,6 +139,10 @@ export function Remarcar({
               <Loader2 className="h-4 w-4 animate-spin" />
               Consultando a agenda…
             </p>
+          ) : aviso ? (
+            <p className="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-steel-400">
+              {aviso}
+            </p>
           ) : (
             <div className="grid grid-cols-4 gap-2">
               {slots.map((s) => (
@@ -142,7 +164,7 @@ export function Remarcar({
               ))}
             </div>
           )}
-          {!loading && slots.length > 0 && slots.every((s) => !s.available) && (
+          {!loading && !aviso && slots.length > 0 && slots.every((s) => !s.available) && (
             <p className="py-4 text-center text-sm text-steel-400">
               Nenhum horário livre nesse dia.
             </p>

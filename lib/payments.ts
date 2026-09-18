@@ -6,7 +6,7 @@
 // ───────────────────────────────────────────────────────────
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { payments, plans, subscriptions, users } from "@/db/schema";
+import { payments, planRequests, plans, subscriptions, users } from "@/db/schema";
 import {
   createPaymentLink,
   checkPayment,
@@ -165,6 +165,20 @@ export async function settlePayment(input: {
           canceledAt: null,
         })
         .where(eq(subscriptions.id, sub.id));
+
+      // O pedido que originou a cobrança está atendido. Sem fechar, ele
+      // seguia aparecendo como "aguardando" no painel e o dono, tentando
+      // ajudar, "ativava" de novo — recomeçando o ciclo de quem acabou
+      // de pagar.
+      await db
+        .update(planRequests)
+        .set({ status: "ATENDIDA" })
+        .where(
+          and(
+            eq(planRequests.userId, sub.userId),
+            eq(planRequests.status, "ABERTA")
+          )
+        );
     }
   }
 

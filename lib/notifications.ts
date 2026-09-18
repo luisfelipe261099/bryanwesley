@@ -129,7 +129,15 @@ export async function cancelPendingNotifications(appointmentId: number) {
       and(
         eq(notifications.appointmentId, appointmentId),
         eq(notifications.status, "PENDENTE"),
-        inArray(notifications.kind, ["LEMBRETE_24H", "LEMBRETE_2H"])
+        // A confirmação também cai. Ela é enfileirada na hora, mas só sai
+        // na próxima varredura: quem marcava e desmarcava em seguida
+        // recebia "seu horário está confirmado" de um horário que não
+        // existia mais — e, na remarcação, com a data errada.
+        inArray(notifications.kind, [
+          "AGENDAMENTO_CRIADO",
+          "LEMBRETE_24H",
+          "LEMBRETE_2H",
+        ])
       )
     );
 }
@@ -154,11 +162,22 @@ export async function markSent(id: number) {
     .where(eq(notifications.id, id));
 }
 
-export async function markFailed(id: number, error: string, attempts: number) {
+/**
+ * Falha de envio. `definitiva` é para o erro que não melhora tentando de
+ * novo (número inválido, template recusado): antes o chamador forçava
+ * `attempts = 99` para o mesmo efeito, e o painel passava a mostrar
+ * "100 tentativa(s)" numa mensagem tentada uma única vez.
+ */
+export async function markFailed(
+  id: number,
+  error: string,
+  attempts: number,
+  definitiva = false
+) {
   await db
     .update(notifications)
     .set({
-      status: attempts >= 4 ? "ERRO" : "PENDENTE",
+      status: definitiva || attempts >= 4 ? "ERRO" : "PENDENTE",
       error: error.slice(0, 500),
       attempts: attempts + 1,
     })
@@ -190,8 +209,22 @@ export async function notificationStats() {
     .from(notifications)
     .groupBy(notifications.status);
   const by = Object.fromEntries(rows.map((r) => [r.status, Number(r.total)]));
+
+  // "Na fila" inclui o lembrete que só sai amanhã; "prontas" é o que o
+  // botão "Enviar agora" realmente manda. Os dois números juntos eram um
+  // só, e o painel dizia "Enviar agora (7)" para responder "0 enviada(s)".
+  const [prontas] = await db
+    .select({ total: drizzleCount() })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.status, "PENDENTE"),
+        lte(notifications.scheduledFor, new Date())
+      )
+    );
   return {
     pendentes: by.PENDENTE ?? 0,
+    prontas: Number(prontas?.total ?? 0),
     enviadas: by.ENVIADA ?? 0,
     erros: by.ERRO ?? 0,
     canceladas: by.CANCELADA ?? 0,
