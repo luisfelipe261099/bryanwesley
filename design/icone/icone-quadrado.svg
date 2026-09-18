@@ -12,8 +12,8 @@
     <linearGradient id="brilho" x1="256" y1="88" x2="256" y2="424" gradientUnits="userSpaceOnUse">
       <stop stop-color="#FFFFFF" stop-opacity=".45"/><stop offset=".45" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient></defs>
-  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
-  <rect width="512" height="512" rx="116" fill="url(#glow)"/>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#glow)"/>
   <g>
     <path d="M256 88 404 173 404 339 256 424 108 339 108 173Z" fill="url(#el)" stroke="url(#el)" stroke-width="18" stroke-linejoin="round"/>
     <path d="M256 88 404 173 404 339 256 424 108 339 108 173Z" fill="none" stroke="url(#brilho)" stroke-width="10" stroke-linejoin="round"/>
