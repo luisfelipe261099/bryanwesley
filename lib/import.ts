@@ -61,8 +61,17 @@ export function planClientImport(csv: string): PlanoImportacao {
   // arquivo são a mesma pessoa cadastrada duas vezes, não duas pessoas.
   const pendentes = new Map<string, ClienteImportado>();
 
-  const emailDe = (raw: string) =>
-    raw.includes("@") ? raw.toLowerCase() : null;
+  // E-mail é único no banco: duas linhas do arquivo com o mesmo e-mail
+  // derrubavam o INSERT do lote inteiro e a importação parava no meio,
+  // com parte da base dentro. Só a primeira linha leva o e-mail.
+  const emailsVistos = new Set<string>();
+  const emailDe = (raw: string) => {
+    if (!raw.includes("@")) return null;
+    const email = raw.toLowerCase();
+    if (emailsVistos.has(email)) return null;
+    emailsVistos.add(email);
+    return email;
+  };
 
   corpo.forEach((cols, i) => {
     const linhaNum = i + (temCabecalho ? 2 : 1);

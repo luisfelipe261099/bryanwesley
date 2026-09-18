@@ -181,8 +181,12 @@ export async function recordCommission(appointmentId: number) {
     );
   }
 
-  const pct =
-    appt.barberPctSnapshot ?? (await resolveBarberPct(appt.barberId)).pct;
+  // A faixa é resolvida no fechamento, com o faturamento do mês em que o
+  // atendimento aconteceu. O percentual gravado na reserva vira piso: quem
+  // marcou em janeiro e foi atendido em março não recebe a faixa de
+  // janeiro, mas também nunca recebe menos do que foi combinado no dia.
+  const daFaixa = (await resolveBarberPct(appt.barberId, appt.startsAt)).pct;
+  const pct = Math.max(daFaixa, appt.barberPctSnapshot ?? 0);
   const split = splitCommission(baseCents, pct);
 
   // Índice único por atendimento: uma corrida aqui vira ER_DUP_ENTRY,

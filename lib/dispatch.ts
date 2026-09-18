@@ -67,10 +67,23 @@ export async function discardStaleNotifications(now = new Date()): Promise<numbe
     total += res.affectedRows;
   };
 
-  // Lembrete de 2h com mais de 90 min de atraso: o cliente já chegou (ou já foi).
-  await vencer(["LEMBRETE_2H"], new Date(now.getTime() - 90 * 60_000), "Vencida: lembrete de 2h atrasado demais");
   // Lembrete de 24h com mais de 12h de atraso: o de 2h cobre o que resta.
   await vencer(["LEMBRETE_24H"], new Date(now.getTime() - 12 * 3600_000), "Vencida: lembrete de 24h atrasado demais");
+
+  // O lembrete de 2h vale até a hora do atendimento. A regra antiga o
+  // matava com 90 minutos de atraso, e no plano Hobby a varredura do cron
+  // roda uma vez por dia: o lembrete nunca ficava "na hora" e era
+  // descartado sem nunca ter sido tentado. Atrasado ele ainda serve —
+  // depois que o horário começa, não serve mais.
+  const [resLembrete] = await db.execute(sql`
+    UPDATE notifications n
+    JOIN appointments a ON a.id = n.appointment_id
+    SET n.status = 'CANCELADA', n.error = 'Vencida: o horário já começou'
+    WHERE n.status = 'PENDENTE'
+      AND n.kind = 'LEMBRETE_2H'
+      AND a.starts_at < ${sqlDate(now)}
+  `);
+  total += Number((resLembrete as { affectedRows?: number }).affectedRows ?? 0);
 
   // Qualquer aviso de um horário que já começou há mais de 1h.
   const [res] = await db.execute(sql`

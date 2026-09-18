@@ -455,6 +455,11 @@ export const payments = mysqlTable(
       onDelete: "set null",
     }),
     kind: mysqlEnum("kind", PAYMENT_KINDS).notNull(),
+    // O que foi cobrado, congelado na hora da cobrança: entre gerar o link e
+    // o pagamento cair, o plano ou o ciclo da assinatura podem mudar, e a
+    // baixa tem que aplicar o que o cliente pagou, não o que está lá agora.
+    cycle: varchar("cycle", { length: 10 }),
+    planId: int("plan_id"),
     amountCents: int("amount_cents").notNull(),
     description: varchar("description", { length: 160 }).notNull(),
     status: mysqlEnum("status", PAYMENT_STATUSES).notNull().default("PENDENTE"),

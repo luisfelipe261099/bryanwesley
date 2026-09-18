@@ -90,11 +90,22 @@ export async function createBooking(input: CreateBookingInput) {
   const durationMin = chosen.reduce((acc, s) => acc + s.durationMin, 0);
   const phone = normalizePhone(input.clientPhone);
 
+  // De quem é este telefone. Antes o plano só era procurado quando havia
+  // sessão de cliente, então o encaixe feito pelo barbeiro e o próprio
+  // assinante deslogado saíam como avulso, com o preço cheio no WhatsApp e
+  // no faturamento. O telefone é a chave do cadastro: dá para saber sem
+  // sessão nenhuma.
+  let ownerId = input.userId ?? null;
+  if (!ownerId) {
+    const dono = await db.query.users.findFirst({ where: eq(users.phone, phone) });
+    if (dono) ownerId = dono.id;
+  }
+
   // Assinatura ativa cobre os serviços do plano — nesse caso não há cobrança.
-  const subscription = input.userId
+  const subscription = ownerId
     ? await db.query.subscriptions.findFirst({
         where: and(
-          eq(subscriptions.userId, input.userId),
+          eq(subscriptions.userId, ownerId),
           eq(subscriptions.status, "ATIVA")
         ),
       })
@@ -174,20 +185,13 @@ export async function createBooking(input: CreateBookingInput) {
 
   // Cliente sem conta vira um registro "leve": dá pra reconhecê-lo na
   // próxima visita e ele pode assumir a conta depois definindo senha.
-  let clientUserId = input.userId ?? null;
+  let clientUserId = ownerId;
   if (!clientUserId) {
-    const existing = await db.query.users.findFirst({
-      where: eq(users.phone, phone),
-    });
-    if (existing) {
-      clientUserId = existing.id;
-    } else {
-      const [{ id }] = await db
-        .insert(users)
-        .values({ name: input.clientName.trim(), phone, role: "CLIENT" })
-        .$returningId();
-      clientUserId = id;
-    }
+    const [{ id }] = await db
+      .insert(users)
+      .values({ name: input.clientName.trim(), phone, role: "CLIENT" })
+      .$returningId();
+    clientUserId = id;
   }
 
   // Percentual do barbeiro congelado agora: se a meta dele mudar depois,

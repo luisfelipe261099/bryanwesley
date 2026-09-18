@@ -85,13 +85,18 @@ export async function listPlans(
 }
 
 /** Barbeiros ativos com o usuário anexado. */
-export async function listTeam(): Promise<BarberWithUser[]> {
+export async function listTeam(
+  opts: { todos?: boolean } = {}
+): Promise<BarberWithUser[]> {
   const rows = await db
     .select({ barber: barbers, user: users })
     .from(barbers)
     .innerJoin(users, eq(users.id, barbers.userId))
-    .where(eq(barbers.active, true))
-    .orderBy(asc(barbers.sortOrder));
+    // `todos` é só para a tela de Equipe: desativar um barbeiro o fazia
+    // sumir de lá também, e não sobrava nenhum lugar para reativá-lo.
+    .where(opts.todos ? undefined : eq(barbers.active, true))
+    // Ativos primeiro; o desativado desce para o fim da lista.
+    .orderBy(desc(barbers.active), asc(barbers.sortOrder));
   return rows.map((r) => ({ ...r.barber, user: r.user }));
 }
 
@@ -565,10 +570,21 @@ export async function adminOverview() {
   const now = new Date();
   const { start, end } = dayBounds(shopToday());
 
-  const [hoje, mesCom, assinantes, planosAtivos] = await Promise.all([
+  const [hoje, hojeCom, mesCom, assinantes, planosAtivos] = await Promise.all([
     db
       .select({ status: appointments.status, totalCents: appointments.totalCents })
       .from(appointments)
+      .where(and(gte(appointments.startsAt, start), lt(appointments.startsAt, end))),
+    // Faturamento do dia pela base de comissão, igual ao mês: somando
+    // totalCents, o atendimento do assinante (que vale 0) sumia do dia e
+    // aparecia no mês.
+    db
+      .select({ base: sum(appointmentCommissions.baseCents) })
+      .from(appointmentCommissions)
+      .innerJoin(
+        appointments,
+        eq(appointments.id, appointmentCommissions.appointmentId)
+      )
       .where(and(gte(appointments.startsAt, start), lt(appointments.startsAt, end))),
     db
       .select({
@@ -585,17 +601,29 @@ export async function adminOverview() {
         )
       ),
     db
-      .select({ planId: subscriptions.planId })
+      .select({ planId: subscriptions.planId, cycle: subscriptions.cycle })
       .from(subscriptions)
       .where(eq(subscriptions.status, "ATIVA")),
-    db.select({ id: plans.id, priceCents: plans.priceCents }).from(plans),
+    db
+      .select({
+        id: plans.id,
+        priceCents: plans.priceCents,
+        annualPriceCents: plans.annualPriceCents,
+      })
+      .from(plans),
   ]);
 
-  const precoPorPlano = new Map(planosAtivos.map((p) => [p.id, p.priceCents]));
-  const mrrCents = assinantes.reduce(
-    (acc, s) => acc + (precoPorPlano.get(s.planId) ?? 0),
-    0
+  // Mesma conta da tela do Clube: o plano anual entra pelo valor por mês.
+  // Antes esta tela cobrava o preço mensal de todo mundo e os dois números
+  // divergiam para o mesmo assinante.
+  const precoPorPlano = new Map(
+    planosAtivos.map((p) => [p.id, { mensal: p.priceCents, anual: p.annualPriceCents }])
   );
+  const mrrCents = assinantes.reduce((acc, s) => {
+    const preco = precoPorPlano.get(s.planId);
+    if (!preco) return acc;
+    return acc + (s.cycle === "ANUAL" ? preco.anual : preco.mensal);
+  }, 0);
 
   const concluidosHoje = hoje.filter((a) => a.status === "CONCLUIDO");
   const ativosHoje = hoje.filter((a) =>
@@ -603,7 +631,7 @@ export async function adminOverview() {
   );
 
   return {
-    faturamentoHojeCents: concluidosHoje.reduce((a, r) => a + r.totalCents, 0),
+    faturamentoHojeCents: Number(hojeCom[0]?.base ?? 0),
     agendamentosHoje: ativosHoje.length,
     concluidosHoje: concluidosHoje.length,
     mrrCents,
@@ -614,30 +642,44 @@ export async function adminOverview() {
   };
 }
 
-/** Faturamento por dia nos últimos 7 dias (mini-gráfico). */
+/**
+ * Faturamento por dia nos últimos 7 dias (mini-gráfico).
+ *
+ * Base de comissão, igual ao "mês corrente": o atendimento de assinante tem
+ * totalCents = 0 (o membro já pagou no plano), então somar totalCents fazia
+ * um dia cheio de membros aparecer como R$ 0,00 no gráfico enquanto o mês
+ * contava o serviço. Vale também o número de atendimentos, para a tela
+ * saber a diferença entre "dia vazio" e "dia sem cobrança avulsa".
+ */
 export async function weeklyRevenue() {
-  const out: { day: string; dateKey: string; cents: number }[] = [];
+  const out: { day: string; dateKey: string; cents: number; atendimentos: number }[] = [];
   for (let i = 6; i >= 0; i--) {
     const dateKey = addDaysKey(shopToday(), -i);
     const { start, end } = dayBounds(dateKey);
     const [row] = await db
-      .select({ total: sum(appointments.totalCents) })
-      .from(appointments)
-      .where(
-        and(
-          gte(appointments.startsAt, start),
-          lt(appointments.startsAt, end),
-          eq(appointments.status, "CONCLUIDO")
-        )
-      );
-    out.push({ day: weekdayLabel(dateKey), dateKey, cents: Number(row?.total ?? 0) });
+      .select({
+        total: sum(appointmentCommissions.baseCents),
+        n: sql<number>`count(*)`,
+      })
+      .from(appointmentCommissions)
+      .innerJoin(
+        appointments,
+        eq(appointments.id, appointmentCommissions.appointmentId)
+      )
+      .where(and(gte(appointments.startsAt, start), lt(appointments.startsAt, end)));
+    out.push({
+      day: weekdayLabel(dateKey),
+      dateKey,
+      cents: Number(row?.total ?? 0),
+      atendimentos: Number(row?.n ?? 0),
+    });
   }
   return out;
 }
 
 /** Desempenho da equipe no mês. */
-export async function teamPerformance() {
-  const team = await listTeam();
+export async function teamPerformance(opts: { todos?: boolean } = {}) {
+  const team = await listTeam(opts);
   return Promise.all(
     team.map(async (b) => ({ barber: b, ...(await barberMonthSummary(b.id)) }))
   );

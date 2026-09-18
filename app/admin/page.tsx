@@ -311,7 +311,7 @@ export default async function AdminDashboard({
               </div>
               {/* Semana inteira zerada vira uma frase: o gráfico vazio era
                   um bloco de 160px de nada no meio da tela. */}
-              {totalSemana === 0 ? (
+              {semana.every((d) => d.atendimentos === 0) ? (
                 <p className="mt-4 rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-steel-400">
                   Nenhum atendimento concluído nos últimos 7 dias.
                 </p>

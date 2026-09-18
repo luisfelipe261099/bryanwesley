@@ -12,6 +12,7 @@ import {
   appointments,
   recurringSlots,
   services as servicesTable,
+  subscriptions,
   users,
 } from "@/db/schema";
 import { createBooking, BookingError } from "./appointments";
@@ -88,6 +89,18 @@ export async function materializeRecurring(
       where: eq(users.id, slot.userId),
     });
     if (!user) continue;
+
+    // Horário fixo é benefício de membro. Sem plano ativo (cancelou ou
+    // venceu), a varredura para de reservar novas semanas — a cadeira volta
+    // a ser vendável. O fixo não é apagado: se a pessoa acertar o plano,
+    // ele volta a materializar sozinho.
+    const plano = await db.query.subscriptions.findFirst({
+      where: and(
+        eq(subscriptions.userId, slot.userId),
+        eq(subscriptions.status, "ATIVA")
+      ),
+    });
+    if (!plano) continue;
 
     const ids = slot.serviceIds ?? [];
     if (ids.length === 0) continue;

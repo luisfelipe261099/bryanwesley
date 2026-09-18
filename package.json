@@ -15,9 +15,10 @@
     "test:seguranca": "tsx scripts/test-seguranca.ts",
     "test:despacho": "tsx scripts/test-despacho.ts",
     "test:import": "tsx scripts/test-import.ts",
-    "test": "tsx scripts/test-agenda.ts && tsx scripts/test-fixo.ts && tsx scripts/test-seguranca.ts && tsx scripts/test-despacho.ts && tsx scripts/test-import.ts && tsx scripts/test-clientes.ts && tsx scripts/test-clube.ts",
+    "test": "tsx scripts/test-agenda.ts && tsx scripts/test-fixo.ts && tsx scripts/test-seguranca.ts && tsx scripts/test-despacho.ts && tsx scripts/test-import.ts && tsx scripts/test-clientes.ts && tsx scripts/test-clube.ts && tsx scripts/test-auditoria.ts",
     "test:clientes": "tsx scripts/test-clientes.ts",
-    "test:clube": "tsx scripts/test-clube.ts"
+    "test:clube": "tsx scripts/test-clube.ts",
+    "test:auditoria": "tsx scripts/test-auditoria.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

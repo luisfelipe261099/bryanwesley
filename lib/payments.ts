@@ -43,6 +43,14 @@ export async function chargeSubscription(
     orderBy: (s, { desc }) => [desc(s.startedAt)],
   });
   if (!sub) return { ok: false, error: "Cliente sem assinatura." };
+  // Assinatura cancelada não se cobra: o pagamento ressuscitaria um plano
+  // que o cliente (ou a barbearia) encerrou. Ative de novo antes de cobrar.
+  if (sub.status === "CANCELADA") {
+    return {
+      ok: false,
+      error: "Esse plano está cancelado. Ative de novo antes de gerar a cobrança.",
+    };
+  }
 
   const [plan, user] = await Promise.all([
     db.query.plans.findFirst({ where: eq(plans.id, sub.planId) }),
@@ -76,6 +84,8 @@ export async function chargeSubscription(
     userId,
     subscriptionId: sub.id,
     kind: "ASSINATURA",
+    cycle,
+    planId: plan.id,
     amountCents,
     description: `${plan.name} · ${cycle.toLowerCase()}`,
     checkoutUrl: link.url,
@@ -137,11 +147,21 @@ export async function settlePayment(input: {
       where: eq(subscriptions.id, payment.subscriptionId),
     });
     if (sub) {
+      // Vale o que foi cobrado, não o que está na assinatura agora: quem
+      // pagou 12 meses tem que ganhar 12 meses, mesmo que a linha tenha
+      // sido mexida no meio do caminho.
+      const cicloPago = (payment.cycle as "MENSAL" | "ANUAL" | null) ?? sub.cycle;
+      // Renovação de quem está em dia continua do vencimento; quem estava
+      // vencido (ou entrando agora) começa a contar de hoje, senão o ciclo
+      // pago já nasceria consumido.
+      const base = sub.status === "ATIVA" && sub.renewsAt > new Date() ? sub.renewsAt : new Date();
       await db
         .update(subscriptions)
         .set({
           status: "ATIVA",
-          renewsAt: nextRenewal(sub.renewsAt, sub.cycle),
+          planId: payment.planId ?? sub.planId,
+          cycle: cicloPago,
+          renewsAt: nextRenewal(base, cicloPago),
           canceledAt: null,
         })
         .where(eq(subscriptions.id, sub.id));

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointments,
@@ -94,25 +94,38 @@ export async function saveRecurringSlot(input: {
     return { ok: false, error: "Escolha ao menos um serviço." };
   }
 
-  // Um fixo por membro: salvar substitui o anterior — e as semanas que o
-  // anterior já tinha garantido na agenda saem junto, senão o membro fica
-  // com dois horários fixos ocupando a agenda do barbeiro.
+  // Um fixo por membro: salvar substitui o anterior. Mas o anterior só sai
+  // depois que o novo estiver garantido — antes o sistema desligava o fixo
+  // antigo e cancelava as semanas já reservadas ANTES de saber se o novo
+  // horário cabia, e o membro que tentasse um horário ocupado terminava
+  // sem fixo nenhum e sem os agendamentos que já tinha.
   const antigos = await db
-    .select({ id: recurringSlots.id })
+    .select()
     .from(recurringSlots)
     .where(
       and(eq(recurringSlots.userId, session.id), eq(recurringSlots.active, true))
     );
-  await db
-    .update(recurringSlots)
-    .set({ active: false })
-    .where(
-      and(
-        eq(recurringSlots.userId, session.id),
-        eq(recurringSlots.active, true)
-      )
-    );
-  await cancelFutureOccurrences(antigos.map((a) => a.id));
+
+  // Mesmo dia, mesma hora, mesmo barbeiro: é o fixo que ele já tem, só com
+  // outros serviços. Recriar aqui faria as próprias semanas dele
+  // aparecerem como "horário ocupado".
+  const mesmoHorario = antigos.find(
+    (a) =>
+      a.barberId === input.barberId &&
+      a.frequency === input.frequency &&
+      a.minutesOfDay === input.minutesOfDay &&
+      (input.frequency === "SEMANAL"
+        ? a.weekday === input.weekday
+        : a.dayOfMonth === input.dayOfMonth)
+  );
+  if (mesmoHorario) {
+    await db
+      .update(recurringSlots)
+      .set({ serviceIds: input.serviceIds })
+      .where(eq(recurringSlots.id, mesmoHorario.id));
+    revalidatePath("/cliente");
+    return { ok: true };
+  }
 
   const [{ id: novoId }] = await db.insert(recurringSlots).values({
     userId: session.id,
@@ -126,28 +139,38 @@ export async function saveRecurringSlot(input: {
   }).$returningId();
 
   // Já deixa os próximos horários garantidos na agenda — só deste fixo.
+  // Com o fixo antigo ainda de pé, o horário dele aparece ocupado: as
+  // ocorrências do próprio membro não contam como conflito.
+  const idsAntigos = antigos.map((a) => a.id);
   const report = await materializeRecurring({ slotId: novoId });
+
+  if (report.criados === 0 && report.conflitos.length > 0) {
+    // Nenhuma data coube: descarta só o fixo NOVO e devolve o membro ao
+    // estado em que ele estava — com o fixo antigo e as semanas dele.
+    await db
+      .update(recurringSlots)
+      .set({ active: false })
+      .where(eq(recurringSlots.id, novoId));
+    revalidatePath("/cliente");
+    return {
+      ok: false,
+      error: `Esse horário não está livre: ${report.conflitos[0].motivo} Escolha outro. Seu horário fixo atual continua valendo.`,
+    };
+  }
+
+  // Deu certo: agora sim o antigo sai e devolve as semanas dele à agenda.
+  if (idsAntigos.length > 0) {
+    await db
+      .update(recurringSlots)
+      .set({ active: false })
+      .where(inArray(recurringSlots.id, idsAntigos));
+    await cancelFutureOccurrences(idsAntigos);
+  }
 
   revalidatePath("/cliente");
   revalidatePath("/barbeiro");
   revalidatePath("/admin");
 
-  if (report.criados === 0 && report.conflitos.length > 0) {
-    // Nenhuma data coube: não deixa um fixo "fantasma" ativo.
-    await db
-      .update(recurringSlots)
-      .set({ active: false })
-      .where(
-        and(
-          eq(recurringSlots.userId, session.id),
-          eq(recurringSlots.active, true)
-        )
-      );
-    return {
-      ok: false,
-      error: `Esse horário não está livre: ${report.conflitos[0].motivo} Escolha outro.`,
-    };
-  }
   if (report.conflitos.length > 0) {
     // Parte das semanas coube, parte não: o membro precisa saber quais
     // datas ficaram de fora em vez de achar que está tudo reservado.
@@ -298,13 +321,21 @@ export async function requestPlan(input: {
     };
   }
 
+  // Pedido em aberto do mesmo cliente é atualizado, não ignorado: antes,
+  // quem pedia Silver e depois voltava para pedir Gold recebia "pedido
+  // registrado" e a barbearia ativava o Silver do primeiro pedido.
   const aberta = await db.query.planRequests.findFirst({
     where: and(
       eq(planRequests.userId, session.id),
       eq(planRequests.status, "ABERTA")
     ),
   });
-  if (!aberta) {
+  if (aberta) {
+    await db
+      .update(planRequests)
+      .set({ planId: plan.id, cycle: input.cycle })
+      .where(eq(planRequests.id, aberta.id));
+  } else {
     await db.insert(planRequests).values({
       userId: session.id,
       planId: plan.id,
@@ -315,11 +346,26 @@ export async function requestPlan(input: {
   if (isInfinitePayConfigured()) {
     // Cria a assinatura inadimplente e cobra o primeiro ciclo: o webhook
     // ativa quando o pagamento cair.
+    // Quem já teve assinatura tem uma linha antiga guardada. Ela precisa
+    // receber o plano e o ciclo escolhidos agora: a cobrança e a baixa do
+    // pagamento leem justamente essa linha, então sem isto o cliente pedia
+    // Gold anual e recebia o link — e o plano — do Silver mensal antigo.
     const existente = await db.query.subscriptions.findFirst({
       where: eq(subscriptions.userId, session.id),
       orderBy: (s, { desc }) => [desc(s.startedAt)],
     });
-    if (!existente) {
+    if (existente) {
+      await db
+        .update(subscriptions)
+        .set({
+          planId: plan.id,
+          cycle: input.cycle,
+          status: "INADIMPLENTE",
+          renewsAt: new Date(),
+          canceledAt: null,
+        })
+        .where(eq(subscriptions.id, existente.id));
+    } else {
       await db.insert(subscriptions).values({
         userId: session.id,
         planId: plan.id,

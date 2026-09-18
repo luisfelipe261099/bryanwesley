@@ -2,7 +2,7 @@
 // controle de fluxo do Next pelos helpers de ação.
 import "../db/load-env";
 import { db, pool } from "../db/client";
-import { settings, notifications } from "../db/schema";
+import { appointments, settings, notifications } from "../db/schema";
 import {
   claimDispatchSlot,
   runDispatch,
@@ -15,7 +15,7 @@ import { sessionMatchesAccount } from "../lib/auth/session";
 import { isNextControlFlow, dbErrorCode } from "../lib/errors";
 import { BookingError } from "../lib/appointments";
 import { labelAgo } from "../lib/time";
-import { eq, inArray } from "drizzle-orm";
+import { eq, gt, inArray } from "drizzle-orm";
 
 let p = 0, f = 0;
 const ok = (l: string, c: boolean, e = "") =>
@@ -87,14 +87,21 @@ async function main() {
 
   console.log("\n2b. Mensagem vencida é descartada, a válida fica");
   {
-    const appt = await db.query.appointments.findFirst();
+    // Um agendamento ainda por vir: a regra do lembrete de 2h olha a hora
+    // do atendimento, não o atraso da mensagem.
+    const appt =
+      (await db.query.appointments.findFirst({
+        where: gt(appointments.startsAt, new Date()),
+      })) ?? (await db.query.appointments.findFirst());
     if (!appt) {
       ok("há agendamento para ancorar a notificação", false);
     } else {
       const agora = Date.now();
+      // 24h é o lembrete que vence por atraso (o de 2h só vence quando o
+      // horário começa — atrasado ele ainda avisa a pessoa a tempo).
       const [{ id: velha }] = await db.insert(notifications).values({
-        appointmentId: appt.id, phone: "11900000000", kind: "LEMBRETE_2H",
-        body: "teste vencida", scheduledFor: new Date(agora - 3 * 3600_000),
+        appointmentId: appt.id, phone: "11900000000", kind: "LEMBRETE_24H",
+        body: "teste vencida", scheduledFor: new Date(agora - 20 * 3600_000),
       }).$returningId();
       const [{ id: nova }] = await db.insert(notifications).values({
         appointmentId: appt.id, phone: "11900000000", kind: "LEMBRETE_2H",
@@ -103,8 +110,8 @@ async function main() {
       const n = await discardStaleNotifications();
       const v = await db.query.notifications.findFirst({ where: eq(notifications.id, velha) });
       const w = await db.query.notifications.findFirst({ where: eq(notifications.id, nova) });
-      ok("lembrete de 2h com 3h de atraso vira CANCELADA com motivo", v?.status === "CANCELADA" && /Vencida/.test(v.error ?? ""), v?.status);
-      ok("lembrete de 2h com 5 min de atraso continua PENDENTE", w?.status === "PENDENTE", w?.status);
+      ok("lembrete de 24h com 20h de atraso vira CANCELADA com motivo", v?.status === "CANCELADA" && /Vencida/.test(v.error ?? ""), v?.status);
+      ok("lembrete de 2h atrasado continua PENDENTE até a hora do atendimento", w?.status === "PENDENTE", w?.status);
       ok("contagem de descartadas ≥ 1", n >= 1, String(n));
       await db.delete(notifications).where(inArray(notifications.id, [velha, nova]));
     }

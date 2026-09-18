@@ -25,7 +25,7 @@ import {
   sessionCookieOptions,
 } from "@/lib/auth/session";
 import { cancelFutureOccurrences } from "@/lib/recurring";
-import { isNextControlFlow } from "@/lib/errors";
+import { isNextControlFlow, dbErrorMessage } from "@/lib/errors";
 import { hashPassword } from "@/lib/auth/password";
 import {
   createBooking,
@@ -41,6 +41,7 @@ import {
   discardNotification as discardNotificationRow,
 } from "@/lib/notifications";
 import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
+import { claimDispatchSlot, runDispatch } from "@/lib/dispatch";
 import { chargeSubscription } from "@/lib/payments";
 import { shopTimeToUtc, parseDateKey } from "@/lib/time";
 import { normalizePhone, isValidPhone, nextPlaceholderPhone, isPlaceholderPhone } from "@/lib/phone";
@@ -698,13 +699,17 @@ export async function subscribeClient(input: {
     await admin();
     const renewsAt = nextRenewal(new Date(), input.cycle);
 
+    // Encerra o que estiver em aberto — ativa OU vencida. Só a ativa era
+    // encerrada, então trocar o plano de quem estava devendo deixava duas
+    // assinaturas de pé: a nova valendo e a velha inflando "planos
+    // vencidos" e a receita do mês.
     await db
       .update(subscriptions)
       .set({ status: "CANCELADA", canceledAt: new Date() })
       .where(
         and(
           eq(subscriptions.userId, input.userId),
-          eq(subscriptions.status, "ATIVA")
+          inArray(subscriptions.status, ["ATIVA", "INADIMPLENTE"])
         )
       );
 
@@ -785,16 +790,61 @@ export async function resetUserPassword(input: {
 export async function cancelSubscription(userId: number): Promise<Result> {
   try {
     await admin();
+    // Vencida também é cancelável: antes o botão não fazia nada para quem
+    // estava devendo, e a assinatura ficava pendurada para sempre.
+    const alvos = await db
+      .select({ id: subscriptions.id })
+      .from(subscriptions)
+      .where(
+        and(
+          eq(subscriptions.userId, userId),
+          inArray(subscriptions.status, ["ATIVA", "INADIMPLENTE"])
+        )
+      );
+    if (alvos.length === 0) {
+      return { ok: false, error: "Esse cliente não tem plano em aberto." };
+    }
     await db
       .update(subscriptions)
       .set({ status: "CANCELADA", canceledAt: new Date() })
       .where(
-        and(eq(subscriptions.userId, userId), eq(subscriptions.status, "ATIVA"))
+        inArray(
+          subscriptions.id,
+          alvos.map((a) => a.id)
+        )
       );
-    return done("Assinatura cancelada.");
+
+    // O horário fixo é benefício de membro: sem plano, a cadeira volta para
+    // a agenda. Sem isto o ex-membro seguia ocupando o mesmo horário toda
+    // semana e o barbeiro não conseguia vender aquele espaço.
+    const liberados = await liberarFixosDe([userId]);
+    return done(
+      liberados > 0
+        ? `Assinatura cancelada. O horário fixo foi liberado (${liberados} horário(s) futuro(s)).`
+        : "Assinatura cancelada."
+    );
   } catch (e) {
     return fail(e);
   }
+}
+
+/**
+ * Desliga os horários fixos de quem deixou de ser membro e devolve as
+ * semanas já reservadas para a agenda. Devolve quantos horários futuros
+ * foram liberados.
+ */
+export async function liberarFixosDe(userIds: number[]): Promise<number> {
+  if (userIds.length === 0) return 0;
+  const ativos = await db
+    .select({ id: recurringSlots.id })
+    .from(recurringSlots)
+    .where(
+      and(inArray(recurringSlots.userId, userIds), eq(recurringSlots.active, true))
+    );
+  if (ativos.length === 0) return 0;
+  const ids = ativos.map((a) => a.id);
+  await db.update(recurringSlots).set({ active: false }).where(inArray(recurringSlots.id, ids));
+  return cancelFutureOccurrences(ids);
 }
 
 /**
@@ -863,6 +913,7 @@ export async function importClients(csv: string): Promise<ImportResult> {
     const nomesPendentes = new Set(jaPendentes.map((u) => chaveNome(u.name)));
 
     const novos: { name: string; phone: string; email: string | null }[] = [];
+    let naoEntraram = 0;
     const atualizar: { id: number; name: string; email: string | null }[] = [];
 
     for (const c of candidatos) {
@@ -900,15 +951,37 @@ export async function importClients(csv: string): Promise<ImportResult> {
       }
     }
 
+    // Um lote que quebra não pode derrubar a importação inteira: o que já
+    // entrou fica, e o que caiu vira aviso com nome e motivo. Em cima de
+    // novecentas linhas, uma linha estranha não pode custar a base toda.
     for (const lote of chunk(novos, LOTE)) {
-      await db.insert(users).values(
-        lote.map((n) => ({
-          name: n.name,
-          phone: n.phone,
-          email: n.email,
-          role: "CLIENT" as const,
-        }))
-      );
+      try {
+        await db.insert(users).values(
+          lote.map((n) => ({
+            name: n.name,
+            phone: n.phone,
+            email: n.email,
+            role: "CLIENT" as const,
+          }))
+        );
+      } catch {
+        // Cai para linha a linha só neste lote, para isolar a que falhou.
+        for (const n of lote) {
+          try {
+            await db.insert(users).values({
+              name: n.name,
+              phone: n.phone,
+              email: n.email,
+              role: "CLIENT" as const,
+            });
+          } catch (e) {
+            skipped.push(
+              `${n.name} — não entrou (${dbErrorMessage(e) ?? "erro no banco"})`
+            );
+            naoEntraram++;
+          }
+        }
+      }
     }
     for (const u of atualizar) {
       await db
@@ -917,14 +990,15 @@ export async function importClients(csv: string): Promise<ImportResult> {
         .where(eq(users.id, u.id));
     }
 
+    const criados = novos.length - naoEntraram;
     const pendentes = novos.filter((n) => isPlaceholderPhone(n.phone)).length;
-    const partes = [`${novos.length} cliente(s) novo(s)`];
+    const partes = [`${criados} cliente(s) novo(s)`];
     if (atualizar.length) partes.push(`${atualizar.length} atualizado(s)`);
     if (pendentes) partes.push(`${pendentes} sem telefone, para completar`);
     if (skipped.length) partes.push(`${skipped.length} aviso(s)`);
     return {
       ...done(partes.join(", ") + "."),
-      criados: novos.length,
+      criados,
       atualizados: atualizar.length,
       skipped,
     };
@@ -984,27 +1058,36 @@ export async function discardNotification(id: number): Promise<Result> {
 }
 
 /** Dispara a fila na hora, sem esperar o cron. */
+/**
+ * "Enviar agora" da tela de mensagens.
+ *
+ * Passa pela mesma trava da varredura automática: o laço próprio daqui
+ * mandava a mesma mensagem duas vezes quando o heartbeat de outra aba
+ * entregava ao mesmo tempo. A janela é curta (5s) só para excluir a
+ * corrida — com os 10 minutos da varredura, o botão viraria um nada.
+ */
 export async function flushNotifications(): Promise<Result> {
   try {
     await admin();
-    const fila = await pendingNotifications(50);
     if (!isWhatsappConfigured()) {
+      const fila = await pendingNotifications(50);
       return {
         ok: false,
         error: `WhatsApp não configurado. ${fila.length} mensagem(ns) aguardando na fila.`,
       };
     }
-    let enviadas = 0;
-    for (const n of fila) {
-      const res = await sendWhatsapp(n.phone, n.body);
-      if (res.sent) {
-        await markSent(n.id);
-        enviadas++;
-      } else {
-        await markFailed(n.id, res.reason, res.retryable ? n.attempts : 99);
-      }
+    const vez = await claimDispatchSlot(5_000);
+    if (!vez) {
+      return {
+        ok: false,
+        error: "Uma varredura já está rodando agora. Tente de novo em alguns segundos.",
+      };
     }
-    return done(`${enviadas} mensagem(ns) enviada(s).`);
+    const r = await runDispatch(50);
+    const partes = [`${r.enviadas} mensagem(ns) enviada(s)`];
+    if (r.falhas) partes.push(`${r.falhas} falha(s)`);
+    if (r.descartadas) partes.push(`${r.descartadas} vencida(s) descartada(s)`);
+    return done(partes.join(" · ") + ".");
   } catch (e) {
     return fail(e);
   }

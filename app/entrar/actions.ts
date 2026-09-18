@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, or, sql as rawSql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
 import { users, barbers, appointments, subscriptions } from "@/db/schema";
@@ -163,11 +163,14 @@ export async function signup(
     // Se esse telefone já tem agendamento, quem assume a conta precisa
     // provar que é o dono: informar o código de um deles. Sem isso,
     // qualquer pessoa com o número veria os horários de outra.
-    const owned = await db.query.appointments.findMany({
-      where: eq(appointments.clientPhone, phone),
-      columns: { code: true },
-      limit: 50,
-    });
+    // Tem algum agendamento neste telefone? (Só a existência: listar os 50
+    // primeiros deixava o cliente antigo, com mais de 50 visitas, sem
+    // conseguir provar nada — o código dele nunca estava na fatia.)
+    const [{ n: quantos }] = await db
+      .select({ n: rawSql<number>`count(*)` })
+      .from(appointments)
+      .where(eq(appointments.clientPhone, phone));
+    const temHistorico = Number(quantos) > 0;
     // Conta de assinante não se reivindica sozinha. O código prova pouco:
     // quem souber o WhatsApp da pessoa consegue agendar em nome dela e
     // ficar com o código daquele agendamento. Como assinatura vale dinheiro
@@ -185,9 +188,16 @@ export async function signup(
       };
     }
 
-    if (owned.length > 0) {
+    if (temHistorico) {
       if (!code) return { needsCode: true };
-      if (!owned.some((a) => a.code === code)) {
+      const confere = await db.query.appointments.findFirst({
+        where: and(
+          eq(appointments.clientPhone, phone),
+          eq(appointments.code, code.trim().toUpperCase())
+        ),
+        columns: { id: true },
+      });
+      if (!confere) {
         // Mantém o campo visível junto do erro, senão ele some da tela.
         return {
           needsCode: true,
@@ -195,6 +205,16 @@ export async function signup(
             "Código não confere. Ele está na confirmação do seu agendamento.",
         };
       }
+    } else {
+      // Cadastro que veio do sistema antigo: tem nome e telefone reais, mas
+      // nenhum agendamento aqui para servir de prova. Deixar qualquer um
+      // criar senha nele entregaria o cadastro de 890 clientes a quem
+      // souber o número — e trancaria o dono de fora, porque o segundo a
+      // tentar ouve "já existe uma conta com esse WhatsApp".
+      return {
+        error:
+          "Esse WhatsApp já está cadastrado na barbearia. Peça no balcão para liberarem o seu acesso, ou marque um horário e use o código da confirmação para criar a senha.",
+      };
     }
     await db
       .update(users)

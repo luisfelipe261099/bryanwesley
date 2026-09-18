@@ -96,7 +96,14 @@ function BarberCard({ barber }: { barber: BarberRow }) {
   }
 
   return (
-    <Card title={barber.name} desc={`${barber.atendimentos} atendimento(s) no mês`}>
+    <Card
+      title={barber.active ? barber.name : `${barber.name} · desativado`}
+      desc={
+        barber.active
+          ? `${barber.atendimentos} atendimento(s) no mês`
+          : "Não aparece para os clientes. Ligue \u201cAtivo na agenda\u201d e salve para trazer de volta."
+      }
+    >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <TextInput
           label="Nome curto"

@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminEquipe() {
   const [perf, hours, tiers] = await Promise.all([
-    teamPerformance(),
+    // Inclui desativados: é aqui que o dono reativa alguém.
+    teamPerformance({ todos: true }),
     db.select().from(barberHours),
     db.select().from(commissionTiers).orderBy(asc(commissionTiers.minRevenueCents)),
   ]);
