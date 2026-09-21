@@ -59,6 +59,7 @@ function done(message?: string): Result {
   for (const p of [
     "/admin",
     "/admin/agenda",
+    "/admin/ajustes",
     "/admin/equipe",
     "/admin/catalogo",
     "/admin/clientes",

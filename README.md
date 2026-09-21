@@ -41,7 +41,8 @@ Utilitários em [`app/globals.css`](app/globals.css): `.glass`, `.btn-royal`,
 | `/barbeiro` | `BARBER` | Agenda do dia, comissão, check-in, iniciar/finalizar |
 | `/barbeiro/checkin/[token]` | `BARBER` | Destino do QR lido pela câmera |
 | `/admin` | `ADMIN` | KPIs, agenda navegável por dia e barbeiro, pedidos de plano |
-| `/admin/agenda` | `ADMIN` | Dados da barbearia, regras da agenda e bloqueios |
+| `/admin/agenda` | `ADMIN` | **A agenda**: dia, semana e o que está por vir; filtros por barbeiro e situação, busca por cliente, remarcar e dar baixa |
+| `/admin/ajustes` | `ADMIN` | Dados da barbearia, regras da agenda e bloqueios |
 | `/admin/equipe` | `ADMIN` | Barbeiros, jornada própria, metas e faixas de comissão |
 | `/admin/catalogo` | `ADMIN` | Serviços e planos de assinatura |
 | `/admin/clube` | `ADMIN` | Clube VIP: preços dos planos, receita recorrente e membros |
@@ -215,7 +216,7 @@ npm run test:auditoria2   # 46 — preço com ponto, redirect com caractere de c
                           #      confirmação derrubada no cancelamento e freio da agenda
 ```
 
-Há ainda um roteiro de navegador (Playwright) com 245 verificações de ponta a
+Há ainda um roteiro de navegador (Playwright) com 276 verificações de ponta a
 ponta: agendamento de visitante, login, todas as telas do admin, check-in por
 código, endpoint do cron protegido, tomada de conta com prova por código, nav
 por papel, troca de senha, assinatura pelo site, remarcação, relatórios,
@@ -231,7 +232,10 @@ criar plano, desativar e reativar, filtrar os membros, registrar renovação
 e trocar o plano de um membro. A última parte cobre o painel do membro
 (cancelar o plano para o fim do ciclo e voltar atrás), o horário fixo preso
 à grade da agenda, a fila de mensagens separando "na fila" de "prontas para
-enviar" e a ocupação do dia com a capacidade real.
+enviar" e a ocupação do dia com a capacidade real. Uma parte cobre a agenda
+do painel: a lista do dia agrupada por período, a semana e o que está por
+vir, os filtros por barbeiro e situação, a busca por cliente, a contagem de
+cada dia na tira e a remarcação feita pelo balcão.
 
 Uma parte do roteiro cuida só do celular: em 320, 360 e 390 pixels, nenhuma
 tela pode ter rolagem lateral nem conteúdo cortado fora de um trilho que

@@ -168,6 +168,13 @@ export default async function AdminDashboard({
               <h2 className="font-display text-lg text-white">
                 {dateKey === today ? "Agenda de hoje" : "Agenda"}
               </h2>
+              <Link
+                href="/admin/agenda"
+                className="label inline-flex items-center gap-1.5 text-electric transition-colors hover:text-white"
+              >
+                Ver agenda completa
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </Link>
               {/* Dois pedaços: no celular a linha quebra entre a data e o
                   horário, em vez de partir "09:00—20:00" no meio. */}
               <span className="label flex flex-wrap gap-x-2 capitalize text-steel-400">

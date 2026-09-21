@@ -35,6 +35,7 @@ import {
   shopToday,
   addDays as addDaysKey,
   labelWeekday as weekdayLabel,
+  utcToShopParts,
 } from "./time";
 import { monthStart, nextMonthStart } from "./commissions";
 
@@ -143,6 +144,175 @@ export async function attachDetails(
     barber: byBarber.get(a.barberId)!,
     items: items.filter((i) => i.appointmentId === a.id),
   }));
+}
+
+// ───────────────────────── Agenda do painel ─────────────────────────
+//
+// A tela da agenda do dono (app/admin/agenda) lê tudo por aqui: o dia, a
+// semana e a lista do que ainda está por vir. Uma consulta só, com os
+// mesmos filtros, para os números do topo baterem com a lista de baixo.
+
+/** Recortes por situação, como aparecem nos chips da tela. */
+export type RecorteAgenda = "tudo" | "ativos" | "concluidos" | "cancelados";
+
+export type FiltroAgenda = {
+  /** Instante inicial (inclusivo). */
+  de: Date;
+  /** Instante final (exclusivo). */
+  ate: Date;
+  barberId?: number | null;
+  recorte?: RecorteAgenda;
+  /** Nome ou telefone do cliente. */
+  busca?: string;
+  limit?: number;
+  offset?: number;
+};
+
+/** O que ainda vai acontecer: é o que o balcão precisa ver primeiro. */
+const AGENDA_ATIVOS = ["PENDENTE", "CONFIRMADO", "EM_ANDAMENTO"] as const;
+
+function condicaoAgenda(f: FiltroAgenda) {
+  const partes = [
+    gte(appointments.startsAt, f.de),
+    lt(appointments.startsAt, f.ate),
+  ];
+  if (f.barberId) partes.push(eq(appointments.barberId, f.barberId));
+  if (f.recorte === "ativos") {
+    partes.push(inArray(appointments.status, [...AGENDA_ATIVOS]));
+  } else if (f.recorte === "concluidos") {
+    partes.push(eq(appointments.status, "CONCLUIDO"));
+  } else if (f.recorte === "cancelados") {
+    partes.push(inArray(appointments.status, ["CANCELADO", "NO_SHOW"]));
+  }
+
+  const termo = (f.busca ?? "").trim();
+  if (termo) {
+    const digitos = termo.replace(/\D/g, "");
+    const porNome = like(appointments.clientName, `%${termo}%`);
+    // Só procura por telefone quando o que foi digitado tem número: com
+    // "%%" o filtro casaria com todo mundo e a busca por nome não valeria
+    // de nada.
+    partes.push(
+      digitos
+        ? or(porNome, like(appointments.clientPhone, `%${digitos}%`))!
+        : porNome
+    );
+  }
+  return and(...partes);
+}
+
+/** Os agendamentos do período, em ordem de horário. */
+export async function agendaDoPeriodo(f: FiltroAgenda) {
+  const rows = await db
+    .select()
+    .from(appointments)
+    .where(condicaoAgenda(f))
+    .orderBy(asc(appointments.startsAt), asc(appointments.id))
+    .limit(f.limit ?? 400)
+    .offset(f.offset ?? 0);
+  return attachDetails(rows);
+}
+
+export async function contarAgenda(f: FiltroAgenda) {
+  const [row] = await db
+    .select({ n: count() })
+    .from(appointments)
+    .where(condicaoAgenda(f));
+  return Number(row?.n ?? 0);
+}
+
+export type ResumoAgenda = {
+  total: number;
+  porStatus: Record<string, number>;
+  ativos: number;
+  concluidos: number;
+  cancelados: number;
+  /** Quanto o dia (ou o período) deve render, sem contar o que caiu. */
+  previstoCents: number;
+  /** Minutos de cadeira ocupados, para a conta de ocupação. */
+  minutosVendidos: number;
+};
+
+/**
+ * Os números do topo da tela. Ignoram o recorte por situação de
+ * propósito: é assim que cada chip pode mostrar a própria contagem.
+ */
+export async function resumoDaAgenda(f: FiltroAgenda): Promise<ResumoAgenda> {
+  const linhas = await db
+    .select({
+      status: appointments.status,
+      n: count(),
+      cents: sum(appointments.totalCents),
+      minutos: sum(appointments.durationMin),
+    })
+    .from(appointments)
+    .where(condicaoAgenda({ ...f, recorte: "tudo", limit: undefined, offset: undefined }))
+    .groupBy(appointments.status);
+
+  const porStatus: Record<string, number> = {};
+  let total = 0;
+  let previstoCents = 0;
+  let minutosVendidos = 0;
+  for (const l of linhas) {
+    const n = Number(l.n);
+    porStatus[l.status] = n;
+    total += n;
+    // Cancelado e falta não entram no previsto nem na ocupação: a cadeira
+    // voltou a ficar livre.
+    if (!["CANCELADO", "NO_SHOW"].includes(l.status)) {
+      previstoCents += Number(l.cents ?? 0);
+      minutosVendidos += Number(l.minutos ?? 0);
+    }
+  }
+  const soma = (...nomes: string[]) =>
+    nomes.reduce((acc, n) => acc + (porStatus[n] ?? 0), 0);
+  return {
+    total,
+    porStatus,
+    ativos: soma(...AGENDA_ATIVOS),
+    concluidos: soma("CONCLUIDO"),
+    cancelados: soma("CANCELADO", "NO_SHOW"),
+    previstoCents,
+    minutosVendidos,
+  };
+}
+
+/**
+ * Quantos atendimentos caem em cada dia da faixa — é o numerozinho na
+ * tira de dias da agenda, que mostra de relance onde está o movimento.
+ *
+ * A contagem é feita aqui e não no banco de propósito: agrupar por dia no
+ * SQL exigiria CONVERT_TZ, que depende das tabelas de fuso carregadas no
+ * servidor (o TiDB Serverless não garante). A faixa é de duas semanas,
+ * então são poucas linhas.
+ */
+export async function contagemPorDia(
+  de: Date,
+  ate: Date,
+  barberId?: number | null
+) {
+  const rows = await db
+    .select({ startsAt: appointments.startsAt })
+    .from(appointments)
+    .where(
+      and(
+        gte(appointments.startsAt, de),
+        lt(appointments.startsAt, ate),
+        barberId ? eq(appointments.barberId, barberId) : undefined,
+        inArray(appointments.status, [
+          "PENDENTE",
+          "CONFIRMADO",
+          "EM_ANDAMENTO",
+          "CONCLUIDO",
+        ])
+      )
+    );
+  const mapa: Record<string, number> = {};
+  for (const r of rows) {
+    const chave = utcToShopParts(r.startsAt).dateKey;
+    mapa[chave] = (mapa[chave] ?? 0) + 1;
+  }
+  return mapa;
 }
 
 /** Limites do dia (na loja) como instantes UTC. */

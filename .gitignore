@@ -24,3 +24,6 @@
 
 # typescript incremental build
 tsconfig.tsbuildinfo
+
+# capturas de tela feitas durante os testes de navegador
+e2e-*.png
