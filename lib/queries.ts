@@ -5,7 +5,9 @@
 // subquery correlacionada, que o TiDB não executa. Aqui as relações são
 // joins explícitos ou uma segunda consulta por lote — portável.
 // ───────────────────────────────────────────────────────────
-import { and, asc, desc, eq, gte, like, lt, or, inArray, sql, sum, count } from "drizzle-orm";
+import {
+  and, asc, desc, eq, gte, isNull, like, lt, or, inArray, sql, sum, count,
+} from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointments,
@@ -18,6 +20,7 @@ import {
   payments,
   services,
   recurringSlots,
+  scheduleBlocks,
   subscriptions,
   users,
   type Appointment,
@@ -188,15 +191,17 @@ function condicaoAgenda(f: FiltroAgenda) {
   const termo = (f.busca ?? "").trim();
   if (termo) {
     const digitos = termo.replace(/\D/g, "");
-    const porNome = like(appointments.clientName, `%${termo}%`);
+    const alvos = [
+      like(appointments.clientName, `%${termo}%`),
+      // O código curto é o que o cliente lê no WhatsApp ("meu código é
+      // K3F9TQ"); procurar por ele era impossível.
+      like(appointments.code, `%${termo.toUpperCase()}%`),
+    ];
     // Só procura por telefone quando o que foi digitado tem número: com
     // "%%" o filtro casaria com todo mundo e a busca por nome não valeria
     // de nada.
-    partes.push(
-      digitos
-        ? or(porNome, like(appointments.clientPhone, `%${digitos}%`))!
-        : porNome
-    );
+    if (digitos) alvos.push(like(appointments.clientPhone, `%${digitos}%`));
+    partes.push(or(...alvos)!);
   }
   return and(...partes);
 }
@@ -278,6 +283,44 @@ export async function resumoDaAgenda(f: FiltroAgenda): Promise<ResumoAgenda> {
 }
 
 /**
+ * Os bloqueios que caem no período — almoço, folga, feriado, manutenção.
+ *
+ * A agenda mostrava só atendimentos, então o horário bloqueado aparecia
+ * como um buraco vazio: quem olhava a tela via a cadeira livre às 12h e
+ * ia oferecer o horário, sem saber que ali havia um bloqueio.
+ */
+export async function bloqueiosDoPeriodo(
+  de: Date,
+  ate: Date,
+  barberId?: number | null
+) {
+  const rows = await db
+    .select({ bloco: scheduleBlocks, barbeiro: barbers, dono: users })
+    .from(scheduleBlocks)
+    .leftJoin(barbers, eq(barbers.id, scheduleBlocks.barberId))
+    .leftJoin(users, eq(users.id, barbers.userId))
+    .where(
+      and(
+        lt(scheduleBlocks.startsAt, ate),
+        gte(scheduleBlocks.endsAt, de),
+        // Bloqueio sem barbeiro vale para a loja toda: aparece sempre,
+        // mesmo com um profissional filtrado.
+        barberId
+          ? or(eq(scheduleBlocks.barberId, barberId), isNull(scheduleBlocks.barberId))
+          : undefined
+      )
+    )
+    .orderBy(asc(scheduleBlocks.startsAt));
+  return rows.map((r) => ({
+    id: r.bloco.id,
+    startsAt: r.bloco.startsAt,
+    endsAt: r.bloco.endsAt,
+    reason: r.bloco.reason,
+    barberName: r.barbeiro?.shortName ?? null,
+  }));
+}
+
+/**
  * Quantos atendimentos caem em cada dia da faixa — é o numerozinho na
  * tira de dias da agenda, que mostra de relance onde está o movimento.
  *
@@ -289,16 +332,18 @@ export async function resumoDaAgenda(f: FiltroAgenda): Promise<ResumoAgenda> {
 export async function contagemPorDia(
   de: Date,
   ate: Date,
-  barberId?: number | null
+  barberId?: number | null,
+  busca?: string
 ) {
   const rows = await db
     .select({ startsAt: appointments.startsAt })
     .from(appointments)
     .where(
       and(
-        gte(appointments.startsAt, de),
-        lt(appointments.startsAt, ate),
-        barberId ? eq(appointments.barberId, barberId) : undefined,
+        // Mesmos filtros da lista (menos a situação): com uma busca em
+        // vigor, a tira de dias mostrava a contagem de todo mundo e não
+        // batia com o que estava logo abaixo.
+        condicaoAgenda({ de, ate, barberId, busca, recorte: "tudo" }),
         inArray(appointments.status, [
           "PENDENTE",
           "CONFIRMADO",

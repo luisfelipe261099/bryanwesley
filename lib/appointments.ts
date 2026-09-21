@@ -3,20 +3,27 @@
 // A prevenção de horário duplicado é da constraint de exclusão
 // no banco; aqui traduzimos a violação para uma mensagem humana.
 // ───────────────────────────────────────────────────────────
-import { and, eq, gt, inArray, lt, ne } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, ne, or } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointments,
   appointmentServices,
   barbers,
   bookingLocks,
+  scheduleBlocks,
   services as servicesTable,
   subscriptions,
   users,
   planServices,
 } from "@/db/schema";
 import { sql as rawSql } from "drizzle-orm";
-import { getAvailability, getSettings, generateCode } from "./schedule";
+import {
+  getAvailability,
+  getSettings,
+  generateCode,
+  workingWindows,
+  BLOCKING_STATUSES,
+} from "./schedule";
 import { resolveBarberPct, recordCommission } from "./commissions";
 import {
   queueBookingNotifications,
@@ -24,7 +31,14 @@ import {
   cancelPendingNotifications,
 } from "./notifications";
 import { randomBytes } from "node:crypto";
-import { shopTimeToUtc, parseDateKey, shopToday, addDays as addDaysKey } from "./time";
+import {
+  shopTimeToUtc,
+  parseDateKey,
+  shopToday,
+  addDays as addDaysKey,
+  utcToShopParts,
+  minutesToHHMM,
+} from "./time";
 import { normalizePhone } from "./phone";
 import { dbErrorCode, dbErrorMessage } from "./errors";
 
@@ -489,6 +503,165 @@ export async function rescheduleBooking(input: {
     console.error("Falha ao avisar remarcação:", e);
   }
   return novo;
+}
+
+/**
+ * Troca os serviços de um atendimento já marcado.
+ *
+ * Acontece o tempo todo no balcão: o cliente sentou para cortar e pede
+ * barba também. Sem isto o jeito era cancelar e marcar de novo — o que
+ * dispara um "seu horário foi cancelado" no WhatsApp, perde o código e
+ * some com o histórico do horário.
+ *
+ * O horário de início não muda; o que muda é a duração (e o preço). Se o
+ * atendimento passar a invadir o próximo da cadeira, ou o fim do
+ * expediente, a troca é recusada com o motivo.
+ */
+export async function updateAppointmentServices(input: {
+  appointmentId: number;
+  serviceIds: number[];
+}) {
+  if (input.serviceIds.length === 0) {
+    throw new BookingError("Escolha ao menos um serviço.");
+  }
+
+  const appt = await db.query.appointments.findFirst({
+    where: eq(appointments.id, input.appointmentId),
+  });
+  if (!appt) throw new BookingError("Agendamento não encontrado.");
+  if (["CONCLUIDO", "CANCELADO", "NO_SHOW"].includes(appt.status)) {
+    throw new BookingError(
+      "Esse atendimento já foi encerrado. Só dá para mudar o que ainda está em aberto."
+    );
+  }
+
+  const chosen = await db.query.services.findMany({
+    where: and(
+      inArray(servicesTable.id, input.serviceIds),
+      eq(servicesTable.active, true)
+    ),
+  });
+  if (chosen.length !== input.serviceIds.length) {
+    throw new BookingError("Algum serviço escolhido não está mais no catálogo.");
+  }
+
+  const settings = await getSettings();
+  const durationMin = Math.max(
+    chosen.reduce((acc, s) => acc + s.durationMin, 0),
+    settings.slotMinutes
+  );
+  const endsAt = new Date(appt.startsAt.getTime() + durationMin * 60_000);
+
+  // Não pode passar do fim do expediente — nem o da loja, nem o do
+  // profissional, que pode ter jornada própria.
+  const partes = utcToShopParts(appt.startsAt);
+  const inicio = partes.minutesOfDay;
+  const janelas = await workingWindows([appt.barberId], partes.weekday, settings);
+  const fimDoTurno = janelas.get(appt.barberId)?.close ?? settings.closeMinute;
+  if (inicio + durationMin > fimDoTurno) {
+    throw new BookingError(
+      `Com esses serviços o atendimento passa do fim do expediente (${minutesToHHMM(
+        fimDoTurno
+      )}). Remarque para um horário mais cedo.`
+    );
+  }
+
+  // Nem invadir o próximo horário da mesma cadeira.
+  const [depois] = await db
+    .select({ id: appointments.id, startsAt: appointments.startsAt })
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.barberId, appt.barberId),
+        ne(appointments.id, appt.id),
+        inArray(appointments.status, [...BLOCKING_STATUSES]),
+        lt(appointments.startsAt, endsAt),
+        gt(appointments.endsAt, appt.startsAt)
+      )
+    )
+    .limit(1);
+  if (depois) {
+    throw new BookingError(
+      "Com esses serviços o atendimento passa por cima do próximo horário dessa cadeira."
+    );
+  }
+
+  // Nem por cima de um bloqueio (almoço, manutenção, folga).
+  const [bloqueio] = await db
+    .select({ id: scheduleBlocks.id, reason: scheduleBlocks.reason })
+    .from(scheduleBlocks)
+    .where(
+      and(
+        lt(scheduleBlocks.startsAt, endsAt),
+        gt(scheduleBlocks.endsAt, appt.startsAt),
+        or(
+          eq(scheduleBlocks.barberId, appt.barberId),
+          isNull(scheduleBlocks.barberId)
+        )
+      )
+    )
+    .limit(1);
+  if (bloqueio) {
+    throw new BookingError(
+      `Com esses serviços o atendimento entra num horário bloqueado${
+        bloqueio.reason ? ` (${bloqueio.reason})` : ""
+      }.`
+    );
+  }
+
+  // Preço: o que o plano do cliente cobre continua sem cobrança.
+  const dono = appt.clientUserId
+    ? appt.clientUserId
+    : (await db.query.users.findFirst({ where: eq(users.phone, appt.clientPhone) }))?.id ?? null;
+  const assinatura = dono
+    ? await db.query.subscriptions.findFirst({
+        where: and(
+          eq(subscriptions.userId, dono),
+          eq(subscriptions.status, "ATIVA")
+        ),
+      })
+    : undefined;
+  let cobertos = new Set<number>();
+  if (assinatura) {
+    const cobre = await db.query.planServices.findMany({
+      where: eq(planServices.planId, assinatura.planId),
+    });
+    cobertos = new Set(cobre.map((c) => c.serviceId));
+  }
+  const tudoCoberto = !!assinatura && chosen.every((s) => cobertos.has(s.id));
+  const totalCents = tudoCoberto
+    ? 0
+    : chosen.reduce((acc, s) => acc + (cobertos.has(s.id) ? 0 : s.priceCents), 0);
+
+  await db
+    .update(appointments)
+    .set({
+      endsAt,
+      durationMin,
+      totalCents,
+      kind: tudoCoberto ? "ASSINANTE" : "AVULSO",
+      subscriptionId: tudoCoberto ? assinatura!.id : null,
+    })
+    .where(eq(appointments.id, appt.id));
+
+  // O snapshot de serviços é reescrito: é ele que vira a comissão e a
+  // linha do relatório quando o atendimento fechar.
+  await db
+    .delete(appointmentServices)
+    .where(eq(appointmentServices.appointmentId, appt.id));
+  await db.insert(appointmentServices).values(
+    chosen.map((s) => ({
+      appointmentId: appt.id,
+      serviceId: s.id,
+      name: s.name,
+      priceCents: cobertos.has(s.id) ? 0 : s.priceCents,
+      durationMin: s.durationMin,
+    }))
+  );
+
+  return (await db.query.appointments.findFirst({
+    where: eq(appointments.id, appt.id),
+  }))!;
 }
 
 /** Transições de estado permitidas, para não pular etapas. */

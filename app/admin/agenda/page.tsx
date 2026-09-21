@@ -9,8 +9,10 @@ import {
   agendaDoPeriodo,
   contarAgenda,
   contagemPorDia,
+  bloqueiosDoPeriodo,
   resumoDaAgenda,
   listTeam,
+  listServices,
   dayBounds,
   type RecorteAgenda,
 } from "@/lib/queries";
@@ -25,18 +27,33 @@ import {
   labelWeekday,
   minutesToHHMM,
 } from "@/lib/time";
-import { AgendaManager, type VisaoAgenda, type LinhaAgenda } from "./AgendaManager";
+import {
+  AgendaManager,
+  type VisaoAgenda,
+  type LinhaAgenda,
+  type LinhaBloqueio,
+} from "./AgendaManager";
 
 export const dynamic = "force-dynamic";
 
-/** Quantos agendamentos por página na lista do que está por vir. */
-const POR_PAGINA = 30;
+/**
+ * Quantos agendamentos por página. Vale para todas as visões: antes o dia
+ * e a semana traziam até 400 numa tacada e, passando disso, a lista
+ * cortava em silêncio — os números do topo diziam 420 e a tela mostrava
+ * 400, sem nada avisando.
+ */
+const POR_PAGINA = 40;
 
 /** Até onde a lista "Próximos" enxerga. */
 const HORIZONTE_DIAS = 120;
 
 const VISOES: VisaoAgenda[] = ["dia", "semana", "proximos"];
-const RECORTES: RecorteAgenda[] = ["tudo", "ativos", "concluidos", "cancelados"];
+const RECORTES: RecorteAgenda[] = [
+  "tudo",
+  "ativos",
+  "concluidos",
+  "cancelados",
+];
 
 export default async function AdminAgenda({
   searchParams,
@@ -59,7 +76,10 @@ export default async function AdminAgenda({
       ? searchParams.dia
       : hoje;
   const barbeiroPedido = Number(searchParams.barbeiro);
-  const barbeiro = Number.isFinite(barbeiroPedido) && barbeiroPedido > 0 ? barbeiroPedido : null;
+  const barbeiro =
+    Number.isFinite(barbeiroPedido) && barbeiroPedido > 0
+      ? barbeiroPedido
+      : null;
   const recorte = RECORTES.includes(searchParams.situacao as RecorteAgenda)
     ? (searchParams.situacao as RecorteAgenda)
     : visao === "proximos"
@@ -68,9 +88,15 @@ export default async function AdminAgenda({
   const busca = (searchParams.q ?? "").trim();
   const paginaPedida = Number(searchParams.pagina ?? 1);
   const pagina =
-    Number.isFinite(paginaPedida) && paginaPedida > 0 ? Math.floor(paginaPedida) : 1;
+    Number.isFinite(paginaPedida) && paginaPedida > 0
+      ? Math.floor(paginaPedida)
+      : 1;
 
-  const [settings, equipe] = await Promise.all([getSettings(), listTeam()]);
+  const [settings, equipe, catalogo] = await Promise.all([
+    getSettings(),
+    listTeam(),
+    listServices(),
+  ]);
 
   // A janela de tempo de cada visão. "Próximos" começa AGORA (não no
   // começo do dia): o que já passou hoje não é mais o que está por vir.
@@ -79,7 +105,10 @@ export default async function AdminAgenda({
       ? dayBounds(dia)
       : visao === "semana"
         ? { start: dayBounds(dia).start, end: dayBounds(addDays(dia, 6)).end }
-        : { start: new Date(), end: dayBounds(addDays(hoje, HORIZONTE_DIAS)).end };
+        : {
+            start: new Date(),
+            end: dayBounds(addDays(hoje, HORIZONTE_DIAS)).end,
+          };
 
   const filtroBase = {
     de: janela.start,
@@ -91,14 +120,35 @@ export default async function AdminAgenda({
   const resumo = await resumoDaAgenda(filtroBase);
   const total = await contarAgenda({ ...filtroBase, recorte });
   const ultimaPagina = Math.max(1, Math.ceil(total / POR_PAGINA));
-  const atual = visao === "proximos" ? Math.min(pagina, ultimaPagina) : 1;
+  const atual = Math.min(pagina, ultimaPagina);
 
   const linhas = await agendaDoPeriodo({
     ...filtroBase,
     recorte,
-    limit: visao === "proximos" ? POR_PAGINA : 400,
-    offset: visao === "proximos" ? (atual - 1) * POR_PAGINA : 0,
+    limit: POR_PAGINA,
+    offset: (atual - 1) * POR_PAGINA,
   });
+
+  // Bloqueios entram na mesma lista, no horário deles — mas só quando a
+  // lista é "o que está marcado". Procurando um cliente, ou filtrando por
+  // concluídos/cancelados, eles viram ruído: a busca por um nome devolvia
+  // zero atendimentos e três almoços. Também só na primeira página, já
+  // que não são paginados junto com os atendimentos.
+  const mostrarBloqueios =
+    atual === 1 && !busca && (recorte === "tudo" || recorte === "ativos");
+  const bloqueios = mostrarBloqueios
+    ? (await bloqueiosDoPeriodo(janela.start, janela.end, barbeiro)).map(
+        (b): LinhaBloqueio => ({
+          id: b.id,
+          dateKey: utcToShopParts(b.startsAt).dateKey,
+          minutos: utcToShopParts(b.startsAt).minutesOfDay,
+          hora: formatShopTime(b.startsAt),
+          fim: formatShopTime(b.endsAt),
+          motivo: b.reason,
+          barberName: b.barberName,
+        }),
+      )
+    : [];
 
   // Ocupação só faz sentido no dia: é minuto de cadeira sobre a
   // capacidade daquele dia, com a folga da loja e a do profissional.
@@ -114,7 +164,8 @@ export default async function AdminAgenda({
       : await contagemPorDia(
           dayBounds(primeiroDaTira).start,
           dayBounds(addDays(primeiroDaTira, 13)).end,
-          barbeiro
+          barbeiro,
+          busca,
         );
   const dias = Array.from({ length: 14 }, (_, i) => {
     const dateKey = addDays(primeiroDaTira, i);
@@ -147,13 +198,22 @@ export default async function AdminAgenda({
       expediente={`${minutesToHHMM(settings.openMinute)}—${minutesToHHMM(settings.closeMinute)}`}
       resumo={{ ...resumo, capacidadeMin: capacidade }}
       equipe={equipe.map((b) => ({ id: b.id, shortName: b.shortName }))}
+      servicos={catalogo.map((s) => ({
+        id: s.id,
+        name: s.name,
+        priceCents: s.priceCents,
+        durationMin: s.durationMin,
+      }))}
       linhas={linhas.map(paraLinha)}
+      bloqueios={bloqueios}
     />
   );
 }
 
 /** O agendamento como a tela precisa dele: já com data e hora prontas. */
-function paraLinha(a: Awaited<ReturnType<typeof agendaDoPeriodo>>[number]): LinhaAgenda {
+function paraLinha(
+  a: Awaited<ReturnType<typeof agendaDoPeriodo>>[number],
+): LinhaAgenda {
   const partes = utcToShopParts(a.startsAt);
   return {
     id: a.id,
@@ -169,6 +229,9 @@ function paraLinha(a: Awaited<ReturnType<typeof agendaDoPeriodo>>[number]): Linh
     barberName: a.barber.shortName,
     servicos: a.items.map((i) => i.name).join(" + "),
     totalCents: a.totalCents,
+    servicoIds: a.items
+      .map((i) => i.serviceId)
+      .filter((id): id is number => id !== null),
     assinante: a.kind === "ASSINANTE",
     fixo: a.recurringSlotId !== null,
     status: a.status,

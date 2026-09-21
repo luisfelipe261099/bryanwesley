@@ -20,11 +20,12 @@ import {
   Phone,
   Upload,
   UserCheck,
+  UserPlus,
   X,
 } from "lucide-react";
-import { Card, Feedback, type Msg } from "@/components/admin/Feedback";
+import { Card, Feedback, notify, type Msg } from "@/components/admin/Feedback";
 import { formatPhone } from "@/lib/phone";
-import { importClients } from "../actions";
+import { importClients, createClientManually } from "../actions";
 
 type ClientRow = {
   id: number;
@@ -134,10 +135,15 @@ export function ClientesManager({
             : `Mostrando ${primeiro}–${ultimo} de ${total}`
         }
       >
-        <BuscaClientes
-          inicial={busca}
-          onBuscar={(termo) => aplicar({ busca: termo })}
-        />
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <div className="min-w-[220px] flex-1">
+            <BuscaClientes
+              inicial={busca}
+              onBuscar={(termo) => aplicar({ busca: termo })}
+            />
+          </div>
+          <NovoCliente />
+        </div>
 
         <div className="mb-4 flex flex-wrap items-center gap-1.5">
           {SITUACOES.map((s) => (
@@ -253,6 +259,92 @@ function PaginaBtn({
  * senha moram lá, onde há espaço para mostrar o que já aconteceu antes de
  * mexer. Aqui fica só o que ajuda a reconhecer a pessoa.
  */
+/**
+ * Cadastro de cliente pelo balcão.
+ *
+ * Até aqui só entrava gente no sistema agendando ou pela importação do
+ * CSV — quem pedia "me cadastra" na loja ficava de fora.
+ */
+function NovoCliente() {
+  const [aberto, setAberto] = useState(false);
+  const [f, setF] = useState({ name: "", phone: "" });
+  const [msg, setMsg] = useState<Msg>(null);
+  const [pendente, start] = useTransition();
+
+  function salvar() {
+    setMsg(null);
+    start(async () => {
+      const r = await createClientManually(f);
+      setMsg(notify(r, "Cliente cadastrado."));
+      if (r.ok) {
+        setF({ name: "", phone: "" });
+        setAberto(false);
+      }
+    });
+  }
+
+  if (!aberto) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAberto(true)}
+        className="btn-outline label inline-flex flex-none items-center gap-2 rounded-full px-4 py-3 text-electric"
+      >
+        <UserPlus className="h-4 w-4" />
+        Novo cliente
+      </button>
+    );
+  }
+
+  return (
+    <div className="w-full rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="label mb-1.5 block text-steel-400">Nome</span>
+          <input
+            value={f.name}
+            onChange={(e) => setF({ ...f, name: e.target.value })}
+            placeholder="Nome completo"
+            className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none placeholder:text-steel-400/60 focus:border-electric/60"
+          />
+        </label>
+        <label className="block">
+          <span className="label mb-1.5 block text-steel-400">WhatsApp</span>
+          <input
+            value={f.phone}
+            onChange={(e) => setF({ ...f, phone: e.target.value })}
+            placeholder="(41) 9 9999-0000"
+            inputMode="tel"
+            className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none placeholder:text-steel-400/60 focus:border-electric/60"
+          />
+        </label>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={pendente}
+          onClick={salvar}
+          className="btn-royal label inline-flex items-center gap-2 rounded-full px-5 py-3 text-white disabled:opacity-50"
+        >
+          {pendente ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+          Cadastrar
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setAberto(false);
+            setMsg(null);
+          }}
+          className="label rounded-full border border-white/12 px-5 py-3 text-steel-300"
+        >
+          Cancelar
+        </button>
+      </div>
+      <Feedback msg={msg} />
+    </div>
+  );
+}
+
 function ClientRowItem({ client }: { client: ClientRow }) {
   return (
     <li>

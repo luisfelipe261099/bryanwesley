@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {
+  Ban,
   Coffee,
   Star,
   Target,
@@ -19,6 +20,8 @@ import { Reveal } from "@/components/Reveal";
 import { requireRole } from "@/lib/auth";
 import {
   appointmentsOfDay,
+  bloqueiosDoPeriodo,
+  dayBounds,
   barberMonthSummary,
   barberTodaySummary,
   getBarberWithUser,
@@ -70,8 +73,12 @@ export default async function BarbeiroPanel({
       ? searchParams.dia
       : today;
 
-  const [agenda, mes, hoje] = await Promise.all([
+  const [agenda, bloqueios, mes, hoje] = await Promise.all([
     appointmentsOfDay(dateKey, barber.id),
+    // Bloqueios do dia (almoço, folga, manutenção): o barbeiro via o
+    // buraco na agenda sem saber que era bloqueio, e ia perguntar no
+    // balcão se podia encaixar alguém.
+    bloqueiosDoPeriodo(dayBounds(dateKey).start, dayBounds(dateKey).end, barber.id),
     barberMonthSummary(barber.id),
     barberTodaySummary(barber.id),
   ]);
@@ -243,9 +250,40 @@ export default async function BarbeiroPanel({
               })}
             </div>
 
+            {bloqueios.length > 0 && (
+              <ul className="mt-4 space-y-2">
+                {bloqueios.map((b) => (
+                  <li
+                    key={b.id}
+                    className="flex items-center gap-3 rounded-2xl border border-dashed border-amber-400/25 bg-amber-400/[0.04] p-3"
+                  >
+                    <span className="flex w-14 flex-none flex-col items-center text-amber-200">
+                      <span className="font-display text-base leading-none">
+                        {formatShopTime(b.startsAt)}
+                      </span>
+                      <span className="mt-1 text-[10px] opacity-70">
+                        até {formatShopTime(b.endsAt)}
+                      </span>
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1.5 text-sm font-semibold text-amber-100">
+                        <Ban className="h-3.5 w-3.5 flex-none" />
+                        {b.reason?.trim() || "Horário bloqueado"}
+                      </span>
+                      <span className="text-xs text-amber-200/70">
+                        {b.barberName ? "Seu bloqueio" : "Barbearia toda"}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
             {agenda.length === 0 ? (
               <p className="mt-5 rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-steel-400">
-                Nenhum atendimento nesse dia.
+                {bloqueios.length > 0
+                  ? "Nenhum atendimento nesse dia — só o bloqueio acima."
+                  : "Nenhum atendimento nesse dia."}
               </p>
             ) : (
               <ul className="mt-5 space-y-2">

@@ -20,6 +20,7 @@ import {
   Plus,
   Repeat,
   Search,
+  Ban,
   Sunrise,
   Sun,
   Moon,
@@ -31,6 +32,7 @@ import { appointmentStatus as statusStyles } from "@/lib/status";
 import type { RecorteAgenda } from "@/lib/queries";
 import { ApptControls } from "../AgendaHoje";
 import { RemarcarAdmin } from "./RemarcarAdmin";
+import { EditarServicos, type ServicoDoCatalogo } from "./EditarServicos";
 
 export type VisaoAgenda = "dia" | "semana" | "proximos";
 
@@ -47,12 +49,29 @@ export type LinhaAgenda = {
   barberId: number;
   barberName: string;
   servicos: string;
+  servicoIds: number[];
   totalCents: number;
   assinante: boolean;
   fixo: boolean;
   status: string;
   code: string;
   notes: string | null;
+};
+
+/** Uma linha da agenda: um atendimento ou um bloqueio. */
+type ItemAgenda =
+  | { tipo: "atendimento"; minutos: number; dateKey: string; a: LinhaAgenda }
+  | { tipo: "bloqueio"; minutos: number; dateKey: string; b: LinhaBloqueio };
+
+export type LinhaBloqueio = {
+  id: number;
+  dateKey: string;
+  minutos: number;
+  hora: string;
+  fim: string;
+  motivo: string | null;
+  /** Nome do profissional, ou null quando o bloqueio é da loja toda. */
+  barberName: string | null;
 };
 
 type DiaChip = {
@@ -124,7 +143,9 @@ export function AgendaManager({
   expediente,
   resumo,
   equipe,
+  servicos,
   linhas,
+  bloqueios,
 }: {
   visao: VisaoAgenda;
   dia: string;
@@ -151,7 +172,10 @@ export function AgendaManager({
     capacidadeMin: number;
   };
   equipe: { id: number; shortName: string }[];
+  /** O catálogo ativo, para trocar os serviços de um atendimento. */
+  servicos: ServicoDoCatalogo[];
   linhas: LinhaAgenda[];
+  bloqueios: LinhaBloqueio[];
 }) {
   const router = useRouter();
   const [navegando, start] = useTransition();
@@ -175,9 +199,16 @@ export function AgendaManager({
     cancelados: resumo.cancelados,
   };
 
+  // Atendimentos e bloqueios na mesma linha do tempo: um almoço marcado
+  // aparece entre os horários, e não como um buraco sem explicação.
+  const itens: ItemAgenda[] = [
+    ...linhas.map((a) => ({ tipo: "atendimento" as const, minutos: a.minutos, dateKey: a.dateKey, a })),
+    ...bloqueios.map((b) => ({ tipo: "bloqueio" as const, minutos: b.minutos, dateKey: b.dateKey, b })),
+  ].sort((x, y) => (x.dateKey === y.dateKey ? x.minutos - y.minutos : x.dateKey < y.dateKey ? -1 : 1));
+
   // Na semana e em "próximos" a lista é quebrada por data; no dia, por
   // período. É o que deixa a leitura rápida em vez de uma fila só.
-  const porData = agruparPorData(linhas);
+  const porData = agruparPorData(itens);
 
   return (
     <div className="space-y-5">
@@ -222,7 +253,7 @@ export function AgendaManager({
             key={v.valor}
             type="button"
             aria-pressed={visao === v.valor}
-            onClick={() => aplicar({ visao: v.valor, recorte: v.valor === "proximos" ? "ativos" : "tudo" })}
+            onClick={() => aplicar({ visao: v.valor })}
             className={`label rounded-full px-4 py-2.5 transition-all ${
               visao === v.valor
                 ? "btn-royal text-white"
@@ -299,6 +330,8 @@ export function AgendaManager({
                     key={d.dateKey}
                     type="button"
                     aria-pressed={on}
+                    data-dia={d.dateKey}
+                    data-quantos={d.quantos}
                     onClick={() => aplicar({ dia: d.dateKey })}
                     className={`flex min-w-[58px] flex-none flex-col items-center gap-1 rounded-xl border py-2.5 transition-colors ${
                       on
@@ -404,15 +437,16 @@ export function AgendaManager({
             </p>
           )}
 
-          {linhas.length === 0 ? (
+          {itens.length === 0 ? (
             <Vazio
               visao={visao}
               busca={busca}
               recorte={recorte}
               diaFechado={diaFechado && visao === "dia"}
+              procurarEmTudo={() => aplicar({ visao: "proximos", recorte: "tudo" })}
             />
           ) : visao === "dia" ? (
-            <ListaPorPeriodo linhas={linhas} equipe={equipe} />
+            <ListaPorPeriodo itens={itens} equipe={equipe} servicos={servicos} />
           ) : (
             <div className="space-y-6">
               {porData.map(([dateKey, doDia]) => (
@@ -420,13 +454,23 @@ export function AgendaManager({
                   <h3 className="label sticky top-0 z-10 -mx-1 mb-2.5 bg-surface/80 px-1 py-1.5 capitalize text-electric backdrop-blur">
                     {rotuloCurto(dateKey)}
                     <span className="ml-2 text-steel-400">
-                      {doDia.length} agendamento{doDia.length > 1 ? "s" : ""}
+                      {contarAtendimentos(doDia)} agendamento
+                      {contarAtendimentos(doDia) === 1 ? "" : "s"}
                     </span>
                   </h3>
                   <ul className="space-y-2">
-                    {doDia.map((a) => (
-                      <Item key={a.id} a={a} equipe={equipe} />
-                    ))}
+                    {doDia.map((i) =>
+                      i.tipo === "atendimento" ? (
+                        <Item
+                          key={`a${i.a.id}`}
+                          a={i.a}
+                          equipe={equipe}
+                          servicos={servicos}
+                        />
+                      ) : (
+                        <Bloqueio key={`b${i.b.id}`} b={i.b} />
+                      )
+                    )}
                   </ul>
                 </div>
               ))}
@@ -434,8 +478,9 @@ export function AgendaManager({
           )}
         </div>
 
-        {/* Paginação (só a lista do que está por vir é longa) */}
-        {visao === "proximos" && total > porPagina && (
+        {/* Paginação: vale para qualquer visão, porque um sábado cheio
+            também passa de uma página */}
+        {total > porPagina && (
           <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/8 pt-4">
             <span className="text-xs text-steel-400">
               {(pagina - 1) * porPagina + 1}–{Math.min(pagina * porPagina, total)} de {total}
@@ -468,18 +513,20 @@ export function AgendaManager({
 }
 
 function ListaPorPeriodo({
-  linhas,
+  itens,
   equipe,
+  servicos,
 }: {
-  linhas: LinhaAgenda[];
+  itens: ItemAgenda[];
   equipe: { id: number; shortName: string }[];
+  servicos: ServicoDoCatalogo[];
 }) {
   let inicio = 0;
   return (
     <div className="space-y-6">
       {PERIODOS.map((p) => {
-        const doPeriodo = linhas.filter(
-          (a) => a.minutos >= inicio && a.minutos < p.ate
+        const doPeriodo = itens.filter(
+          (i) => i.minutos >= inicio && i.minutos < p.ate
         );
         inicio = p.ate;
         if (doPeriodo.length === 0) return null;
@@ -488,12 +535,16 @@ function ListaPorPeriodo({
             <h3 className="label mb-2.5 flex items-center gap-2 text-electric">
               <p.icone className="h-3.5 w-3.5" />
               {p.label}
-              <span className="text-steel-400">{doPeriodo.length}</span>
+              <span className="text-steel-400">{contarAtendimentos(doPeriodo)}</span>
             </h3>
             <ul className="space-y-2">
-              {doPeriodo.map((a) => (
-                <Item key={a.id} a={a} equipe={equipe} />
-              ))}
+              {doPeriodo.map((i) =>
+                i.tipo === "atendimento" ? (
+                  <Item key={`a${i.a.id}`} a={i.a} equipe={equipe} servicos={servicos} />
+                ) : (
+                  <Bloqueio key={`b${i.b.id}`} b={i.b} />
+                )
+              )}
             </ul>
           </div>
         );
@@ -502,12 +553,47 @@ function ListaPorPeriodo({
   );
 }
 
+/** A linha de um bloqueio: some da agenda do cliente, aparece na do dono. */
+function Bloqueio({ b }: { b: LinhaBloqueio }) {
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-2xl border border-dashed border-amber-400/25 bg-amber-400/[0.04] p-3 sm:flex-nowrap sm:gap-4 sm:p-3.5">
+      <div className="flex w-16 flex-none flex-col items-center">
+        <span className="font-display text-base leading-none text-amber-200">{b.hora}</span>
+        <span className="mt-1 text-[10px] text-amber-200/60">até {b.fim}</span>
+      </div>
+      <div className="hidden h-10 w-px bg-amber-400/20 sm:block" />
+      <div className="min-w-0 flex-1">
+        <span className="flex items-center gap-2 font-semibold text-amber-100">
+          <Ban className="h-3.5 w-3.5 flex-none" />
+          {b.motivo?.trim() || "Horário bloqueado"}
+        </span>
+        <span className="mt-0.5 block text-sm text-amber-200/70">
+          {b.barberName ? `Só ${b.barberName}` : "Barbearia toda"} · não entra na agenda do cliente
+        </span>
+      </div>
+      <Link
+        href="/admin/ajustes"
+        className="label rounded-full border border-amber-400/30 px-3 py-2 text-amber-200 transition-colors hover:bg-amber-400/10"
+      >
+        Gerenciar
+      </Link>
+    </li>
+  );
+}
+
+/** Conta só os atendimentos — bloqueio não é agendamento. */
+function contarAtendimentos(itens: ItemAgenda[]) {
+  return itens.filter((i) => i.tipo === "atendimento").length;
+}
+
 function Item({
   a,
   equipe,
+  servicos,
 }: {
   a: LinhaAgenda;
   equipe: { id: number; shortName: string }[];
+  servicos: ServicoDoCatalogo[];
 }) {
   const st = statusStyles[a.status];
   const caiu = ["CANCELADO", "NO_SHOW"].includes(a.status);
@@ -571,19 +657,24 @@ function Item({
             <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
             {st.label}
           </span>
-          <div className="flex items-center gap-1.5">
-            {!caiu && a.status !== "CONCLUIDO" && (
-              <RemarcarAdmin
-                appointmentId={a.id}
-                dateKey={a.dateKey}
-                durationMin={a.durationMin}
-                barberId={a.barberId}
-                equipe={equipe}
-                resumo={`${a.clientName} · ${a.hora}`}
-              />
-            )}
-            <ApptControls id={a.id} status={a.status} />
-          </div>
+          <ApptControls id={a.id} status={a.status}>
+            <EditarServicos
+              variante="menu"
+              appointmentId={a.id}
+              servicos={servicos}
+              atuais={a.servicoIds}
+              resumo={`${a.clientName} · ${a.hora}`}
+            />
+            <RemarcarAdmin
+              variante="menu"
+              appointmentId={a.id}
+              dateKey={a.dateKey}
+              durationMin={a.durationMin}
+              barberId={a.barberId}
+              equipe={equipe}
+              resumo={`${a.clientName} · ${a.hora}`}
+            />
+          </ApptControls>
         </div>
       </div>
       {a.notes && !(a.fixo && /^hor.rio fixo do plano$/i.test(a.notes.trim())) && (
@@ -600,11 +691,14 @@ function Vazio({
   busca,
   recorte,
   diaFechado,
+  procurarEmTudo,
 }: {
   visao: VisaoAgenda;
   busca: string;
   recorte: RecorteAgenda;
   diaFechado: boolean;
+  /** Leva a busca para a lista do que está por vir. */
+  procurarEmTudo: () => void;
 }) {
   const texto = busca
     ? `Nenhum agendamento de "${busca}" nesse período.`
@@ -616,9 +710,20 @@ function Vazio({
           ? "Nenhum horário marcado daqui para a frente."
           : "Nenhum agendamento nesse período.";
   return (
-    <p className="rounded-2xl border border-dashed border-white/10 px-4 py-12 text-center text-sm text-steel-400">
-      {texto}
-    </p>
+    <div className="rounded-2xl border border-dashed border-white/10 px-4 py-12 text-center text-sm text-steel-400">
+      <p>{texto}</p>
+      {/* Procurar um cliente dentro de um dia só quase nunca acha. O
+          caminho útil é procurar no que está por vir. */}
+      {busca && visao !== "proximos" && (
+        <button
+          type="button"
+          onClick={procurarEmTudo}
+          className="btn-outline label mt-4 inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-electric"
+        >
+          Procurar em todos os próximos
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -670,13 +775,13 @@ function Chip({
   );
 }
 
-/** Agrupa mantendo a ordem de horário que veio do banco. */
-function agruparPorData(linhas: LinhaAgenda[]) {
-  const mapa = new Map<string, LinhaAgenda[]>();
-  for (const l of linhas) {
-    const atual = mapa.get(l.dateKey);
-    if (atual) atual.push(l);
-    else mapa.set(l.dateKey, [l]);
+/** Agrupa por data mantendo a ordem de horário. */
+function agruparPorData(itens: ItemAgenda[]) {
+  const mapa = new Map<string, ItemAgenda[]>();
+  for (const i of itens) {
+    const atual = mapa.get(i.dateKey);
+    if (atual) atual.push(i);
+    else mapa.set(i.dateKey, [i]);
   }
   return Array.from(mapa.entries());
 }

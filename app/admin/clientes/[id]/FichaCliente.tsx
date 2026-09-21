@@ -27,9 +27,11 @@ import { formatBRL, formatDuration } from "@/lib/money";
 import type { DayOption } from "@/lib/schedule";
 import type { Slot } from "@/lib/schedule";
 import { fetchAvailability } from "@/app/agendar/actions";
+import { toast } from "@/lib/toast";
 import {
   bookForClient,
   cancelSubscription,
+  liberarFixoDoCliente,
   createSubscriptionCharge,
   renewSubscription,
   resetUserPassword,
@@ -160,9 +162,13 @@ function Cabecalho({
             )}
           </div>
           {fixo && (
-            <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-electric/10 px-3 py-1.5 text-xs text-electric">
+            <p className="mt-2 inline-flex flex-wrap items-center gap-2 rounded-full bg-electric/10 px-3 py-1.5 text-xs text-electric">
               <CalendarClock className="h-3.5 w-3.5" />
               Horário fixo {fixo.texto} com {fixo.barberName}
+              {/* Só o próprio membro conseguia abrir mão do fixo pelo app.
+                  Quando ele avisava no balcão, a cadeira seguia reservada
+                  toda semana e ninguém do lado de cá podia liberar. */}
+              <LiberarFixo userId={cliente.id} />
             </p>
           )}
         </div>
@@ -259,6 +265,50 @@ function Cabecalho({
 
       <Feedback msg={msg} />
     </div>
+  );
+}
+
+/** Encerra o horário fixo do membro e devolve as semanas para a agenda. */
+function LiberarFixo({ userId }: { userId: number }) {
+  const [confirmando, setConfirmando] = useState(false);
+  const [pendente, start] = useTransition();
+
+  if (!confirmando) {
+    return (
+      <button
+        type="button"
+        onClick={() => setConfirmando(true)}
+        className="rounded-full border border-electric/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-electric transition-colors hover:bg-electric/15"
+      >
+        Liberar
+      </button>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <button
+        type="button"
+        disabled={pendente}
+        onClick={() =>
+          start(async () => {
+            const r = await liberarFixoDoCliente(userId);
+            toast(r.ok ? (r.message ?? "Horário fixo encerrado.") : r.error, r.ok ? "ok" : "erro");
+            setConfirmando(false);
+          })
+        }
+        className="inline-flex items-center gap-1 rounded-full bg-red-500/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white disabled:opacity-50"
+      >
+        {pendente && <Loader2 className="h-3 w-3 animate-spin" />}
+        Confirmar
+      </button>
+      <button
+        type="button"
+        onClick={() => setConfirmando(false)}
+        className="rounded-full border border-white/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-steel-300"
+      >
+        Não
+      </button>
+    </span>
   );
 }
 

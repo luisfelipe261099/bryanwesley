@@ -5,18 +5,30 @@ import { db, pool } from "../db/client";
 import {
   appointments, appointmentServices, appointmentCommissions, notifications,
   payments, planServices, plans, rateLimits, recurringSlots,
-  services as sv, subscriptions, users,
+  services as sv, scheduleBlocks, subscriptions, users,
 } from "../db/schema";
-import { createBooking, rescheduleBooking, transitionAppointment } from "../lib/appointments";
+import {
+  createBooking,
+  rescheduleBooking,
+  transitionAppointment,
+  updateAppointmentServices,
+  BookingError,
+} from "../lib/appointments";
 import { recordCommission } from "../lib/commissions";
-import { clientDetail, memberStats } from "../lib/queries";
+import {
+  clientDetail,
+  memberStats,
+  agendaDoPeriodo,
+  bloqueiosDoPeriodo,
+  dayBounds,
+} from "../lib/queries";
 import { capacidadeDoDia, gradeDeHorarios, getSettings, getAvailability } from "../lib/schedule";
 import { expireOverdueSubscriptions } from "../lib/subscriptions";
 import { markFailed, notificationStats, cancelPendingNotifications, queueNotification } from "../lib/notifications";
 import { hitRateLimit, purgeRateLimits } from "../lib/rate-limit";
 import { parseMoneyToCents } from "../lib/money";
 import { safeNext } from "../lib/url";
-import { shopToday, addDays, weekdayOf } from "../lib/time";
+import { shopToday, addDays, weekdayOf, parseDateKey, shopTimeToUtc } from "../lib/time";
 import { and, eq, inArray, like, sql } from "drizzle-orm";
 
 let p = 0, f = 0;
@@ -319,6 +331,143 @@ async function main() {
     await purgeRateLimits(new Date(Date.now() + 1000));
     ok("a limpeza apaga as janelas antigas",
       !(await db.query.rateLimits.findFirst({ where: eq(rateLimits.chave, chave) })));
+  }
+
+  console.log("\n13. Trocar os serviços de um atendimento marcado");
+  {
+    await db.insert(users).values({ name: `${MARCA} Troca`, phone: "11970005007", role: "CLIENT" });
+    const cli = (await db.query.users.findFirst({ where: eq(users.phone, "11970005007") }))!;
+    const extra = (await db.query.services.findFirst({
+      where: and(eq(sv.active, true), sql`${sv.id} <> ${corte.id}`),
+    }))!;
+    const { dia, hora } = await diaComVaga(barbeiro.id, corte.durationMin + extra.durationMin);
+    const appt = await createBooking({
+      serviceIds: [corte.id], dateKey: dia, time: hora, barberId: barbeiro.id,
+      clientName: cli.name, clientPhone: cli.phone, userId: cli.id,
+    });
+    const novo = await updateAppointmentServices({
+      appointmentId: appt.id,
+      serviceIds: [corte.id, extra.id],
+    });
+    ok("o valor é refeito com o serviço novo",
+      novo.totalCents === corte.priceCents + extra.priceCents,
+      `${novo.totalCents} vs ${corte.priceCents + extra.priceCents}`);
+    ok("a duração acompanha",
+      novo.durationMin === corte.durationMin + extra.durationMin,
+      String(novo.durationMin));
+    ok("o fim do atendimento é recalculado",
+      novo.endsAt.getTime() === novo.startsAt.getTime() + novo.durationMin * 60_000);
+    const itens = await db.select().from(appointmentServices)
+      .where(eq(appointmentServices.appointmentId, appt.id));
+    ok("o snapshot de serviços é reescrito", itens.length === 2, String(itens.length));
+    ok("o código do agendamento não muda", novo.code === appt.code);
+
+    // Não pode invadir o horário seguinte da mesma cadeira: marca o
+    // próximo horário livre do mesmo barbeiro, no mesmo dia.
+    const { slots } = await getAvailability({
+      dateKey: dia, durationMin: corte.durationMin, barberId: barbeiro.id,
+    });
+    const seguinte = slots.find((x) => x.available && x.time > hora);
+    if (!seguinte) {
+      ok("recusa quando passa por cima do próximo horário", true, "(dia sem horário seguinte livre)");
+    } else {
+      const depois = await createBooking({
+        serviceIds: [corte.id], dateKey: dia, time: seguinte.time,
+        barberId: barbeiro.id, clientName: cli.name, clientPhone: cli.phone, userId: cli.id,
+      });
+      let recusou = false;
+      try {
+        const gordo = await db.query.services.findMany({ where: eq(sv.active, true) });
+        await updateAppointmentServices({
+          appointmentId: appt.id,
+          serviceIds: gordo.map((g) => g.id),
+        });
+      } catch (e) {
+        recusou = e instanceof BookingError;
+      }
+      ok("recusa quando passa por cima do próximo horário", recusou);
+      await transitionAppointment(depois.id, "CANCELADO");
+    }
+
+    // Nem por cima de um bloqueio.
+    {
+      const { year, month, day } = parseDateKey(dia);
+      const [h, m] = hora.split(":").map(Number);
+      const depoisDoInicio = h * 60 + m + corte.durationMin;
+      const [{ id: bid }] = await db.insert(scheduleBlocks).values({
+        startsAt: shopTimeToUtc(year, month, day, depoisDoInicio),
+        endsAt: shopTimeToUtc(year, month, day, depoisDoInicio + 60),
+        reason: `${MARCA} bloqueio`,
+      }).$returningId();
+      let barrouBloqueio = false;
+      try {
+        await updateAppointmentServices({
+          appointmentId: appt.id,
+          serviceIds: [corte.id, extra.id],
+        });
+      } catch (e) {
+        barrouBloqueio = e instanceof BookingError && /bloqueado/i.test((e as Error).message);
+      }
+      ok("recusa quando o serviço novo entra num bloqueio", barrouBloqueio);
+      await db.delete(scheduleBlocks).where(eq(scheduleBlocks.id, bid));
+    }
+
+    // Atendimento encerrado não muda mais.
+    await transitionAppointment(appt.id, "CANCELADO");
+    let barrou = false;
+    try {
+      await updateAppointmentServices({ appointmentId: appt.id, serviceIds: [corte.id] });
+    } catch (e) {
+      barrou = e instanceof BookingError;
+    }
+    ok("atendimento encerrado não aceita troca de serviço", barrou);
+  }
+
+  console.log("\n14. Bloqueios entram na agenda do painel");
+  {
+    const { dia } = await diaComVaga(barbeiro.id, corte.durationMin);
+    const { year, month, day } = parseDateKey(dia);
+    const inicio = shopTimeToUtc(year, month, day, 12 * 60);
+    const fim = shopTimeToUtc(year, month, day, 13 * 60);
+    const [{ id }] = await db.insert(scheduleBlocks).values({
+      startsAt: inicio, endsAt: fim, reason: `${MARCA} almoço`,
+    }).$returningId();
+    const lista = await bloqueiosDoPeriodo(dayBounds(dia).start, dayBounds(dia).end, null);
+    ok("o bloqueio aparece no período", lista.some((b) => b.id === id));
+    ok("com motivo e sem barbeiro (loja toda)",
+      lista.find((b) => b.id === id)?.reason === `${MARCA} almoço` &&
+      lista.find((b) => b.id === id)?.barberName === null);
+    const deOutroBarbeiro = await bloqueiosDoPeriodo(
+      dayBounds(dia).start, dayBounds(dia).end, barbeiro.id
+    );
+    ok("bloqueio da loja aparece mesmo filtrando um barbeiro",
+      deOutroBarbeiro.some((b) => b.id === id));
+    await db.delete(scheduleBlocks).where(eq(scheduleBlocks.id, id));
+  }
+
+  console.log("\n15. Busca da agenda acha pelo código");
+  {
+    await db.insert(users).values({ name: `${MARCA} Codigo`, phone: "11970005008", role: "CLIENT" });
+    const cli = (await db.query.users.findFirst({ where: eq(users.phone, "11970005008") }))!;
+    const { dia, hora } = await diaComVaga(barbeiro.id, corte.durationMin);
+    const appt = await createBooking({
+      serviceIds: [corte.id], dateKey: dia, time: hora, barberId: barbeiro.id,
+      clientName: cli.name, clientPhone: cli.phone, userId: cli.id,
+    });
+    const achados = await agendaDoPeriodo({
+      de: dayBounds(dia).start, ate: dayBounds(dia).end, busca: appt.code,
+    });
+    ok("procurar pelo código devolve o agendamento",
+      achados.some((a) => a.id === appt.id), appt.code);
+    const porNome = await agendaDoPeriodo({
+      de: dayBounds(dia).start, ate: dayBounds(dia).end, busca: "Codigo",
+    });
+    ok("e procurar pelo nome continua funcionando",
+      porNome.some((a) => a.id === appt.id));
+    const porTelefone = await agendaDoPeriodo({
+      de: dayBounds(dia).start, ate: dayBounds(dia).end, busca: "70005008",
+    });
+    ok("e pelo telefone também", porTelefone.some((a) => a.id === appt.id));
   }
 
   await limpar();

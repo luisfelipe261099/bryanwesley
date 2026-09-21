@@ -13,6 +13,7 @@ import { Modal } from "@/components/Modal";
 import { toast } from "@/lib/toast";
 import { fetchAvailability } from "@/app/agendar/actions";
 import { adminReschedule } from "../actions";
+import { ItemMenu } from "../AgendaHoje";
 import type { Slot } from "@/lib/schedule";
 
 export function RemarcarAdmin({
@@ -22,6 +23,7 @@ export function RemarcarAdmin({
   barberId,
   equipe,
   resumo,
+  variante = "icone",
 }: {
   appointmentId: number;
   /** O dia em que o horário está hoje — é por onde a busca começa. */
@@ -31,6 +33,8 @@ export function RemarcarAdmin({
   equipe: { id: number; shortName: string }[];
   /** "Fulano · 14:30", só para o cabeçalho do diálogo. */
   resumo: string;
+  /** "menu" desenha o gatilho como linha do menu de ações. */
+  variante?: "icone" | "menu";
 }) {
   const [open, setOpen] = useState(false);
   // Começa no dia do próprio agendamento: na maioria das vezes a troca é
@@ -94,15 +98,22 @@ export function RemarcarAdmin({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        title="Remarcar"
-        aria-label={`Remarcar ${resumo}`}
-        className="grid h-10 w-10 place-items-center rounded-full border border-white/12 text-steel-400 transition-colors hover:border-electric/45 hover:text-white sm:h-9 sm:w-9"
-      >
-        <CalendarClock className="h-3.5 w-3.5" />
-      </button>
+      {variante === "menu" ? (
+        <ItemMenu onClick={() => setOpen(true)}>
+          <CalendarClock className="h-3.5 w-3.5" />
+          Remarcar
+        </ItemMenu>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          title="Remarcar"
+          aria-label={`Remarcar ${resumo}`}
+          className="grid h-10 w-10 place-items-center rounded-full border border-white/12 text-steel-400 transition-colors hover:border-electric/45 hover:text-white sm:h-9 sm:w-9"
+        >
+          <CalendarClock className="h-3.5 w-3.5" />
+        </button>
+      )}
 
       <Modal open={open} onClose={() => setOpen(false)} label={`Remarcar — ${resumo}`}>
         <div className="grid gap-4 sm:grid-cols-2">

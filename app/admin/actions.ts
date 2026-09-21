@@ -32,6 +32,7 @@ import {
   createBooking,
   transitionAppointment,
   rescheduleBooking,
+  updateAppointmentServices,
   BookingError,
 } from "@/lib/appointments";
 import {
@@ -48,6 +49,7 @@ import { shopTimeToUtc, parseDateKey } from "@/lib/time";
 import { normalizePhone, isValidPhone, nextPlaceholderPhone, isPlaceholderPhone } from "@/lib/phone";
 import { planClientImport, chaveNome } from "@/lib/import";
 import { nextRenewal } from "@/lib/subscriptions";
+import { formatBRL } from "@/lib/money";
 
 export type Result = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -705,6 +707,58 @@ export async function updateClient(input: {
 }
 
 /**
+ * Cadastra um cliente pelo balcão, sem marcar horário.
+ *
+ * Antes só entrava gente no sistema de duas formas: agendando ou pela
+ * importação do CSV. Quem chegava na loja e pedia "me cadastra aí" ficava
+ * de fora até marcar alguma coisa.
+ */
+export async function createClientManually(input: {
+  name: string;
+  phone: string;
+}): Promise<Result> {
+  try {
+    await admin();
+    const name = input.name.trim();
+    if (name.length < 2) return { ok: false, error: "Informe o nome do cliente." };
+    if (!isValidPhone(input.phone)) {
+      return { ok: false, error: "Telefone inválido. Use DDD + número." };
+    }
+    const phone = normalizePhone(input.phone);
+    const existente = await db.query.users.findFirst({
+      where: eq(users.phone, phone),
+    });
+    if (existente) {
+      // O telefone é a chave do cadastro: em vez de criar um segundo
+      // registro para a mesma pessoa, manda para a ficha que já existe.
+      return {
+        ok: false,
+        error: `Esse telefone já é de ${existente.name}. Abra a ficha dele para editar.`,
+      };
+    }
+    await db.insert(users).values({ name, phone, role: "CLIENT" });
+    return done("Cliente cadastrado.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Tira o horário fixo de um membro e devolve as semanas para a agenda. */
+export async function liberarFixoDoCliente(userId: number): Promise<Result> {
+  try {
+    await admin();
+    const liberados = await liberarFixosDe([userId]);
+    return done(
+      liberados > 0
+        ? `Horário fixo encerrado — ${liberados} semana(s) liberada(s) na agenda.`
+        : "Horário fixo encerrado."
+    );
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
  * Marca um horário em nome do cliente, pelo balcão.
  *
  * O nome e o telefone saem do cadastro — digitar de novo criaria um
@@ -1228,6 +1282,28 @@ export async function rejectPlanRequest(requestId: number): Promise<Result> {
       .where(eq(planRequests.id, requestId));
     return done("Solicitação arquivada.");
   } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Troca os serviços de um atendimento em aberto (o cliente pediu barba
+ * junto com o corte). O horário de início não muda.
+ */
+export async function editarServicos(input: {
+  appointmentId: number;
+  serviceIds: number[];
+}): Promise<Result> {
+  try {
+    await admin();
+    const appt = await updateAppointmentServices(input);
+    return done(
+      appt.kind === "ASSINANTE"
+        ? "Serviços atualizados — incluso no plano."
+        : `Serviços atualizados — ${formatBRL(appt.totalCents)}.`
+    );
+  } catch (e) {
+    if (e instanceof BookingError) return { ok: false, error: e.message };
     return fail(e);
   }
 }

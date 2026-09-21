@@ -404,14 +404,22 @@ export default async function ClienteDashboard({
           {/* Próximos horários */}
           <Reveal delay={0.08}>
             <div className="glass flex h-full flex-col rounded-3xl p-7">
-              <span className="label text-electric">Próximos horários</span>
+              <span className="label flex items-center gap-2 text-electric">
+                Próximos horários
+                {upcoming.length > 0 && (
+                  <span className="text-steel-400">{upcoming.length}</span>
+                )}
+              </span>
               {upcoming.length === 0 ? (
                 <div className="mt-5 flex-1">
                   <EmptyState>Nenhum horário marcado ainda.</EmptyState>
                 </div>
               ) : (
                 <ul className="mt-5 flex-1 space-y-3">
-                  {upcoming.slice(0, 3).map((a) => (
+                  {/* Todos, não os três primeiros: quem tem horário fixo
+                      tem cinco semanas reservadas e não conseguia ver (nem
+                      desmarcar) da quarta em diante. */}
+                  {upcoming.map((a) => (
                     <li
                       key={a.id}
                       className="rounded-2xl border border-white/6 bg-white/[0.02] p-3.5"
@@ -526,6 +534,11 @@ export default async function ClienteDashboard({
                 </h3>
                 <span className="text-sm text-steel-400">
                   {totalVisits} concluídos
+                  {totalVisits > history.length && (
+                    <span className="ml-1 text-steel-400/70">
+                      (últimos {history.length} aqui)
+                    </span>
+                  )}
                 </span>
               </div>
               {history.length === 0 ? (

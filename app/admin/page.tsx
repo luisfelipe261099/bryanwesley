@@ -24,9 +24,7 @@ import {
   formatShopTime,
   shopToday,
   minutesToHHMM,
-  addDays,
   labelFullDate,
-  labelWeekday,
 } from "@/lib/time";
 import { shopFrom } from "@/lib/shop";
 import { openPlanRequests } from "@/lib/queries";
@@ -38,17 +36,14 @@ export const dynamic = "force-dynamic";
 
 
 
-export default async function AdminDashboard({
-  searchParams,
-}: {
-  searchParams: { dia?: string; barbeiro?: string };
-}) {
+// O painel é o resumo do dia; navegar por dia, filtrar barbeiro e
+// procurar cliente é tarefa da Agenda (/admin/agenda). Ter os dois
+// lugares com controles parecidos, e resultados diferentes, era metade da
+// confusão de quem abria o sistema.
+export default async function AdminDashboard() {
   const today = shopToday();
-  const dateKey =
-    searchParams.dia && /^\d{4}-\d{2}-\d{2}$/.test(searchParams.dia)
-      ? searchParams.dia
-      : today;
-  const barberFilter = searchParams.barbeiro ? Number(searchParams.barbeiro) : null;
+  const dateKey = today;
+  const barberFilter = null;
 
   const [kpi, agendaDia, semana, equipe, settings, pedidos] = await Promise.all([
     adminOverview(),
@@ -62,16 +57,10 @@ export default async function AdminDashboard({
 
   const info = shopFrom(settings);
   const totalSemana = semana.reduce((a, d) => a + d.cents, 0);
-  // Faixa de dias em volta do escolhido, para navegar sem sair da tela.
-  const dias = Array.from({ length: 7 }, (_, i) => addDays(today, i - 2));
-  const qs = (o: { dia?: string; barbeiro?: number | null }) => {
-    const p = new URLSearchParams();
-    if (o.dia && o.dia !== today) p.set("dia", o.dia);
-    if (o.barbeiro) p.set("barbeiro", String(o.barbeiro));
-    const q = p.toString();
-    return q ? `/admin?${q}` : "/admin";
-  };
   const maxSemana = Math.max(1, ...semana.map((d) => d.cents));
+  // O painel mostra o começo do dia; o resto fica a um clique, na Agenda.
+  const MOSTRAR = 6;
+  const restantes = agenda.length - MOSTRAR;
 
   // Ocupação: minutos vendidos sobre a capacidade REAL do dia mostrado —
   // com o barbeiro filtrado, a folga dele e a folga da loja. A conta
@@ -165,89 +154,25 @@ export default async function AdminDashboard({
         <Reveal className="min-w-0">
           <div className="glass rounded-3xl p-6">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="font-display text-lg text-white">
-                {dateKey === today ? "Agenda de hoje" : "Agenda"}
-              </h2>
+              <div>
+                <h2 className="font-display text-lg text-white">Agenda de hoje</h2>
+                {/* Dois pedaços: no celular a linha quebra entre a data e o
+                    horário, em vez de partir "09:00—20:00" no meio. */}
+                <span className="label mt-1 flex flex-wrap gap-x-2 text-steel-400">
+                  <span className="first-letter:uppercase">{labelFullDate(dateKey)}</span>
+                  <span className="whitespace-nowrap">
+                    {minutesToHHMM(settings.openMinute)}—
+                    {minutesToHHMM(settings.closeMinute)}
+                  </span>
+                </span>
+              </div>
               <Link
                 href="/admin/agenda"
-                className="label inline-flex items-center gap-1.5 text-electric transition-colors hover:text-white"
+                className="label inline-flex items-center gap-1.5 rounded-full border border-electric/40 px-3.5 py-2.5 text-electric transition-colors hover:bg-electric/10"
               >
                 Ver agenda completa
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </Link>
-              {/* Dois pedaços: no celular a linha quebra entre a data e o
-                  horário, em vez de partir "09:00—20:00" no meio. */}
-              <span className="label flex flex-wrap gap-x-2 capitalize text-steel-400">
-                <span>{labelFullDate(dateKey)}</span>
-                <span className="whitespace-nowrap">
-                  {minutesToHHMM(settings.openMinute)}—
-                  {minutesToHHMM(settings.closeMinute)}
-                </span>
-              </span>
-            </div>
-
-            {/* Navegar dias sem sair do painel */}
-            <div className="rail mt-4 -mx-6 px-6">
-              {dias.map((d) => {
-                const on = d === dateKey;
-                return (
-                  <Link
-                    key={d}
-                    href={qs({ dia: d, barbeiro: barberFilter })}
-                    scroll={false}
-                    className={`flex min-w-[56px] flex-none flex-col items-center gap-1 rounded-xl border py-2.5 transition-colors ${
-                      on
-                        ? "border-electric/60 bg-electric/[0.08]"
-                        : "border-white/8 bg-white/[0.02] hover:border-white/20"
-                    }`}
-                  >
-                    <span
-                      className={`label capitalize ${
-                        on ? "text-electric" : "text-steel-400"
-                      }`}
-                    >
-                      {labelWeekday(d)}
-                    </span>
-                    <span className="font-display text-base text-white">
-                      {d.slice(-2)}
-                    </span>
-                    <span
-                      className={`h-1 w-1 rounded-full ${
-                        d === today ? "bg-electric" : "bg-transparent"
-                      }`}
-                    />
-                  </Link>
-                );
-              })}
-            </div>
-
-            {/* Filtrar por barbeiro */}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Link
-                href={qs({ dia: dateKey, barbeiro: null })}
-                scroll={false}
-                className={`label rounded-full px-3.5 py-2 transition-all ${
-                  !barberFilter
-                    ? "border border-electric/50 bg-electric/10 text-electric"
-                    : "border border-white/10 text-steel-400 hover:text-white"
-                }`}
-              >
-                Todos
-              </Link>
-              {equipe.map((t) => (
-                <Link
-                  key={t.barber.id}
-                  href={qs({ dia: dateKey, barbeiro: t.barber.id })}
-                  scroll={false}
-                  className={`label rounded-full px-3.5 py-2 transition-all ${
-                    barberFilter === t.barber.id
-                      ? "border border-electric/50 bg-electric/10 text-electric"
-                      : "border border-white/10 text-steel-400 hover:text-white"
-                  }`}
-                >
-                  {t.barber.shortName}
-                </Link>
-              ))}
             </div>
 
             {agenda.length === 0 ? (
@@ -256,7 +181,7 @@ export default async function AdminDashboard({
               </p>
             ) : (
               <ul className="mt-5 space-y-2">
-                {agenda.map((a) => {
+                {agenda.slice(0, MOSTRAR).map((a) => {
                   const st = statusStyles[a.status];
                   return (
                     <li
@@ -306,6 +231,15 @@ export default async function AdminDashboard({
                   );
                 })}
               </ul>
+            )}
+            {restantes > 0 && (
+              <Link
+                href="/admin/agenda"
+                className="label mt-3 flex items-center justify-center gap-1.5 rounded-2xl border border-dashed border-white/12 py-3.5 text-steel-300 transition-colors hover:border-electric/40 hover:text-white"
+              >
+                +{restantes} na agenda de hoje
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </Link>
             )}
           </div>
         </Reveal>
