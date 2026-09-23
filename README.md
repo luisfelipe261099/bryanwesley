@@ -49,8 +49,9 @@ Utilitários em [`app/globals.css`](app/globals.css): `.glass`, `.btn-royal`,
 | `/admin/clientes` | `ADMIN` | Lista com busca, filtros, ordenação, paginação, cadastro pelo balcão e importar/exportar |
 | `/admin/clientes/[id]` | `ADMIN` | Ficha: cadastro, marcar horário, histórico, plano e pagamentos |
 | `/admin/relatorios` | `ADMIN` | Fechamento mensal por barbeiro + CSV |
-| `/admin/notificacoes` | `ADMIN` | Fila de mensagens, reenvio e disparo manual |
-| `/api/whatsapp/webhook` | Meta | Mensagem recebida no WhatsApp entra no atendente que marca o horário |
+| `/admin/notificacoes` | `ADMIN` | WhatsApp da barbearia (conectar, QR code), fila de mensagens, reenvio e disparo manual |
+| `/api/whatsapp/waha` | WAHA | Mensagem recebida no WhatsApp (número comum) entra no atendente que marca o horário |
+| `/api/whatsapp/webhook` | Meta | O mesmo, pela Cloud API oficial |
 | `/api/health` | Monitor | Disponibilidade e latência do banco |
 
 O acesso é barrado no [`middleware.ts`](middleware.ts) e reconferido em cada
@@ -201,7 +202,7 @@ Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
 ## Testes
 
 ```bash
-npm test                  # 365 verificações
+npm test                  # 537 verificações
 npm run test:agenda       # 34 — motor de agenda, jornada por barbeiro, faixas de meta
 npm run test:fixo         # 17 — horário fixo, ocorrência cancelada, transição concorrente
 npm run test:seguranca    # 18 — teto de agendamentos, webhook, redirect, CSV, sessão
@@ -216,10 +217,18 @@ npm run test:auditoria2   # 60 — preço com ponto, redirect com caractere de c
                           #      cobertura parcial, remarcação sem janela sem horário,
                           #      confirmação derrubada no cancelamento, freio da agenda,
                           #      troca de serviços de um horário marcado e bloqueios
-npm run test:whatsapp     # 67 — link pré-preenchido, leitura do webhook da Meta
-                          #      e a conversa inteira do atendente: menu,
-                          #      serviço, dia, horário, o agendamento fechado
-                          #      no sistema e o cancelamento pelo dono
+npm run test:whatsapp     # 179 — a conversa inteira do atendente (menu, serviço,
+                          #      dia, horário, agendamento fechado, cancelamento
+                          #      pelo dono) e o que se digita sem IA: "2",
+                          #      "sábado", "15h", "sim", "meu nome é"; o texto
+                          #      numerado, o nono dígito, os eventos do WAHA e a
+                          #      conferência do que o Gemini devolve
+npm run test:waha         # 60 — de ponta a ponta com um WAHA e um Gemini de
+                          #      mentira: assinatura, conversa por números,
+                          #      mensagem repetida, cliente antigo sem o nono
+                          #      dígito, barbearia assumindo pelo celular, @lid,
+                          #      áudio, lembrete pelo id certo, número
+                          #      desconectado e o botão Conectar
 ```
 
 Há ainda um roteiro de navegador (Playwright) com 305 verificações de ponta a
@@ -261,61 +270,97 @@ materialização idempotente do horário fixo.
 ## Agendamento pelo WhatsApp
 
 A pessoa chama no WhatsApp e sai de lá com o horário marcado — sem abrir
-site, sem baixar nada. São dois caminhos, e os dois desembocam na mesma
-agenda.
-
-**1. O atendente dentro da conversa.** Quem manda mensagem para o número da
-barbearia recebe um menu e vai tocando: escolhe o serviço (com preço e
-duração), escolhe o dia entre os que a barbearia abre, escolhe entre os
-horários **realmente livres** daquele dia — a mesma disponibilidade que o
-site usa, já descontando atendimentos, bloqueios e fim de expediente — e
-pronto. Quem ainda não é cliente só informa o nome; quem já é, nem isso. A
-confirmação volta na hora com o código, e o horário entra no sistema como
+site, sem baixar nada. O atendente mostra os serviços (com preço e duração),
+os dias em que a barbearia abre e os horários **realmente livres** daquele
+dia — a mesma disponibilidade do site, já descontando atendimentos, bloqueios
+e fim de expediente. Quem ainda não é cliente informa o nome; quem já é, nem
+isso. A confirmação volta com o código, e o horário entra no sistema como
 qualquer outro: lugar na agenda, barbeiro escolhido pelo sistema, comissão e
 os lembretes de 24h e 2h. Pelo mesmo menu dá para ver os horários marcados e
-cancelar (com a mesma regra de 2h do site — e sempre conferindo, pelo
-telefone da conversa, que o horário é de quem está pedindo).
+cancelar (com a regra de 2h do site, e sempre conferindo pelo telefone da
+conversa que o horário é de quem pede).
 
-A conversa inteira está em [`lib/whatsapp-bot.ts`](lib/whatsapp-bot.ts), que
-não conhece rede: recebe o que a pessoa mandou e devolve o que responder.
-[`lib/whatsapp-inbox.ts`](lib/whatsapp-inbox.ts) só lê o envelope da Meta
-(texto e toques em lista/botão) e
-[`app/api/whatsapp/webhook/route.ts`](app/api/whatsapp/webhook/route.ts) faz
-a ponte. Onde cada um parou fica em `whatsapp_sessions`, uma linha por
-telefone, esquecida depois de meia hora — e a varredura de despacho limpa as
-sobras.
+```
+Cliente:   oi
+Barbearia: Oi, João! Aqui é a Bryan Wesley Barbearia. […]
+           *1.* Marcar horário — Escolher serviço, dia e hora
+           *2.* Endereço e horário — Onde fica e quando a gente abre
+Cliente:   corte
+Barbearia: Qual deles?
+           *1.* Corte Signature — R$ 90,00 · 40min
+           *2.* Corte & Lavagem — R$ 90,00 · 45min
+Cliente:   1
+Barbearia: Corte Signature 👌 Para que dia?  (*1.* Hoje, 23/09 …)
+Cliente:   sábado
+Barbearia: Sábado, 26 de setembro — estes horários estão livres: (*1.* 09:00 …)
+Cliente:   2
+Barbearia: Quase lá! Como é seu nome completo?
+Cliente:   João da Silva
+Barbearia: Tá marcado! ✂️ Sábado, 26 de setembro às 09:30. Seu código: CKUR2Z
+```
 
-**2. O link pré-preenchido.** Para quando a barbearia quer convidar alguém:
-em *Mensagens* o painel monta um link como
-`.../agendar?nome=João&fone=41999998888&servico=corte`. O cliente abre e a
-tela já vem com o nome, o WhatsApp e o serviço. Funciona sem depender de
-aprovação de ninguém — é o que atende enquanto o número não está aprovado na
-Meta. A caixa tem "copiar link", "copiar mensagem pronta" e, com o número
-preenchido, "abrir no WhatsApp".
+**Dois jeitos de ligar**, escolhidos pelas variáveis de ambiente:
 
-Para ligar o caminho 1:
+| | WAHA | Cloud API da Meta |
+|---|---|---|
+| Número | o de sempre, conectado por QR code | um número aprovado pela Meta |
+| Custo | grátis (o servidor pode ser grátis também) | responder quem escreveu é grátis; lembrete é cobrado por mensagem |
+| Menus | texto numerado — responde "1", "2"… | listas e botões |
+| Oficial | não: número que parecer robô de spam pode ser bloqueado | sim |
+| Onde roda | um servidor ligado 24h ([`deploy/waha`](deploy/waha/LEIAME.md)) | na Meta |
 
-| Variável | Onde achar |
-|----------|------------|
-| `WHATSAPP_TOKEN` | Meta → WhatsApp → API Setup (token permanente do app) |
-| `WHATSAPP_PHONE_NUMBER_ID` | mesma tela, campo "Phone number ID" |
-| `WHATSAPP_VERIFY_TOKEN` | você inventa; repete no painel da Meta |
-| `WHATSAPP_APP_SECRET` | Meta → Configurações do app → Básico |
-| `NEXT_PUBLIC_SITE_URL` | o endereço público do site, para o link sair certo |
+Com os dois configurados, `WHATSAPP_PROVIDER` decide. O passo a passo do WAHA
+— servidor grátis (Oracle Cloud ou Google Cloud), Docker com HTTPS automático,
+variáveis na Vercel e o botão **Conectar** do painel, que cria a sessão já com
+o webhook e mostra o QR code (ou um código, para quem está no próprio
+celular) — está em [`deploy/waha/LEIAME.md`](deploy/waha/LEIAME.md).
 
-Depois, no painel da Meta: **WhatsApp → Configuração → Webhooks → editar**,
-URL `https://SEU-SITE/api/whatsapp/webhook`, o mesmo `WHATSAPP_VERIFY_TOKEN`,
-e assine o campo **messages**.
+**O que o atendente entende.** Em qualquer dos dois, a pessoa pode responder
+com o número da opção ou escrever: "sábado", "amanhã", "26/09", "15h", "3 da
+tarde", o nome do serviço ("corte" — e, se houver dois cortes, ele pergunta
+qual), "sim", "meu nome é João". Com o **Gemini** (`GEMINI_API_KEY`, grátis no
+Google AI Studio), entende frases inteiras: "quero cortar sábado de tarde,
+umas 3h". O Gemini só *interpreta* — tudo o que ele devolve é conferido contra
+o catálogo e a agenda de verdade, e nada é marcado sem o cliente confirmar. No
+limite do plano grátis, lento ou fora do ar, o atendente segue pelo menu. Ao
+Google vai só o texto da mensagem, os nomes dos serviços e o calendário —
+nunca telefone, cadastro ou histórico (no plano grátis o conteúdo pode ser
+usado pelo Google; a página de privacidade diz isso).
 
-Enquanto faltar qualquer variável, a rota responde 503 e o resto do sistema
-segue igual — inclusive o link do caminho 2. O POST só é aceito com a
-assinatura `X-Hub-Signature-256` conferida contra o app secret; o endereço é
-público. Cada número tem teto de 60 mensagens a cada 15 minutos: conversa de
-verdade gasta meia dúzia, e o teto só existe para quem tentar usar o
-atendente como megafone. Se o envio imediato de um texto falhar, ele entra na
-fila de *Mensagens* em vez de se perder (lista e botões não: fora da janela
-de 24h a Meta recusa mensagem interativa, e uma lista de horários entregue
-amanhã já estaria errada).
+**Gente da barbearia no meio.** No WAHA, quando alguém responde um cliente
+pelo celular, o atendente fica quieto naquela conversa por 4 horas
+(`WHATSAPP_PAUSA_HUMANO_MIN`) para não falar por cima. O painel lista essas
+conversas com **Devolver ao atendente**; o cliente também pode mandar "menu".
+Por isso a saudação e a mensagem de ausência automáticas do WhatsApp Business
+precisam ficar desligadas.
+
+**Cuidados com o WAHA.** Ele só responde quem escreveu — com "visto" e
+"digitando…" antes, como gente — e os lembretes saem espaçados. Número
+desconectado (QR pendente, celular sem internet) não queima a fila: a
+varredura percebe e espera. Celular brasileiro antigo aparece no WhatsApp sem
+o nono dígito (em Curitiba, a maioria): o sistema devolve o 9 para achar o
+cliente no cadastro e, para mandar lembrete, pergunta ao WhatsApp qual é o id
+certo do número. Quando o WhatsApp esconde o número (`@lid`), o sistema pede
+ao WAHA; se nem assim, responde com o link do site.
+
+**Segurança das rotas.** `/api/whatsapp/waha` só aceita o que vier assinado
+com `WAHA_HMAC_KEY` (HMAC-SHA512 em `X-Webhook-Hmac`) e
+`/api/whatsapp/webhook`, com o app secret da Meta (`X-Hub-Signature-256`).
+A mesma mensagem reenviada não vira duas respostas. Cada número tem teto de 60
+mensagens a cada 15 minutos. A chave do WAHA nunca vai para o navegador: o QR
+code passa pelo site.
+
+**O link pré-preenchido** continua no painel para convidar alguém:
+`.../agendar?nome=João&fone=41999998888&servico=corte` abre a agenda já com
+os dados, e funciona com ou sem o atendente conectado.
+
+A conversa está em [`lib/whatsapp-bot.ts`](lib/whatsapp-bot.ts) (sem rede:
+recebe o que a pessoa mandou e devolve o que responder), o que se digita em
+[`lib/whatsapp-texto.ts`](lib/whatsapp-texto.ts), o Gemini em
+[`lib/whatsapp-ia.ts`](lib/whatsapp-ia.ts), a leitura dos envelopes em
+[`lib/whatsapp-inbox.ts`](lib/whatsapp-inbox.ts) e o envio em
+[`lib/providers`](lib/providers). Onde cada um parou fica em
+`whatsapp_sessions`, esquecido depois de meia hora.
 
 ## Segurança
 

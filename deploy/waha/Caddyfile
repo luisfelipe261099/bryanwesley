@@ -1,0 +1,3 @@
+{$DOMINIO} {
+	reverse_proxy waha:3000
+}

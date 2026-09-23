@@ -1,0 +1,38 @@
+# WAHA — o WhatsApp da barbearia num servidor ligado 24h.
+# Passo a passo em deploy/waha/LEIAME.md.
+#
+#   cp .env.example .env    # e preencha
+#   docker compose up -d
+services:
+  waha:
+    # Motor GOWS: sem navegador, cabe folgado em 1 GB de RAM.
+    # Servidor ARM (Oracle Ampere)? Troque por devlikeapro/waha:gows-arm.
+    image: devlikeapro/waha:gows
+    restart: always
+    env_file: .env
+    environment:
+      WHATSAPP_DEFAULT_ENGINE: GOWS
+      WAHA_BASE_URL: https://${DOMINIO}
+      TZ: America/Sao_Paulo
+    volumes:
+      # A sessão do WhatsApp mora aqui: sobrevive a reinício e atualização.
+      - ./sessions:/app/.sessions
+    # Sem "ports": ninguém de fora fala com o WAHA direto, só pelo Caddy.
+
+  caddy:
+    # HTTPS automático (Let's Encrypt) — a Vercel só conversa com https.
+    image: caddy:2
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMINIO: ${DOMINIO}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

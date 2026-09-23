@@ -12,7 +12,10 @@ import { getSettings, getAvailability } from "../lib/schedule";
 import { shopToday, addDays, weekdayOf, utcToShopParts, formatShopTime } from "../lib/time";
 import { linkDeAgendamento, linkWaMe, conviteDeAgendamento } from "../lib/whatsapp-link";
 import { extrairMensagens } from "../lib/whatsapp-inbox";
-import { processarMensagem, limparSessoesVelhas, VALIDADE_SESSAO_MS } from "../lib/whatsapp-bot";
+import {
+  processarMensagem, limparSessoesVelhas, VALIDADE_SESSAO_MS,
+  pausarAtendente, retomarAtendente, conversasPausadas,
+} from "../lib/whatsapp-bot";
 import { eq, inArray, like } from "drizzle-orm";
 
 let p = 0, f = 0;
@@ -108,7 +111,7 @@ async function main() {
     };
     const msgs = extrairMensagens(corpo);
     ok("pega só as mensagens de texto", msgs.length === 1, String(msgs.length));
-    ok("com o número de quem escreveu", msgs[0]?.de === "5541970007001");
+    ok("com o número de quem escreveu", msgs[0]?.de === "41970007001", msgs[0]?.de);
     ok("o texto sem espaço sobrando", msgs[0]?.texto === "oi, tem horário?", msgs[0]?.texto);
     ok("e o nome do perfil", msgs[0]?.nomeDoPerfil === "João");
 
@@ -330,6 +333,49 @@ async function main() {
     const lixo = await processarMensagem({ de: "5541970007005", escolha: "xxx:yyy" });
     ok("opção desconhecida cai no menu", lixo[0]?.mensagem.tipo === "lista",
       JSON.stringify(lixo[0]?.mensagem)?.slice(0, 80));
+  }
+
+  console.log("\n8. Quando a barbearia assume a conversa");
+  {
+    const F = "41970007006";
+    await pausarAtendente(F);
+    const quieto = await processarMensagem({ de: `55${F}`, texto: "tem horário amanhã?" });
+    ok("o atendente fica quieto", quieto.length === 0, JSON.stringify(quieto));
+    const toque = await processarMensagem({ de: `55${F}`, escolha: "menu:agendar" });
+    ok("nem um toque em lista antiga acorda ele", toque.length === 0);
+    ok("a conversa aparece no painel", (await conversasPausadas()).some((c) => c.phone === F));
+
+    // A varredura das conversas velhas não pode apagar uma pausa em vigor.
+    await db.update(whatsappSessions)
+      .set({ updatedAt: new Date(Date.now() - VALIDADE_SESSAO_MS - 60_000) })
+      .where(eq(whatsappSessions.phone, F));
+    await limparSessoesVelhas();
+    ok("a pausa sobrevive à limpeza", (await conversasPausadas()).some((c) => c.phone === F));
+
+    const menu = await processarMensagem({ de: `55${F}`, texto: "menu" });
+    ok("'menu' traz o atendente de volta", menu[0]?.mensagem.tipo === "lista");
+    ok("e a pausa acaba", !(await conversasPausadas()).some((c) => c.phone === F));
+
+    await pausarAtendente(F);
+    await retomarAtendente(F);
+    const depois = await processarMensagem({ de: `55${F}`, texto: "oi" });
+    ok("o botão do painel também devolve a conversa", depois[0]?.mensagem.tipo === "lista");
+  }
+
+  console.log("\n9. Resposta em texto, sem botão (WAHA)");
+  {
+    const F = "5541970007007";
+    const m1 = await processarMensagem({ de: F, texto: "oi" });
+    ok("o menu vem com opções", m1[0]?.mensagem.tipo === "lista");
+    const m2 = await processarMensagem({ de: F, texto: "1" });
+    ok("'1' escolhe a primeira opção (marcar)", m2[0]?.mensagem.tipo === "lista" &&
+      JSON.stringify(m2[0].mensagem).includes("Qual serviço"), JSON.stringify(m2[0]?.mensagem).slice(0, 80));
+    const m3 = await processarMensagem({ de: F, texto: "99" });
+    ok("número fora da lista: pede de novo, sem perder o lugar",
+      m3[0]?.mensagem.tipo === "texto" && m3[0].mensagem.texto.includes("Não entendi"), JSON.stringify(m3[0]?.mensagem));
+    const m4 = await processarMensagem({ de: F, texto: "1" });
+    ok("e o número certo segue a conversa", JSON.stringify(m4.at(-1)?.mensagem ?? "").includes("Para que dia"),
+      JSON.stringify(m4.at(-1)?.mensagem).slice(0, 80));
   }
 
   await limpar();

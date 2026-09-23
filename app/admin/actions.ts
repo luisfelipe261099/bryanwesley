@@ -50,6 +50,9 @@ import { normalizePhone, isValidPhone, nextPlaceholderPhone, isPlaceholderPhone 
 import { planClientImport, chaveNome } from "@/lib/import";
 import { nextRenewal } from "@/lib/subscriptions";
 import { formatBRL } from "@/lib/money";
+import { publicBaseUrl } from "@/lib/qr";
+import { wahaConfigurado, wahaConectar, wahaCodigoDePareamento } from "@/lib/providers/waha";
+import { retomarAtendente } from "@/lib/whatsapp-bot";
 
 export type Result = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -1204,6 +1207,12 @@ export async function flushNotifications(): Promise<Result> {
       };
     }
     const r = await runDispatch(50);
+    if (r.desconectado) {
+      return {
+        ok: false,
+        error: `O WhatsApp não está conectado — conecte em "WhatsApp da barbearia", aqui em cima. ${r.pendentes} mensagem(ns) aguardando.`,
+      };
+    }
     const partes = [`${r.enviadas} mensagem(ns) enviada(s)`];
     if (r.falhas) partes.push(`${r.falhas} falha(s)`);
     if (r.descartadas) partes.push(`${r.descartadas} vencida(s) descartada(s)`);
@@ -1320,6 +1329,59 @@ export async function adminReschedule(input: {
     await admin();
     await rescheduleBooking(input);
     return done("Horário remarcado.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// ───────────────────── WhatsApp (WAHA) ─────────────────────
+
+/**
+ * "Conectar" do painel: cria (ou acerta) a sessão no WAHA já apontando o
+ * webhook para este site e liga. Pode apertar de novo sem medo — é o
+ * mesmo botão que conserta um webhook apontado para o lugar errado.
+ */
+export async function conectarWhatsapp(): Promise<Result> {
+  try {
+    await admin();
+    if (!wahaConfigurado()) {
+      return { ok: false, error: "Configure WAHA_URL e WAHA_API_KEY na Vercel primeiro." };
+    }
+    if (!process.env.WAHA_HMAC_KEY) {
+      return { ok: false, error: "Falta WAHA_HMAC_KEY na Vercel — sem ela o site recusa as mensagens." };
+    }
+    const r = await wahaConectar(`${publicBaseUrl()}/api/whatsapp/waha`);
+    if (!r.ok) return { ok: false, error: `O WAHA não aceitou: ${r.erro}` };
+    return done("Pronto. Se aparecer o QR code, é só escanear com o WhatsApp da barbearia.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Código de 8 letras para conectar sem escanear (painel aberto no próprio celular). */
+export async function codigoDoWhatsapp(
+  fone: string
+): Promise<{ ok: true; codigo: string } | { ok: false; error: string }> {
+  try {
+    await admin();
+    if (!isValidPhone(fone)) return { ok: false, error: "Digite o número do WhatsApp da barbearia, com DDD." };
+    const r = await wahaCodigoDePareamento(normalizePhone(fone));
+    if (r.codigo === null) {
+      return { ok: false, error: `Não deu para gerar o código (${r.erro}). Use o QR code.` };
+    }
+    return { ok: true, codigo: r.codigo };
+  } catch (e) {
+    const r = fail(e);
+    return r.ok ? { ok: false, error: "Não foi possível concluir." } : r;
+  }
+}
+
+/** Devolve a conversa ao atendente antes de a pausa acabar. */
+export async function retomarConversaWhatsapp(fone: string): Promise<Result> {
+  try {
+    await admin();
+    await retomarAtendente(fone);
+    return done("O atendente voltou a responder essa conversa.");
   } catch (e) {
     return fail(e);
   }

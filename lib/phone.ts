@@ -52,3 +52,19 @@ export function isValidPhone(input: string) {
   if (isPlaceholderPhone(d)) return false;
   return d.length === 10 || d.length === 11;
 }
+
+/**
+ * Telefone a partir do identificador do WhatsApp ("554188887777@c.us",
+ * "5541988887777@s.whatsapp.net" ou só os dígitos).
+ *
+ * Celular brasileiro registrado no WhatsApp antes do nono dígito costuma
+ * chegar SEM o 9 — em Curitiba (DDD 41) isso é a maioria. Sem devolver o
+ * 9, o cliente de sempre, cadastrado como 41 9 8888-7777, chegava como
+ * 41 8888-7777: outra pessoa para o sistema, sem os horários nem o plano
+ * dele. Fixo começa com 2 a 5; celular, com 6 a 9.
+ */
+export function telefoneDoWhatsapp(id: string) {
+  const d = normalizePhone((id ?? "").split("@")[0]);
+  if (d.length === 10 && /[6-9]/.test(d[2])) return `${d.slice(0, 2)}9${d.slice(2)}`;
+  return d;
+}

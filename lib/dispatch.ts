@@ -17,7 +17,8 @@ import { db } from "@/db/client";
 import { notifications, settings } from "@/db/schema";
 import { getSettings } from "./schedule";
 import { pendingNotifications, markSent, markFailed } from "./notifications";
-import { sendWhatsapp, isWhatsappConfigured } from "./providers/whatsapp";
+import { sendWhatsapp, isWhatsappConfigured, provedorAtivo } from "./providers/whatsapp";
+import { wahaStatus } from "./providers/waha";
 import { materializeRecurring, type MaterializeReport } from "./recurring";
 import { expireOverdueSubscriptions } from "./subscriptions";
 import { purgeRateLimits } from "./rate-limit";
@@ -38,6 +39,11 @@ export const DISPATCH_BUDGET_MS = 30_000;
 
 export type DispatchReport = {
   configurado: boolean;
+  /**
+   * O WAHA está configurado, mas o número não está conectado (QR code
+   * pendente, celular desligado): a fila espera, sem gastar tentativa.
+   */
+  desconectado?: boolean;
   enviadas: number;
   falhas: number;
   pendentes: number;
@@ -150,13 +156,28 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
   await limparSessoesVelhas();
 
   const fila = await pendingNotifications(limit);
-  const configurado = isWhatsappConfigured();
+  let configurado = isWhatsappConfigured();
+  let desconectado = false;
+  // Com o número desconectado, o WAHA não recusa o envio: ele fica
+  // pendurado até estourar o tempo. Cada mensagem gastaria 10s e uma
+  // tentativa — em quatro varreduras, a fila inteira virava erro.
+  if (configurado && fila.length > 0 && provedorAtivo() === "waha") {
+    const { status } = await wahaStatus();
+    if (status !== "WORKING") {
+      configurado = false;
+      desconectado = true;
+    }
+  }
 
   let enviadas = 0;
   let falhas = 0;
   let interrompida = false;
   if (configurado) {
     const limiteDeTempo = Date.now() + DISPATCH_BUDGET_MS;
+    // No WAHA (número comum), rajada de mensagens é o que faz o WhatsApp
+    // desconfiar de robô: entre uma e outra, uma pausa de gente.
+    const intervalo = provedorAtivo() === "waha" ? () => 1500 + Math.random() * 2500 : null;
+    let primeira = true;
     for (const n of fila) {
       // O envio é em série e cada chamada ao provedor pode demorar. Com a
       // fila cheia, a função estourava o tempo da Vercel e era morta no
@@ -167,6 +188,8 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
         interrompida = true;
         break;
       }
+      if (intervalo && !primeira) await new Promise((r) => setTimeout(r, intervalo()));
+      primeira = false;
       const res = await sendWhatsapp(n.phone, n.body);
       if (res.sent) {
         await markSent(n.id);
@@ -181,6 +204,7 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
 
   return {
     configurado,
+    ...(desconectado ? { desconectado } : {}),
     enviadas,
     falhas,
     pendentes: configurado ? fila.length - enviadas : fila.length,

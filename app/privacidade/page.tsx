@@ -25,6 +25,10 @@ const secoes = [
     p: "Somente com os serviços necessários para operar: hospedagem do sistema, envio de mensagens e processamento de pagamento. Cada um recebe apenas o mínimo para sua função.",
   },
   {
+    t: "Atendimento pelo WhatsApp",
+    p: "Quando você marca horário conversando com a gente no WhatsApp, as mensagens passam pelo nosso atendente automático. Para entender frases escritas do seu jeito, o texto da mensagem pode ser lido por um serviço de inteligência artificial do Google (Gemini) — só o que você escreveu, nunca seu telefone, cadastro ou histórico. Prefere falar com uma pessoa? É só pedir na conversa.",
+  },
+  {
     t: "Por quanto tempo",
     p: "Enquanto você for cliente e pelo prazo exigido por obrigações fiscais. Você pode pedir a exclusão a qualquer momento.",
   },

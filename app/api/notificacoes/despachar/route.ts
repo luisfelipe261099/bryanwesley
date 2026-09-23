@@ -49,7 +49,11 @@ async function handler(req: Request) {
     ...report,
     ...(report.configurado
       ? {}
-      : { mensagem: "Provedor de WhatsApp não configurado. As mensagens ficam na fila." }),
+      : {
+          mensagem: report.desconectado
+            ? "WhatsApp (WAHA) desconectado. As mensagens ficam na fila."
+            : "Provedor de WhatsApp não configurado. As mensagens ficam na fila.",
+        }),
   });
 }
 

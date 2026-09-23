@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { extrairMensagens } from "@/lib/whatsapp-inbox";
+import { extrairMensagens, chaveDaMensagem } from "@/lib/whatsapp-inbox";
 import { processarMensagem } from "@/lib/whatsapp-bot";
-import { sendWhatsappMessage, isWhatsappConfigured } from "@/lib/providers/whatsapp";
+import { sendMetaMessage, isMetaConfigured } from "@/lib/providers/whatsapp";
 import { queueFreeText } from "@/lib/notifications";
+import { hitRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -78,6 +79,12 @@ export async function POST(req: Request) {
 
   for (const msg of mensagens) {
     try {
+      // A Meta reenvia o mesmo lote quando a resposta demora: a mesma
+      // mensagem não pode virar duas respostas.
+      if (msg.id) {
+        const primeira = await hitRateLimit(chaveDaMensagem(msg.id), 1, 24 * 3600_000);
+        if (!primeira.ok) continue;
+      }
       const respostas = await processarMensagem(msg);
       for (const r of respostas) {
         // A janela de resposta do WhatsApp está aberta agora (a pessoa
@@ -86,8 +93,8 @@ export async function POST(req: Request) {
         // varredura em vez de se perder. Lista e botões não dá: fora da
         // janela de 24h a Meta recusa mensagem interativa, e uma lista
         // de horários entregue amanhã já estaria errada.
-        const enviado = isWhatsappConfigured()
-          ? await sendWhatsappMessage(r.para, r.mensagem)
+        const enviado = isMetaConfigured()
+          ? await sendMetaMessage(r.para, r.mensagem)
           : { sent: false as const, reason: "sem credenciais", retryable: true };
         if (!enviado.sent && r.mensagem.tipo === "texto") {
           await queueFreeText({ phone: r.para, body: r.mensagem.texto });

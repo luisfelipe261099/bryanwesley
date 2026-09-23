@@ -532,6 +532,14 @@ export const whatsappSessions = mysqlTable("whatsapp_sessions", {
     /** Deslocamento da lista de horários, para "ver mais". */
     offset?: number;
   }>(),
+  /**
+   * As opções da última pergunta, na ordem em que foram numeradas. É o
+   * que transforma um "2" digitado na escolha certa — no WAHA não existe
+   * botão, só texto.
+   */
+  opcoes: json("opcoes").$type<{ id: string; titulo: string }[]>(),
+  /** Alguém da barbearia respondeu pelo celular: o atendente fica quieto até aqui. */
+  pausadoAte: ts("pausado_ate"),
   updatedAt: tsNow("updated_at"),
 });
 
