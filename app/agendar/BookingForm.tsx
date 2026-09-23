@@ -35,6 +35,7 @@ export function BookingForm({
   days,
   plan,
   viewer,
+  prefill,
   minAdvanceHours,
 }: {
   services: Service[];
@@ -42,16 +43,28 @@ export function BookingForm({
   days: DayOption[];
   plan: (Plan & { covers: { id: number }[] }) | null;
   viewer: { name: string; phone: string } | null;
+  /** O que veio no link mandado pelo WhatsApp. */
+  prefill?: {
+    nome: string | null;
+    fone: string | null;
+    servicoId: number | null;
+    dia: string | null;
+  };
   minAdvanceHours: number;
 }) {
   const isSub = !!plan;
 
-  const [selected, setSelected] = useState<number[]>([]);
+  const [selected, setSelected] = useState<number[]>(
+    prefill?.servicoId ? [prefill.servicoId] : []
+  );
   const [barberId, setBarberId] = useState<number | null>(null);
-  const [dateKey, setDateKey] = useState<string | null>(days[0]?.dateKey ?? null);
+  const [dateKey, setDateKey] = useState<string | null>(
+    prefill?.dia ?? days[0]?.dateKey ?? null
+  );
   const [time, setTime] = useState<string | null>(null);
-  const [name, setName] = useState(viewer?.name ?? "");
-  const [phone, setPhone] = useState(viewer?.phone ?? "");
+  // O cliente logado manda; depois dele, o que veio no link.
+  const [name, setName] = useState(viewer?.name ?? prefill?.nome ?? "");
+  const [phone, setPhone] = useState(viewer?.phone ?? prefill?.fone ?? "");
   const [notes, setNotes] = useState("");
 
   const [slots, setSlots] = useState<Slot[]>([]);

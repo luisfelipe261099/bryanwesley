@@ -19,6 +19,7 @@ const KIND_LABEL: Record<string, string> = {
   AGENDAMENTO_REMARCADO: "Remarcação",
   ASSINATURA_RENOVADA: "Assinatura renovada",
   ASSINATURA_FALHOU: "Falha na assinatura",
+  RESPOSTA_WHATSAPP: "Resposta automática",
 };
 
 const STATUS_STYLE: Record<string, string> = {

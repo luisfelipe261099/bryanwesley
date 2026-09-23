@@ -14,6 +14,7 @@ import {
   boolean,
   datetime,
   customType,
+  json,
   uniqueIndex,
   index,
   primaryKey,
@@ -57,6 +58,8 @@ export const NOTIF_KINDS = [
   "AGENDAMENTO_REMARCADO",
   "ASSINATURA_RENOVADA",
   "ASSINATURA_FALHOU",
+  // Resposta do auto-atendente a quem escreveu no WhatsApp da barbearia.
+  "RESPOSTA_WHATSAPP",
 ] as const;
 
 // ───────────────────────── Usuários ─────────────────────────
@@ -511,6 +514,25 @@ export const rateLimits = mysqlTable("rate_limits", {
   chave: varchar("chave", { length: 80 }).notNull().primaryKey(),
   hits: int("hits").notNull().default(0),
   windowStart: tsNow("window_start"),
+});
+
+// Onde cada conversa do WhatsApp parou.
+//
+// O cliente escolhe serviço, dia e hora em mensagens separadas — entre
+// uma e outra, é isto que lembra o que ele já respondeu. Uma linha por
+// telefone; some sozinha depois de meia hora parada.
+export const whatsappSessions = mysqlTable("whatsapp_sessions", {
+  phone: varchar("phone", { length: 20 }).notNull().primaryKey(),
+  etapa: varchar("etapa", { length: 20 }).notNull().default("menu"),
+  dados: json("dados").$type<{
+    serviceIds?: number[];
+    dateKey?: string;
+    time?: string;
+    nome?: string;
+    /** Deslocamento da lista de horários, para "ver mais". */
+    offset?: number;
+  }>(),
+  updatedAt: tsNow("updated_at"),
 });
 
 // ───────────────────────── Relações ─────────────────────────

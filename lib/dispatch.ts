@@ -21,6 +21,7 @@ import { sendWhatsapp, isWhatsappConfigured } from "./providers/whatsapp";
 import { materializeRecurring, type MaterializeReport } from "./recurring";
 import { expireOverdueSubscriptions } from "./subscriptions";
 import { purgeRateLimits } from "./rate-limit";
+import { limparSessoesVelhas } from "./whatsapp-bot";
 
 /** Intervalo mínimo entre varreduras disparadas pelo painel. */
 export const HEARTBEAT_INTERVAL_MS = 10 * 60_000;
@@ -143,6 +144,10 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
   // Janelas de freio já vencidas não servem para nada e a tabela cresceria
   // para sempre.
   await purgeRateLimits(new Date(Date.now() - 24 * 3600_000));
+
+  // Conversas do WhatsApp abandonadas no meio também não servem: quem
+  // volta amanhã começa do menu, não de um "qual seu nome?" perdido.
+  await limparSessoesVelhas();
 
   const fila = await pendingNotifications(limit);
   const configurado = isWhatsappConfigured();

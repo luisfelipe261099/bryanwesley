@@ -50,6 +50,7 @@ Utilitários em [`app/globals.css`](app/globals.css): `.glass`, `.btn-royal`,
 | `/admin/clientes/[id]` | `ADMIN` | Ficha: cadastro, marcar horário, histórico, plano e pagamentos |
 | `/admin/relatorios` | `ADMIN` | Fechamento mensal por barbeiro + CSV |
 | `/admin/notificacoes` | `ADMIN` | Fila de mensagens, reenvio e disparo manual |
+| `/api/whatsapp/webhook` | Meta | Mensagem recebida no WhatsApp entra no atendente que marca o horário |
 | `/api/health` | Monitor | Disponibilidade e latência do banco |
 
 O acesso é barrado no [`middleware.ts`](middleware.ts) e reconferido em cada
@@ -200,7 +201,7 @@ Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
 ## Testes
 
 ```bash
-npm test                  # 297 verificações
+npm test                  # 365 verificações
 npm run test:agenda       # 34 — motor de agenda, jornada por barbeiro, faixas de meta
 npm run test:fixo         # 17 — horário fixo, ocorrência cancelada, transição concorrente
 npm run test:seguranca    # 18 — teto de agendamentos, webhook, redirect, CSV, sessão
@@ -215,9 +216,13 @@ npm run test:auditoria2   # 60 — preço com ponto, redirect com caractere de c
                           #      cobertura parcial, remarcação sem janela sem horário,
                           #      confirmação derrubada no cancelamento, freio da agenda,
                           #      troca de serviços de um horário marcado e bloqueios
+npm run test:whatsapp     # 67 — link pré-preenchido, leitura do webhook da Meta
+                          #      e a conversa inteira do atendente: menu,
+                          #      serviço, dia, horário, o agendamento fechado
+                          #      no sistema e o cancelamento pelo dono
 ```
 
-Há ainda um roteiro de navegador (Playwright) com 289 verificações de ponta a
+Há ainda um roteiro de navegador (Playwright) com 305 verificações de ponta a
 ponta: agendamento de visitante, login, todas as telas do admin, check-in por
 código, endpoint do cron protegido, tomada de conta com prova por código, nav
 por papel, troca de senha, assinatura pelo site, remarcação, relatórios,
@@ -238,7 +243,12 @@ do painel: a lista do dia agrupada por período, a semana e o que está por
 vir, os filtros por barbeiro e situação, a busca por cliente, a contagem de
 cada dia na tira, a remarcação feita pelo balcão, a troca de serviços de um
 horário já marcado, a confirmação antes de cancelar, os bloqueios dentro da
-lista e o cadastro de cliente pelo balcão.
+lista e o cadastro de cliente pelo balcão. A última parte percorre o caminho
+do WhatsApp: o link pré-preenchido abre a agenda com os dados do cliente, o
+horário escolhido aparece no painel, a conversa do atendente vai do menu ao
+horário marcado (conferindo que a lista de horários bate com a
+disponibilidade real e que ninguém cancela o horário alheio) e o webhook
+recusa qualquer chamada sem as credenciais da Meta.
 
 Uma parte do roteiro cuida só do celular: em 320, 360 e 390 pixels, nenhuma
 tela pode ter rolagem lateral nem conteúdo cortado fora de um trilho que
@@ -247,6 +257,65 @@ rola, e o menu do celular precisa cobrir a página inteira.
 Cobrem disponibilidade, bloqueios, antecedência, reserva dupla, corrida de
 concorrência, ciclo de vida do atendimento, fechamento da comissão e a
 materialização idempotente do horário fixo.
+
+## Agendamento pelo WhatsApp
+
+A pessoa chama no WhatsApp e sai de lá com o horário marcado — sem abrir
+site, sem baixar nada. São dois caminhos, e os dois desembocam na mesma
+agenda.
+
+**1. O atendente dentro da conversa.** Quem manda mensagem para o número da
+barbearia recebe um menu e vai tocando: escolhe o serviço (com preço e
+duração), escolhe o dia entre os que a barbearia abre, escolhe entre os
+horários **realmente livres** daquele dia — a mesma disponibilidade que o
+site usa, já descontando atendimentos, bloqueios e fim de expediente — e
+pronto. Quem ainda não é cliente só informa o nome; quem já é, nem isso. A
+confirmação volta na hora com o código, e o horário entra no sistema como
+qualquer outro: lugar na agenda, barbeiro escolhido pelo sistema, comissão e
+os lembretes de 24h e 2h. Pelo mesmo menu dá para ver os horários marcados e
+cancelar (com a mesma regra de 2h do site — e sempre conferindo, pelo
+telefone da conversa, que o horário é de quem está pedindo).
+
+A conversa inteira está em [`lib/whatsapp-bot.ts`](lib/whatsapp-bot.ts), que
+não conhece rede: recebe o que a pessoa mandou e devolve o que responder.
+[`lib/whatsapp-inbox.ts`](lib/whatsapp-inbox.ts) só lê o envelope da Meta
+(texto e toques em lista/botão) e
+[`app/api/whatsapp/webhook/route.ts`](app/api/whatsapp/webhook/route.ts) faz
+a ponte. Onde cada um parou fica em `whatsapp_sessions`, uma linha por
+telefone, esquecida depois de meia hora — e a varredura de despacho limpa as
+sobras.
+
+**2. O link pré-preenchido.** Para quando a barbearia quer convidar alguém:
+em *Mensagens* o painel monta um link como
+`.../agendar?nome=João&fone=41999998888&servico=corte`. O cliente abre e a
+tela já vem com o nome, o WhatsApp e o serviço. Funciona sem depender de
+aprovação de ninguém — é o que atende enquanto o número não está aprovado na
+Meta. A caixa tem "copiar link", "copiar mensagem pronta" e, com o número
+preenchido, "abrir no WhatsApp".
+
+Para ligar o caminho 1:
+
+| Variável | Onde achar |
+|----------|------------|
+| `WHATSAPP_TOKEN` | Meta → WhatsApp → API Setup (token permanente do app) |
+| `WHATSAPP_PHONE_NUMBER_ID` | mesma tela, campo "Phone number ID" |
+| `WHATSAPP_VERIFY_TOKEN` | você inventa; repete no painel da Meta |
+| `WHATSAPP_APP_SECRET` | Meta → Configurações do app → Básico |
+| `NEXT_PUBLIC_SITE_URL` | o endereço público do site, para o link sair certo |
+
+Depois, no painel da Meta: **WhatsApp → Configuração → Webhooks → editar**,
+URL `https://SEU-SITE/api/whatsapp/webhook`, o mesmo `WHATSAPP_VERIFY_TOKEN`,
+e assine o campo **messages**.
+
+Enquanto faltar qualquer variável, a rota responde 503 e o resto do sistema
+segue igual — inclusive o link do caminho 2. O POST só é aceito com a
+assinatura `X-Hub-Signature-256` conferida contra o app secret; o endereço é
+público. Cada número tem teto de 60 mensagens a cada 15 minutos: conversa de
+verdade gasta meia dúzia, e o teto só existe para quem tentar usar o
+atendente como megafone. Se o envio imediato de um texto falhar, ele entra na
+fila de *Mensagens* em vez de se perder (lista e botões não: fora da janela
+de 24h a Meta recusa mensagem interativa, e uma lista de horários entregue
+amanhã já estaria errada).
 
 ## Segurança
 

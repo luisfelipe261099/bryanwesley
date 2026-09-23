@@ -49,6 +49,10 @@ export async function renderTemplate(
       return `${first}, sua assinatura na ${shop} foi renovada. Bom corte!`;
     case "ASSINATURA_FALHOU":
       return `${first}, não conseguimos renovar sua assinatura na ${shop}. Atualize seu pagamento para não perder os benefícios.`;
+    case "RESPOSTA_WHATSAPP":
+      // O texto do atendente é montado em lib/whatsapp-bot e chega pronto
+      // em queueFreeText — não passa por template.
+      return `${first}, é a ${shop}. Fale com a gente por aqui.`;
   }
 }
 
@@ -118,6 +122,31 @@ export async function queueBookingNotifications(
   }
 
   await Promise.all(jobs);
+}
+
+/**
+ * Enfileira uma mensagem solta, sem agendamento por trás.
+ *
+ * É o que guarda a resposta do auto-atendente quando o envio imediato
+ * falha (ou quando o número ainda não foi aprovado pela Meta): a
+ * mensagem fica visível no painel e sai na próxima varredura.
+ */
+export async function queueFreeText(opts: {
+  phone: string;
+  body: string;
+  kind?: NotifKind;
+  scheduledFor?: Date;
+}) {
+  const [{ id }] = await db
+    .insert(notifications)
+    .values({
+      phone: opts.phone,
+      kind: opts.kind ?? "RESPOSTA_WHATSAPP",
+      body: opts.body,
+      scheduledFor: opts.scheduledFor ?? new Date(),
+    })
+    .$returningId();
+  return db.query.notifications.findFirst({ where: eq(notifications.id, id) });
 }
 
 /** Cancelou o horário: avisa o cliente e derruba os lembretes pendentes. */

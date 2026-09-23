@@ -9,13 +9,19 @@ import { users } from "@/db/schema";
 import { getSettings, listOpenDays } from "@/lib/schedule";
 import { listServices, listPlans, listTeam, activeSubscription } from "@/lib/queries";
 import { getSession } from "@/lib/auth";
-import { formatPhone } from "@/lib/phone";
+import { formatPhone, normalizePhone } from "@/lib/phone";
 import { BookingForm } from "./BookingForm";
 
 // A agenda muda a todo instante — nada de cache.
 export const dynamic = "force-dynamic";
 
-export default async function Agendar() {
+export default async function Agendar({
+  searchParams,
+}: {
+  // O link que a barbearia manda no WhatsApp já vem com os dados de quem
+  // está conversando: ?nome=&fone=&servico=&dia=
+  searchParams: { nome?: string; fone?: string; servico?: string; dia?: string };
+}) {
   const session = await getSession();
 
   const [settings, services, team, plans] = await Promise.all([
@@ -47,6 +53,22 @@ export default async function Agendar() {
           u ? { name: u.name, phone: formatPhone(u.phone) } : null
         )
     : null;
+
+  // Pré-preenchimento do link do WhatsApp. Vale só o que veio na URL: o
+  // telefone NÃO é consultado no banco, senão um link com o número de
+  // outra pessoa revelaria o nome dela.
+  const fonePre = normalizePhone(searchParams.fone ?? "");
+  const prefill = {
+    nome: (searchParams.nome ?? "").trim().slice(0, 80) || null,
+    fone: fonePre.length >= 10 ? formatPhone(fonePre) : null,
+    servicoId:
+      services.find((s) => s.slug === (searchParams.servico ?? "").trim())?.id ??
+      null,
+    dia:
+      searchParams.dia && days.some((d) => d.dateKey === searchParams.dia)
+        ? searchParams.dia
+        : null,
+  };
 
   return (
     <>
@@ -88,6 +110,7 @@ export default async function Agendar() {
             days={days}
             plan={plan}
             viewer={viewer}
+            prefill={prefill}
             minAdvanceHours={settings.minAdvanceHours}
           />
         )}
