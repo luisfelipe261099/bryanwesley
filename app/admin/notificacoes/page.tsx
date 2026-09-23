@@ -1,9 +1,10 @@
 import { notificationStats, recentNotifications } from "@/lib/notifications";
-import { isWhatsappConfigured, isMetaConfigured, provedorAtivo } from "@/lib/providers/whatsapp";
+import { isWhatsappConfigured, provedorAtivo } from "@/lib/providers/whatsapp";
 import { wahaConfigurado, wahaStatus } from "@/lib/providers/waha";
 import { iaConfigurada, MODELO_PADRAO } from "@/lib/whatsapp-ia";
 import { conversasPausadas } from "@/lib/whatsapp-bot";
 import { formatPhone } from "@/lib/phone";
+import { estadoDaPonte, painelAberto, PONTE_SILENCIO_MS } from "@/lib/ponte";
 import {
   utcToShopParts,
   formatShopTime,
@@ -22,7 +23,7 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminNotificacoes() {
   const webhookWaha = `${publicBaseUrl()}/api/whatsapp/waha`;
-  const [stats, rows, ultima, servicos, settings, pausadas, statusWaha] = await Promise.all([
+  const [stats, rows, ultima, servicos, settings, pausadas, statusWaha, ponte] = await Promise.all([
     notificationStats(),
     recentNotifications(40),
     lastDispatchAt(),
@@ -32,7 +33,17 @@ export default async function AdminNotificacoes() {
     // Só pergunta ao WAHA quando ele está configurado: sem isso, a tela
     // esperaria um servidor que não existe.
     wahaConfigurado() ? wahaStatus(webhookWaha) : Promise.resolve(null),
+    estadoDaPonte(),
   ]);
+
+  // Instalado pela ponte: com o painel aberto, o servidor dá sinal a cada
+  // 3 segundos (QR code fresco, "Conectado" na hora).
+  const pelaPonte = !process.env.WHATSAPP_PROVIDER && Boolean(ponte?.segredoHash);
+  if (pelaPonte) await painelAberto();
+  const foraDoAr =
+    pelaPonte &&
+    Boolean(ponte?.pareadaEm) &&
+    Date.now() - (ponte?.vistoEm ?? ponte!.pareadaEm!).getTime() > PONTE_SILENCIO_MS;
 
   // Cada jeito de ligar o WhatsApp precisa das suas variáveis; sem elas a
   // rota correspondente recusa tudo, de propósito.
@@ -51,18 +62,25 @@ export default async function AdminNotificacoes() {
   return (
     <div className="space-y-5">
       <ConexaoWhatsapp
-        provedor={provedorAtivo()}
+        provedor={pelaPonte ? "ponte" : provedorAtivo()}
+        ponte={{
+          status: ponte?.status ?? null,
+          numero: ponte?.numero ?? null,
+          nome: ponte?.nome ?? null,
+          qr: ponte?.qr ?? null,
+          codigoWhatsapp: ponte?.codigoWhatsapp ?? null,
+          vistoHa: ponte?.vistoEm ? labelAgo(ponte.vistoEm) : null,
+          foraDoAr,
+        }}
         waha={{
-          configurado: wahaConfigurado(),
           falta: faltaWaha,
           status: statusWaha?.status ?? null,
           numero: statusWaha?.numero ?? null,
           nome: statusWaha?.nome ?? null,
           webhookCerto: statusWaha?.webhookCerto ?? null,
           erro: statusWaha?.erro ?? null,
-          webhook: webhookWaha,
         }}
-        meta={{ configurado: isMetaConfigured(), falta: faltaMeta }}
+        meta={{ falta: faltaMeta }}
         ia={{ ligada: iaConfigurada(), modelo: process.env.GEMINI_MODEL || MODELO_PADRAO }}
         pausadas={pausadas.map((c) => ({
           phone: c.phone,
@@ -76,7 +94,7 @@ export default async function AdminNotificacoes() {
         servicos={servicos.map((s) => ({ slug: s.slug, name: s.name }))}
       />
       <NotificacoesPanel
-        configured={isWhatsappConfigured()}
+        configured={isWhatsappConfigured() || pelaPonte}
         ultimaVerificacao={ultima ? labelAgo(ultima) : null}
         stats={stats}
         rows={rows.map((n) => ({

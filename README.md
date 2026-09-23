@@ -50,7 +50,9 @@ Utilitários em [`app/globals.css`](app/globals.css): `.glass`, `.btn-royal`,
 | `/admin/clientes/[id]` | `ADMIN` | Ficha: cadastro, marcar horário, histórico, plano e pagamentos |
 | `/admin/relatorios` | `ADMIN` | Fechamento mensal por barbeiro + CSV |
 | `/admin/notificacoes` | `ADMIN` | WhatsApp da barbearia (conectar, QR code), fila de mensagens, reenvio e disparo manual |
-| `/api/whatsapp/waha` | WAHA | Mensagem recebida no WhatsApp (número comum) entra no atendente que marca o horário |
+| `/api/whatsapp/ponte/*` | Ponte | O servidor do WhatsApp (instalado pelo painel) pareia, dá sinal e repassa mensagens |
+| `/whatsapp/instalar.sh` | Público | Instalador de um comando (WAHA + ponte); só funciona com o código do painel |
+| `/api/whatsapp/waha` | WAHA | Mensagem recebida no WAHA com HTTPS próprio entra no atendente |
 | `/api/whatsapp/webhook` | Meta | O mesmo, pela Cloud API oficial |
 | `/api/health` | Monitor | Disponibilidade e latência do banco |
 
@@ -202,7 +204,7 @@ Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
 ## Testes
 
 ```bash
-npm test                  # 537 verificações
+npm test                  # 579 verificações
 npm run test:agenda       # 34 — motor de agenda, jornada por barbeiro, faixas de meta
 npm run test:fixo         # 17 — horário fixo, ocorrência cancelada, transição concorrente
 npm run test:seguranca    # 18 — teto de agendamentos, webhook, redirect, CSV, sessão
@@ -229,6 +231,12 @@ npm run test:waha         # 60 — de ponta a ponta com um WAHA e um Gemini de
                           #      dígito, barbearia assumindo pelo celular, @lid,
                           #      áudio, lembrete pelo id certo, número
                           #      desconectado e o botão Conectar
+npm run test:ponte        # 42 — o programa da ponte de verdade, como processo
+                          #      separado, contra um WAHA de mentira e as rotas
+                          #      reais: código de uso único, QR code no painel,
+                          #      código por número, fila de lembretes, mensagem
+                          #      que chega (em ordem), barbearia assumindo, @lid,
+                          #      segredo revogado e a ponte se atualizando
 ```
 
 Há ainda um roteiro de navegador (Playwright) com 305 verificações de ponta a
@@ -299,21 +307,43 @@ Cliente:   João da Silva
 Barbearia: Tá marcado! ✂️ Sábado, 26 de setembro às 09:30. Seu código: CKUR2Z
 ```
 
-**Dois jeitos de ligar**, escolhidos pelas variáveis de ambiente:
+**Três jeitos de ligar.** O WAHA (WhatsApp Web num servidor) não roda na
+Vercel: ela só acorda quando alguém abre o site, e o WhatsApp precisa ficar
+conectado o tempo todo. Então ele mora numa máquina à parte — que pode ser
+grátis.
 
-| | WAHA | Cloud API da Meta |
-|---|---|---|
-| Número | o de sempre, conectado por QR code | um número aprovado pela Meta |
-| Custo | grátis (o servidor pode ser grátis também) | responder quem escreveu é grátis; lembrete é cobrado por mensagem |
-| Menus | texto numerado — responde "1", "2"… | listas e botões |
-| Oficial | não: número que parecer robô de spam pode ser bloqueado | sim |
-| Onde roda | um servidor ligado 24h ([`deploy/waha`](deploy/waha/LEIAME.md)) | na Meta |
+| | Pela ponte (recomendado) | WAHA com HTTPS próprio | Cloud API da Meta |
+|---|---|---|---|
+| Número | o de sempre, por QR code | o de sempre, por QR code | um número aprovado pela Meta |
+| Onde roda | máquina grátis do Google Cloud (ou qualquer Linux) | um servidor com domínio | na Meta |
+| Instalar | colar **um comando** gerado no painel | Docker + Caddy + 3 variáveis na Vercel | app na Meta + 4 variáveis |
+| Domínio, porta aberta | não precisa | precisa | não precisa |
+| Custo | grátis | o do servidor | conversa grátis; lembrete ~R$ 0,04 |
+| Menus | texto numerado | texto numerado | listas e botões |
+| Oficial | não — número que parecer robô de spam pode ser bloqueado | não | sim |
 
-Com os dois configurados, `WHATSAPP_PROVIDER` decide. O passo a passo do WAHA
-— servidor grátis (Oracle Cloud ou Google Cloud), Docker com HTTPS automático,
-variáveis na Vercel e o botão **Conectar** do painel, que cria a sessão já com
-o webhook e mostra o QR code (ou um código, para quem está no próprio
-celular) — está em [`deploy/waha/LEIAME.md`](deploy/waha/LEIAME.md).
+**A ponte.** Ao lado do WAHA roda um programa pequeno e sem dependências
+([`public/whatsapp/ponte.mjs`](public/whatsapp/ponte.mjs)) que só faz
+conexões **de saída**: repassa ao site cada mensagem que chega e, de tempos
+em tempos, dá um sinal — conta como está o número, manda o QR code, busca as
+ordens do painel e as mensagens da fila. Instalar é gerar o comando no painel
+(**Mensagens → Gerar comando de instalação**) e colar na máquina: o
+[instalador](public/whatsapp/instalar.sh) põe Docker e swap, troca o código de
+uso único (30 minutos) por um segredo que só a máquina guarda — o site guarda o
+hash — e sobe o WAHA e a ponte sem nenhuma porta aberta. O QR code aparece no
+painel; rodar o comando de novo atualiza sem desconectar o número; a ponte se
+atualiza sozinha quando o site muda. O sinal é rápido (3s) só com o painel
+aberto ou com fila, e devagar no resto do tempo (20s conectado, 60s
+desconectado) — cada sinal é uma chamada na Vercel e algumas consultas no
+banco, os dois de plano grátis. Mensagem entregue à ponte fica reservada 5
+minutos: se a máquina cair no meio, volta sozinha para a fila. O passo a passo
+do Google Cloud — com as três escolhas que decidem se ele é grátis (região,
+`e2-micro`, disco padrão) — está no próprio painel e em
+[`deploy/waha/LEIAME.md`](deploy/waha/LEIAME.md). Render e Koyeb não servem:
+desligam a máquina sem acesso e apagam os arquivos ao reiniciar.
+
+Com mais de um configurado, a ponte instalada vale; `WHATSAPP_PROVIDER`
+(`waha` ou `meta`) força outro.
 
 **O que o atendente entende.** Em qualquer dos dois, a pessoa pode responder
 com o número da opção ou escrever: "sábado", "amanhã", "26/09", "15h", "3 da
@@ -343,8 +373,10 @@ cliente no cadastro e, para mandar lembrete, pergunta ao WhatsApp qual é o id
 certo do número. Quando o WhatsApp esconde o número (`@lid`), o sistema pede
 ao WAHA; se nem assim, responde com o link do site.
 
-**Segurança das rotas.** `/api/whatsapp/waha` só aceita o que vier assinado
-com `WAHA_HMAC_KEY` (HMAC-SHA512 em `X-Webhook-Hmac`) e
+**Segurança das rotas.** A ponte só entra com o segredo do pareamento
+(`Authorization: Bearer`), e o código de instalação é de uso único, vence em
+30 minutos e tem freio de tentativas. `/api/whatsapp/waha` só aceita o que
+vier assinado com `WAHA_HMAC_KEY` (HMAC-SHA512 em `X-Webhook-Hmac`) e
 `/api/whatsapp/webhook`, com o app secret da Meta (`X-Hub-Signature-256`).
 A mesma mensagem reenviada não vira duas respostas. Cada número tem teto de 60
 mensagens a cada 15 minutos. A chave do WAHA nunca vai para o navegador: o QR

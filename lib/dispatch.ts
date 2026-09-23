@@ -19,6 +19,7 @@ import { getSettings } from "./schedule";
 import { pendingNotifications, markSent, markFailed } from "./notifications";
 import { sendWhatsapp, isWhatsappConfigured, provedorAtivo } from "./providers/whatsapp";
 import { wahaStatus } from "./providers/waha";
+import { pontePareada } from "./ponte";
 import { materializeRecurring, type MaterializeReport } from "./recurring";
 import { expireOverdueSubscriptions } from "./subscriptions";
 import { purgeRateLimits } from "./rate-limit";
@@ -44,6 +45,8 @@ export type DispatchReport = {
    * pendente, celular desligado): a fila espera, sem gastar tentativa.
    */
   desconectado?: boolean;
+  /** Instalado pela ponte: o servidor da barbearia busca a fila sozinho. */
+  ponte?: boolean;
   enviadas: number;
   falhas: number;
   pendentes: number;
@@ -156,6 +159,23 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
   await limparSessoesVelhas();
 
   const fila = await pendingNotifications(limit);
+
+  // Instalado pela ponte: quem entrega é o servidor da barbearia, que
+  // busca a fila a cada sinal. Daqui não se manda nada.
+  if (!process.env.WHATSAPP_PROVIDER && (await pontePareada())) {
+    return {
+      configurado: true,
+      ponte: true,
+      enviadas: 0,
+      falhas: 0,
+      pendentes: fila.length,
+      descartadas,
+      interrompida: false,
+      horariosFixos,
+      assinaturasExpiradas,
+    };
+  }
+
   let configurado = isWhatsappConfigured();
   let desconectado = false;
   // Com o número desconectado, o WAHA não recusa o envio: ele fica

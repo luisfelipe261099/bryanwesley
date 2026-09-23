@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { lerEventoWaha, chaveDaMensagem } from "@/lib/whatsapp-inbox";
-import { processarMensagem, pausarAtendente } from "@/lib/whatsapp-bot";
-import { paraTexto } from "@/lib/providers/whatsapp";
+import { atenderEventoWaha } from "@/lib/whatsapp-atendimento";
 import {
   wahaConfigurado,
   wahaSessao,
@@ -12,24 +10,18 @@ import {
   wahaTelefoneDoLid,
 } from "@/lib/providers/waha";
 import { queueFreeText } from "@/lib/notifications";
-import { hitRateLimit } from "@/lib/rate-limit";
-import { publicBaseUrl } from "@/lib/qr";
-import { linkDeAgendamento } from "@/lib/whatsapp-link";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 /**
- * Entrada de mensagens do WAHA (o WhatsApp da barbearia conectado por QR
- * code num servidor próprio — veja deploy/waha).
+ * Entrada de mensagens do WAHA ligado direto (o site fala com o WAHA por
+ * HTTPS — veja deploy/waha). Quem instalou pela ponte não usa esta rota:
+ * lá o servidor da barbearia busca tudo em /api/whatsapp/ponte.
  *
- * Cada mensagem que chega passa pelo atendente (lib/whatsapp-bot) e a
- * resposta volta pelo WAHA como texto numerado. O que a barbearia manda
- * pelo celular também chega aqui: é o sinal para o atendente se calar
- * naquela conversa e deixar a pessoa falar com gente.
- *
- * O painel (Mensagens → Conectar) cria a sessão no WAHA já apontando para
- * esta rota, com a chave WAHA_HMAC_KEY. Sem as variáveis, 503.
+ * Cada mensagem passa pelo atendente e a resposta volta pelo WAHA como
+ * texto numerado. O que a barbearia manda pelo celular também chega
+ * aqui: é o sinal para o atendente se calar naquela conversa.
  */
 export async function POST(req: Request) {
   const cru = await req.text();
@@ -54,69 +46,38 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "corpo inválido" }, { status: 400 });
   }
 
-  const ev = lerEventoWaha(corpo, wahaSessao());
-  if (ev.tipo === "ignorar") return NextResponse.json({ ignorada: ev.motivo });
-
-  // O WAHA reenvia quando a resposta demora: a mesma mensagem não pode
-  // virar duas respostas (nem duas tentativas de marcar o mesmo horário).
-  const primeira = await hitRateLimit(chaveDaMensagem(ev.id), 1, 24 * 3600_000);
-  if (!primeira.ok) return NextResponse.json({ repetida: true });
-
   try {
-    const fone =
-      ev.de ?? (ev.chatId.endsWith("@lid") ? await wahaTelefoneDoLid(ev.chatId) : null);
-
-    if (ev.tipo === "humano") {
-      const ate = fone ? await pausarAtendente(fone) : null;
-      return NextResponse.json({ pausado: Boolean(ate) });
-    }
-
-    if (!fone) {
-      // Sem o número não há como achar o cadastro nem marcar em nome de
-      // alguém. O link do site resolve — uma vez a cada 15 minutos.
-      const vez = await hitRateLimit(`walid:${ev.chatId}`, 1, 15 * 60_000);
-      if (vez.ok) {
-        await wahaEnviarTexto(
-          ev.chatId,
-          `Oi! Para marcar seu horário, é por aqui: ${linkDeAgendamento(publicBaseUrl())}`
-        );
-      }
-      return NextResponse.json({ semTelefone: true });
-    }
-
-    const saidas = await processarMensagem({
-      de: fone,
-      texto: ev.texto,
-      nomeDoPerfil: ev.nomeDoPerfil,
-      midia: ev.midia,
+    const r = await atenderEventoWaha(corpo, {
+      sessao: wahaSessao(),
+      telefoneDoLid: wahaTelefoneDoLid,
     });
+    if (r.acoes.length === 0) {
+      return NextResponse.json({
+        ignorada: r.ignorada,
+        repetida: r.repetida,
+        pausado: r.pausado,
+        semTelefone: r.semTelefone,
+      });
+    }
+
+    // Visto, "digitando…", uma pausa curta: o jeito de gente responder,
+    // que é o que o WAHA recomenda para o número não parecer robô.
+    const chatId = r.acoes[0].chatId;
+    await wahaMarcarLida(chatId);
+    await wahaDigitando(chatId, true);
+    await espera(900 + Math.random() * 900);
+    await wahaDigitando(chatId, false);
 
     let respondidas = 0;
-    if (saidas.length) {
-      // Visto, "digitando…", uma pausa curta: o jeito de gente responder,
-      // que é o que o WAHA recomenda para o número não parecer robô.
-      await wahaMarcarLida(ev.chatId);
-      await wahaDigitando(ev.chatId, true);
-      await espera(900 + Math.random() * 900);
-      await wahaDigitando(ev.chatId, false);
-
-      for (const [i, s] of saidas.entries()) {
-        if (i > 0) await espera(500 + Math.random() * 500);
-        const r = await wahaEnviarTexto(ev.chatId, paraTexto(s.mensagem));
-        if (r.sent) {
-          respondidas++;
-        } else if (s.mensagem.tipo === "texto") {
-          // Texto (como a confirmação com o código) não se perde: vai para
-          // a fila e sai na próxima varredura. Menu, não — um menu de
-          // horários entregue depois já estaria velho.
-          await queueFreeText({ phone: fone, body: s.mensagem.texto });
-        }
-      }
+    for (const [i, a] of r.acoes.entries()) {
+      if (i > 0) await espera(500 + Math.random() * 500);
+      const envio = await wahaEnviarTexto(a.chatId, a.texto);
+      if (envio.sent) respondidas++;
+      else if (a.guardarSeFalhar && a.fone) await queueFreeText({ phone: a.fone, body: a.texto });
     }
-    return NextResponse.json({ respondidas });
+    return NextResponse.json({ respondidas, ...(r.semTelefone ? { semTelefone: true } : {}) });
   } catch (e) {
-    // Sempre 200: para o WAHA, erro é motivo para reenviar — e a mensagem
-    // já foi marcada como vista.
+    // Sempre 200: para o WAHA, erro é motivo para reenviar.
     console.error("Falha ao responder mensagem do WAHA:", e);
     return NextResponse.json({ erro: true });
   }

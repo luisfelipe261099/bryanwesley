@@ -69,12 +69,8 @@ export function NotificacoesPanel({
           <p className="font-semibold">WhatsApp ainda não configurado</p>
           <p className="mt-1.5 leading-relaxed text-amber-200/85">
             O sistema continua funcionando: as mensagens ficam gravadas na fila
-            e são enviadas assim que as variáveis{" "}
-            <code className="rounded bg-black/30 px-1">WHATSAPP_TOKEN</code> e{" "}
-            <code className="rounded bg-black/30 px-1">
-              WHATSAPP_PHONE_NUMBER_ID
-            </code>{" "}
-            forem preenchidas. Nenhuma mensagem se perde.
+            e saem assim que o WhatsApp da barbearia for conectado — é o cartão
+            lá em cima. Nenhuma mensagem se perde.
           </p>
         </div>
       )}

@@ -2,7 +2,7 @@
 // controle de fluxo do Next pelos helpers de ação.
 import "../db/load-env";
 import { db, pool } from "../db/client";
-import { appointments, settings, notifications } from "../db/schema";
+import { appointments, settings, notifications, whatsappPonte } from "../db/schema";
 import {
   claimDispatchSlot,
   runDispatch,
@@ -50,6 +50,9 @@ async function main() {
 
   console.log("\n2. Varredura sem provedor não consome tentativas");
   {
+    // "Sem provedor" inclui não ter servidor do WhatsApp instalado pela
+    // ponte — com ele, quem entrega a fila é o servidor.
+    await db.delete(whatsappPonte);
     const antes = await db
       .select({ id: notifications.id, attempts: notifications.attempts, status: notifications.status })
       .from(notifications)

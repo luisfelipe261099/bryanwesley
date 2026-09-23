@@ -11,6 +11,7 @@ import {
   int,
   varchar,
   text,
+  mediumtext,
   boolean,
   datetime,
   customType,
@@ -542,6 +543,41 @@ export const whatsappSessions = mysqlTable("whatsapp_sessions", {
   pausadoAte: ts("pausado_ate"),
   updatedAt: tsNow("updated_at"),
 });
+
+/**
+ * A ponte do WhatsApp: o programa que roda ao lado do WAHA no servidor
+ * da barbearia e só faz conexões DE SAÍDA para o site — sem domínio, sem
+ * porta aberta, sem variável na Vercel. Uma linha só (id = 1).
+ */
+export const whatsappPonte = mysqlTable("whatsapp_ponte", {
+  id: int("id").notNull().default(1).primaryKey(),
+  /** Código de instalação (sha256), de uso único e com prazo. */
+  codigoHash: varchar("codigo_hash", { length: 64 }),
+  codigoExpira: ts("codigo_expira"),
+  /** sha256 do segredo que o servidor usa em cada chamada. */
+  segredoHash: varchar("segredo_hash", { length: 64 }),
+  pareadaEm: ts("pareada_em"),
+  /** Último sinal do servidor. */
+  vistoEm: ts("visto_em"),
+  /** Situação da sessão no WAHA (WORKING, SCAN_QR_CODE…). */
+  status: varchar("status", { length: 40 }),
+  numero: varchar("numero", { length: 20 }),
+  nome: varchar("nome", { length: 120 }),
+  /** O QR code como data URL, só enquanto espera o pareamento. */
+  qr: mediumtext("qr"),
+  /** Código de pareamento por número, pedido pelo painel. */
+  codigoWhatsapp: varchar("codigo_whatsapp", { length: 40 }),
+  /** Ordens do painel esperando o servidor buscar. */
+  comandos: json("comandos").$type<ComandoPonte[]>(),
+  /** Painel aberto: o servidor pergunta mais rápido até aqui. */
+  painelAte: ts("painel_ate"),
+  versao: varchar("versao", { length: 40 }),
+});
+
+export type ComandoPonte =
+  | { tipo: "conectar" }
+  | { tipo: "codigo"; fone: string }
+  | { tipo: "sair" };
 
 // ───────────────────────── Relações ─────────────────────────
 

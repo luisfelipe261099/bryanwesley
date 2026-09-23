@@ -53,6 +53,13 @@ import { formatBRL } from "@/lib/money";
 import { publicBaseUrl } from "@/lib/qr";
 import { wahaConfigurado, wahaConectar, wahaCodigoDePareamento } from "@/lib/providers/waha";
 import { retomarAtendente } from "@/lib/whatsapp-bot";
+import {
+  pontePareada,
+  painelAberto,
+  novoCodigoDeInstalacao,
+  enviarComando,
+  desligarPonte,
+} from "@/lib/ponte";
 
 export type Result = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -1192,6 +1199,12 @@ export async function discardNotification(id: number): Promise<Result> {
 export async function flushNotifications(): Promise<Result> {
   try {
     await admin();
+    if (!process.env.WHATSAPP_PROVIDER && (await pontePareada())) {
+      // Pela ponte, quem manda é o servidor da barbearia: o painel aberto
+      // já faz ele perguntar a cada 3 segundos.
+      await painelAberto();
+      return done("O servidor do WhatsApp manda a fila nos próximos segundos.");
+    }
     if (!isWhatsappConfigured()) {
       const fila = await pendingNotifications(50);
       return {
@@ -1344,6 +1357,11 @@ export async function adminReschedule(input: {
 export async function conectarWhatsapp(): Promise<Result> {
   try {
     await admin();
+    if (await pontePareada()) {
+      await enviarComando({ tipo: "conectar" });
+      await painelAberto();
+      return done("Pedido enviado ao servidor. O QR code aparece aqui em alguns segundos.");
+    }
     if (!wahaConfigurado()) {
       return { ok: false, error: "Configure WAHA_URL e WAHA_API_KEY na Vercel primeiro." };
     }
@@ -1361,10 +1379,16 @@ export async function conectarWhatsapp(): Promise<Result> {
 /** Código de 8 letras para conectar sem escanear (painel aberto no próprio celular). */
 export async function codigoDoWhatsapp(
   fone: string
-): Promise<{ ok: true; codigo: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; codigo: string | null } | { ok: false; error: string }> {
   try {
     await admin();
     if (!isValidPhone(fone)) return { ok: false, error: "Digite o número do WhatsApp da barbearia, com DDD." };
+    if (await pontePareada()) {
+      // Pela ponte, o código volta no próximo sinal e aparece no painel.
+      await enviarComando({ tipo: "codigo", fone: normalizePhone(fone) });
+      await painelAberto();
+      return { ok: true, codigo: null };
+    }
     const r = await wahaCodigoDePareamento(normalizePhone(fone));
     if (r.codigo === null) {
       return { ok: false, error: `Não deu para gerar o código (${r.erro}). Use o QR code.` };
@@ -1382,6 +1406,54 @@ export async function retomarConversaWhatsapp(fone: string): Promise<Result> {
     await admin();
     await retomarAtendente(fone);
     return done("O atendente voltou a responder essa conversa.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * O comando que instala o WhatsApp num servidor: leva um código de uso
+ * único (30 minutos) que o instalador troca pelo segredo da ponte.
+ */
+export async function gerarComandoDaPonte(): Promise<
+  { ok: true; comando: string; expira: string } | { ok: false; error: string }
+> {
+  try {
+    await admin();
+    const { codigo, expira } = await novoCodigoDeInstalacao();
+    await painelAberto();
+    const site = publicBaseUrl().replace(/\/+$/, "");
+    return {
+      ok: true,
+      comando: `curl -fsSL ${site}/whatsapp/instalar.sh | sudo bash -s -- ${site} ${codigo}`,
+      expira: expira.toISOString(),
+    };
+  } catch (e) {
+    const r = fail(e);
+    return r.ok ? { ok: false, error: "Não foi possível concluir." } : r;
+  }
+}
+
+/** Desconecta o número do WhatsApp no servidor (para trocar de número). */
+export async function desconectarNumeroWhatsapp(): Promise<Result> {
+  try {
+    await admin();
+    if (!(await enviarComando({ tipo: "sair" }))) {
+      return { ok: false, error: "Não há servidor do WhatsApp instalado." };
+    }
+    await painelAberto();
+    return done("Pedido enviado. Em alguns segundos o número é desconectado.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Desliga o servidor instalado: ele para de valer até instalar de novo. */
+export async function desligarServidorWhatsapp(): Promise<Result> {
+  try {
+    await admin();
+    await desligarPonte();
+    return done("Servidor desligado. Para voltar, gere um novo comando de instalação.");
   } catch (e) {
     return fail(e);
   }
