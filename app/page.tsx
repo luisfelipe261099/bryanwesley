@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { whatsappEnviando } from "@/lib/whatsapp-status";
 import {
   CalendarPlus,
   Star,
@@ -84,7 +85,7 @@ export default async function Home() {
     getSession(),
   ]);
   const combo = services.find((s) => s.slug === "combo") ?? services[0];
-  const settings = await getSettings();
+  const [settings, avisaPorWhatsapp] = await Promise.all([getSettings(), whatsappEnviando()]);
   const info = shopFrom(settings);
   const unitLabel = info.unit;
   // "Unidade Cajuru" → "Cajuru", para o kicker da seção de equipe.
@@ -248,7 +249,14 @@ export default async function Home() {
               />
             </Reveal>
             <div className="mt-12 grid gap-6 md:grid-cols-3">
-              {steps.map((step, i) => (
+              {steps.map((step, i) => ({
+                ...step,
+                // Só promete WhatsApp quando ele está mandando de verdade.
+                text:
+                  i === 2 && !avisaPorWhatsapp
+                    ? "A confirmação e o código aparecem na hora, na tela. Membro? É só chegar."
+                    : step.text,
+              })).map((step, i) => (
                 <Reveal key={step.title} delay={i * 0.08}>
                   <div className="glass relative h-full rounded-2xl p-7">
                     <span className="absolute right-6 top-5 font-display text-5xl text-white/[0.06]">

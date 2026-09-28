@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { whatsappEnviando } from "@/lib/whatsapp-status";
 import { ArrowLeft, Ban } from "lucide-react";
 import { eq } from "drizzle-orm";
 import { Background } from "@/components/Background";
@@ -24,7 +25,7 @@ export default async function Agendar({
 }) {
   const session = await getSession();
 
-  const [settings, services, team, plans] = await Promise.all([
+  const [settings, services, team, plans, avisaPorWhatsapp] = await Promise.all([
     getSettings(),
     listServices(),
     listTeam(),
@@ -32,6 +33,7 @@ export default async function Agendar({
     // vitrine continua membro, e o servidor continua cobrindo os serviços
     // dele. Sem isso a tela cobrava o preço cheio de quem não ia pagar.
     listPlans({ todos: true }),
+    whatsappEnviando(),
   ]);
 
   const days = listOpenDays(settings, 10);
@@ -112,6 +114,7 @@ export default async function Agendar({
             viewer={viewer}
             prefill={prefill}
             minAdvanceHours={settings.minAdvanceHours}
+            avisaPorWhatsapp={avisaPorWhatsapp}
           />
         )}
       </main>

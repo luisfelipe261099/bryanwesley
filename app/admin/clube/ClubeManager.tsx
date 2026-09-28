@@ -89,6 +89,7 @@ export function ClubeManager({
   pagina,
   porPagina,
   total,
+  cobrancaOnline,
 }: {
   resumo: Resumo;
   pedidos: RequestRow[];
@@ -101,6 +102,8 @@ export function ClubeManager({
   pagina: number;
   porPagina: number;
   total: number;
+  /** InfinitePay ligada: só então existe o botão "Cobrar". */
+  cobrancaOnline: boolean;
 }) {
   const router = useRouter();
   const [navegando, start] = useTransition();
@@ -285,7 +288,7 @@ export function ClubeManager({
         ) : (
           <ul className={`space-y-2 ${navegando ? "opacity-60" : ""}`}>
             {assinantes.map((a) => (
-              <LinhaAssinante key={a.subscriptionId} assinante={a} planos={planos} />
+              <LinhaAssinante key={a.subscriptionId} assinante={a} planos={planos} cobrancaOnline={cobrancaOnline} />
             ))}
           </ul>
         )}
@@ -349,9 +352,11 @@ function Numero({
 function LinhaAssinante({
   assinante,
   planos,
+  cobrancaOnline,
 }: {
   assinante: Assinante;
   planos: PlanoEditavel[];
+  cobrancaOnline: boolean;
 }) {
   const [msg, setMsg] = useState<Msg>(null);
   const [cobranca, setCobranca] = useState<string | null>(null);
@@ -390,6 +395,9 @@ function LinhaAssinante({
   }
 
   function cancelar() {
+    // Cancelar encerra o plano na hora e solta o horário fixo: um clique
+    // sem querer não pode fazer isso.
+    if (!confirm(`Cancelar o plano de ${assinante.name}? Os benefícios e o horário fixo saem na hora.`)) return;
     setMsg(null);
     start(async () => {
       setMsg(notify(await cancelSubscription(assinante.userId), "Plano cancelado."));
@@ -470,7 +478,7 @@ function LinhaAssinante({
                   <Link2 className="h-3 w-3" />
                   Abrir cobrança
                 </a>
-              ) : (
+              ) : cobrancaOnline ? (
                 <button
                   type="button"
                   onClick={cobrar}
@@ -481,7 +489,7 @@ function LinhaAssinante({
                   <Link2 className="h-3 w-3" />
                   Cobrar
                 </button>
-              )}
+              ) : null}
               <button
                 type="button"
                 onClick={() => setTrocando((v) => !v)}

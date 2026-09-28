@@ -1,3 +1,4 @@
+import { isInfinitePayConfigured } from "@/lib/payments";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
@@ -61,6 +62,7 @@ export default async function FichaDoCliente({
       </Link>
 
       <FichaCliente
+        cobrancaOnline={isInfinitePayConfigured()}
         cliente={ficha.cliente}
         assinatura={
           ficha.assinatura

@@ -233,7 +233,13 @@ export async function createBooking(input: CreateBookingInput) {
     ignorarAntecedencia: !input.publicRequest,
   });
   if (availability.closed) {
-    throw new BookingError("A barbearia não abre nesse dia.");
+    throw new BookingError(
+      availability.motivo === "folga"
+        ? "Esse profissional não atende nesse dia. Escolha outro dia ou outro barbeiro."
+        : availability.motivo === "sem-equipe"
+          ? "Não há barbeiro atendendo nesse dia."
+          : "A barbearia não abre nesse dia."
+    );
   }
   const slot = availability.slots.find((s) => s.time === input.time);
   if (!slot) {
@@ -265,11 +271,21 @@ export async function createBooking(input: CreateBookingInput) {
   // próxima visita e ele pode assumir a conta depois definindo senha.
   let clientUserId = ownerId;
   if (!clientUserId) {
-    const [{ id }] = await db
-      .insert(users)
-      .values({ name: input.clientName.trim(), phone, role: "CLIENT" })
-      .$returningId();
-    clientUserId = id;
+    try {
+      const [{ id }] = await db
+        .insert(users)
+        .values({ name: input.clientName.trim(), phone, role: "CLIENT" })
+        .$returningId();
+      clientUserId = id;
+    } catch (err) {
+      // Dois pedidos do mesmo telefone novo ao mesmo tempo (duplo toque,
+      // duas abas): o outro criou o cadastro um instante antes. Usa o dele
+      // em vez de devolver um erro genérico.
+      if (dbErrorCode(err) !== DUP_ENTRY) throw err;
+      const dono = await db.query.users.findFirst({ where: eq(users.phone, phone) });
+      if (!dono) throw err;
+      clientUserId = dono.id;
+    }
   }
 
   // Poucas tentativas cobrem a colisão rara do código de 6 letras, e a
@@ -415,6 +431,12 @@ export async function rescheduleBooking(input: {
   dateKey: string;
   time: string;
   barberId?: number | null;
+  /**
+   * Pedido do próprio cliente: vale o mesmo que agendar pelo site — limite
+   * de dias, antecedência mínima e agenda pausada. Sem isto, remarcando dava
+   * para levar o horário para daqui a meses ou para daqui a 10 minutos.
+   */
+  publicRequest?: boolean;
 }) {
   const appt = await db.query.appointments.findFirst({
     where: eq(appointments.id, input.appointmentId),
@@ -466,6 +488,7 @@ export async function rescheduleBooking(input: {
     // varredura seguinte enxerga a semana "livre" e reserva de novo.
     recurringSlotId: appt.recurringSlotId,
     ignoreAppointmentId: appt.id,
+    publicRequest: input.publicRequest,
   });
 
   // Agora o antigo sai. O UPDATE é condicionado ao estado lido: se o

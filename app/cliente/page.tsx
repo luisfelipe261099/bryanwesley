@@ -37,6 +37,7 @@ import { CheckinQR } from "./CheckinQR";
 import { CancelButton, EmptyState, ChangePassword } from "./MeusHorarios";
 import { Remarcar } from "./Remarcar";
 import { PagarPlano, CancelarPlano, ManterPlano } from "./MinhaAssinatura";
+import { isInfinitePayConfigured } from "@/lib/payments";
 import { listOpenDays } from "@/lib/schedule";
 import { KeyRound } from "lucide-react";
 
@@ -358,7 +359,16 @@ export default async function ClienteDashboard({
                     />
                   </div>
                   <div className="mt-6 flex flex-wrap gap-3">
-                    <PagarPlano rotulo="Regularizar agora" />
+                    {/* Sem cobrança online ligada, o botão só devolvia erro
+                        depois do clique: o caminho é acertar na barbearia. */}
+                    {isInfinitePayConfigured() ? (
+                      <PagarPlano rotulo="Regularizar agora" />
+                    ) : (
+                      <p className="w-full text-sm text-amber-200">
+                        Para regularizar, acerte o pagamento na barbearia — no
+                        balcão ou pelo WhatsApp.
+                      </p>
+                    )}
                     <CancelarPlano />
                   </div>
                 </div>

@@ -37,7 +37,7 @@ export function Remarcar({
     let cancelled = false;
     setLoading(true);
     setAviso(null);
-    fetchAvailability({ dateKey, durationMin, barberId: who })
+    fetchAvailability({ dateKey, durationMin, barberId: who, remarcandoId: appointmentId })
       .then((r) => {
         if (cancelled) return;
         setSlots(r.slots);

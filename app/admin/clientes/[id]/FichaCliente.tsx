@@ -64,6 +64,7 @@ export function FichaCliente({
   days,
   resumo,
   fixo,
+  cobrancaOnline,
 }: {
   cliente: Cliente;
   assinatura: Assinatura;
@@ -73,12 +74,14 @@ export function FichaCliente({
   days: DayOption[];
   resumo: { concluidos: number; gasto: number; desde: string };
   fixo: { texto: string; barberName: string } | null;
+  /** InfinitePay ligada: só então existe o botão "Gerar cobrança". */
+  cobrancaOnline: boolean;
 }) {
   return (
     <div className="space-y-5">
       <Cabecalho cliente={cliente} resumo={resumo} fixo={fixo} />
       <Agendar cliente={cliente} services={services} team={team} days={days} />
-      <Plano cliente={cliente} assinatura={assinatura} plans={plans} />
+      <Plano cliente={cliente} assinatura={assinatura} plans={plans} cobrancaOnline={cobrancaOnline} />
     </div>
   );
 }
@@ -554,10 +557,12 @@ function Plano({
   cliente,
   assinatura,
   plans,
+  cobrancaOnline,
 }: {
   cliente: Cliente;
   assinatura: Assinatura;
   plans: { id: number; name: string; priceCents: number }[];
+  cobrancaOnline: boolean;
 }) {
   const [planId, setPlanId] = useState(String(plans[0]?.id ?? ""));
   const [cycle, setCycle] = useState<"MENSAL" | "ANUAL">("MENSAL");
@@ -585,6 +590,9 @@ function Plano({
   }
 
   function cancelar() {
+    // Cancelar encerra o plano na hora e solta o horário fixo: um clique
+    // sem querer não pode fazer isso.
+    if (!confirm(`Cancelar o plano de ${cliente.name}? Os benefícios e o horário fixo saem na hora.`)) return;
     setMsg(null);
     start(async () => {
       setMsg(notify(await cancelSubscription(cliente.id), "Plano cancelado."));
@@ -638,7 +646,7 @@ function Plano({
               <Link2 className="h-3.5 w-3.5" />
               Abrir cobrança
             </a>
-          ) : (
+          ) : cobrancaOnline ? (
             <button
               type="button"
               onClick={cobrar}
@@ -649,7 +657,7 @@ function Plano({
               <Link2 className="h-3.5 w-3.5" />
               Gerar cobrança
             </button>
-          )}
+          ) : null}
           {assinatura.status === "ATIVA" && (
             <button
               type="button"

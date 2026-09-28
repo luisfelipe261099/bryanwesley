@@ -87,6 +87,17 @@ export async function discardStaleNotifications(now = new Date()): Promise<numbe
     total += res.affectedRows;
   };
 
+  // Aviso com mais de um dia de atraso não sai. É o que protege o dia em
+  // que o WhatsApp for conectado: sem isto, todas as confirmações da fila
+  // (de agendamentos feitos há semanas) sairiam de uma vez — confusão para
+  // o cliente e, no WAHA, a rajada que faz o WhatsApp bloquear o número.
+  // Os lembretes de 24h e 2h têm regra própria (abaixo) e cobrem o recado.
+  await vencer(
+    ["AGENDAMENTO_CRIADO", "AGENDAMENTO_REMARCADO", "AGENDAMENTO_CANCELADO", "ASSINATURA_RENOVADA", "ASSINATURA_FALHOU", "RESPOSTA_WHATSAPP"],
+    new Date(now.getTime() - 24 * 3600_000),
+    "Vencida: aviso com mais de 1 dia de atraso"
+  );
+
   // Lembrete de 24h com mais de 12h de atraso: o de 2h cobre o que resta.
   await vencer(["LEMBRETE_24H"], new Date(now.getTime() - 12 * 3600_000), "Vencida: lembrete de 24h atrasado demais");
 

@@ -9,6 +9,9 @@ import { isValidPhone } from "@/lib/phone";
 import { hitRateLimit } from "@/lib/rate-limit";
 import { headers } from "next/headers";
 import type { Slot } from "@/lib/schedule";
+import { eq } from "drizzle-orm";
+import { db } from "@/db/client";
+import { appointments } from "@/db/schema";
 
 /** Quem está pedindo, do ponto de vista da rede. */
 function ipDaRequisicao() {
@@ -30,16 +33,32 @@ export async function fetchAvailability(params: {
   dateKey: string;
   durationMin: number;
   barberId: number | null;
+  /**
+   * Remarcação: o próprio horário não ocupa a cadeira — sem isto, empurrar
+   * o corte 30 minutos com o mesmo barbeiro aparecia como indisponível.
+   */
+  remarcandoId?: number;
 }): Promise<AvailabilityPayload> {
   // Equipe logada está fazendo encaixe: enxerga também os horários que a
   // antecedência mínima esconde do cliente.
   const session = await getSession();
   const daCasa = session?.role === "ADMIN" || session?.role === "BARBER";
+
+  // Só ignora o horário de quem pode remarcá-lo: o dono ou a equipe.
+  let ignorar: number | undefined;
+  if (params.remarcandoId && session) {
+    const appt = await db.query.appointments.findFirst({
+      where: eq(appointments.id, params.remarcandoId),
+    });
+    if (appt && (daCasa || appt.clientUserId === session.id)) ignorar = appt.id;
+  }
+
   const result = await getAvailability({
     dateKey: params.dateKey,
     durationMin: Math.max(params.durationMin, 1),
     barberId: params.barberId,
     ignorarAntecedencia: daCasa,
+    ignorarAppointmentId: ignorar,
   });
   return { slots: result.slots, closed: result.closed, motivo: result.motivo };
 }

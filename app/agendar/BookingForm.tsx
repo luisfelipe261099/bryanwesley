@@ -37,6 +37,7 @@ export function BookingForm({
   viewer,
   prefill,
   minAdvanceHours,
+  avisaPorWhatsapp = false,
 }: {
   services: Service[];
   team: TeamMember[];
@@ -51,6 +52,8 @@ export function BookingForm({
     dia: string | null;
   };
   minAdvanceHours: number;
+  /** O WhatsApp está mandando mensagem? Só então a tela promete isso. */
+  avisaPorWhatsapp?: boolean;
 }) {
   const isSub = !!plan;
 
@@ -411,7 +414,9 @@ export function BookingForm({
               />
             </label>
             <p className="text-xs text-steel-400">
-              Você recebe a confirmação e um lembrete no WhatsApp.
+              {avisaPorWhatsapp
+                ? "Você recebe a confirmação e um lembrete no WhatsApp."
+                : "A confirmação e o código aparecem na hora, na próxima tela."}
             </p>
           </div>
         </section>

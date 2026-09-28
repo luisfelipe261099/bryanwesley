@@ -52,6 +52,9 @@ export function CancelarPlano() {
     <Acao
       className="border border-white/12 text-steel-300 hover:border-red-400/50 hover:text-red-200"
       onRun={async () => {
+        // Um toque sem querer não pode encerrar o plano (e, se estiver
+        // vencido, soltar o horário fixo na hora).
+        if (!confirm("Cancelar seu plano do Clube? Os benefícios valem até o fim do ciclo já pago.")) return;
         const r = await cancelMyPlan();
         toast(r.ok ? (r.warning ?? "Plano cancelado.") : r.error, r.ok ? "ok" : "erro");
       }}

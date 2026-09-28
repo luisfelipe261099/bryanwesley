@@ -204,7 +204,7 @@ Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
 ## Testes
 
 ```bash
-npm test                  # 579 verificações
+npm test                  # 586 verificações
 npm run test:agenda       # 34 — motor de agenda, jornada por barbeiro, faixas de meta
 npm run test:fixo         # 17 — horário fixo, ocorrência cancelada, transição concorrente
 npm run test:seguranca    # 18 — teto de agendamentos, webhook, redirect, CSV, sessão
@@ -237,6 +237,10 @@ npm run test:ponte        # 42 — o programa da ponte de verdade, como processo
                           #      código por número, fila de lembretes, mensagem
                           #      que chega (em ordem), barbearia assumindo, @lid,
                           #      segredo revogado e a ponte se atualizando
+npm run test:revisao3     # 7 — a terceira revisão: aviso atrasado não sai numa
+                          #      rajada quando o WhatsApp for ligado, remarcar
+                          #      pelo cliente segue as regras do site, dois
+                          #      pedidos do mesmo telefone novo ao mesmo tempo
 ```
 
 Há ainda um roteiro de navegador (Playwright) com 305 verificações de ponta a

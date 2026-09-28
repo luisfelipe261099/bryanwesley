@@ -342,7 +342,7 @@ export async function rescheduleMyAppointment(input: {
   }
 
   try {
-    await rescheduleBooking(input);
+    await rescheduleBooking({ ...input, publicRequest: session.role !== "ADMIN" });
   } catch (e) {
     if (e instanceof BookingError) return { ok: false, error: e.message };
     throw e;
@@ -515,9 +515,12 @@ export async function cancelMyPlan(): Promise<ActionResult> {
     .where(eq(subscriptions.id, sub.id));
   revalidatePath("/cliente");
   revalidatePath("/admin");
+  // No fuso da loja: o servidor roda em UTC, e um vencimento às 22h de
+  // Brasília aparecia como o dia seguinte.
   const dia = sub.renewsAt.toLocaleDateString("pt-BR", {
     day: "2-digit",
     month: "2-digit",
+    timeZone: "America/Sao_Paulo",
   });
   return {
     ok: true,

@@ -125,6 +125,10 @@ export async function materializeRecurring(
 
       const { year, month, day } = parseDateKey(dateKey);
       const startsAt = shopTimeToUtc(year, month, day, slot.minutesOfDay);
+      // A ocorrência de hoje que já passou não é conflito, é passado: sem
+      // isto, quem salvava o fixo à tarde via "exige antecedência" para o
+      // horário da manhã.
+      if (startsAt.getTime() <= Date.now()) continue;
 
       // Já tratado? Para uma ocorrência deste fixo vale QUALQUER status:
       // cancelada pelo membro, ela não pode voltar na próxima varredura.

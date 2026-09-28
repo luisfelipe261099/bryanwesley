@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { whatsappEnviando } from "@/lib/whatsapp-status";
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { Crown, PartyPopper, Sparkles } from "lucide-react";
@@ -49,7 +50,11 @@ export default async function Confirmado({
   if (!row) notFound();
 
   const [appt] = await attachDetails([row]);
-  const [session, settings] = await Promise.all([getSession(), getSettings()]);
+  const [session, settings, avisaPorWhatsapp] = await Promise.all([
+    getSession(),
+    getSettings(),
+    whatsappEnviando(),
+  ]);
   const info = shopFrom(settings);
 
   const p = utcToShopParts(appt.startsAt);
@@ -96,7 +101,9 @@ export default async function Confirmado({
         <p className="mt-3 text-steel-300">
           {cancelado
             ? "Esse horário foi cancelado. Quando quiser, é só marcar outro."
-            : "Seu horário está reservado. Enviamos a confirmação no WhatsApp."}
+            : avisaPorWhatsapp
+              ? "Seu horário está reservado. Enviamos a confirmação no WhatsApp."
+              : "Seu horário está reservado. Guarde esta página ou o código abaixo."}
         </p>
 
         <div className="glass mt-8 rounded-2xl p-6 text-left">

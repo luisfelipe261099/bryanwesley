@@ -8,6 +8,7 @@ import { activeSubscription } from "@/lib/queries";
 import { requireRole } from "@/lib/auth";
 import { isNextControlFlow } from "@/lib/errors";
 import { transitionAppointment, BookingError } from "@/lib/appointments";
+import { shopToday, utcToShopParts, labelFullDate } from "@/lib/time";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -66,6 +67,17 @@ export async function checkIn(input: {
   token?: string;
   code?: string;
 }): Promise<ActionResult & { appointmentId?: number }> {
+  try {
+    return await fazerCheckIn(input);
+  } catch (e) {
+    return toResult(e);
+  }
+}
+
+async function fazerCheckIn(input: {
+  token?: string;
+  code?: string;
+}): Promise<ActionResult & { appointmentId?: number }> {
   const session = await requireRole(["BARBER", "ADMIN"]);
 
   const where = input.token
@@ -86,6 +98,15 @@ export async function checkIn(input: {
   }
   if (appt.status === "CONCLUIDO") {
     return { ok: false, error: "Esse atendimento já foi concluído." };
+  }
+  // Check-in é de hoje. O código de um horário da semana que vem iniciava
+  // aquele atendimento agora — e bagunçava a agenda dos dois dias.
+  const dia = utcToShopParts(appt.startsAt).dateKey;
+  if (dia !== shopToday()) {
+    return {
+      ok: false,
+      error: `Esse agendamento é de ${labelFullDate(dia)}, não de hoje.`,
+    };
   }
 
   await db
