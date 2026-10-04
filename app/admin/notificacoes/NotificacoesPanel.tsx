@@ -33,6 +33,8 @@ export type NotifRow = {
   id: number;
   phone: string;
   kind: string;
+  /** PUSH é o aviso no celular pelo navegador; o resto sai pelo WhatsApp. */
+  channel: string;
   status: string;
   body: string;
   quando: string;
@@ -134,6 +136,11 @@ export function NotificacoesPanel({
                     <span className="label text-steel-200">
                       {KIND_LABEL[n.kind] ?? n.kind}
                     </span>
+                    {n.channel === "PUSH" && (
+                      <span className="label rounded-full bg-electric/10 px-2 py-1 text-electric" title="Aviso no celular, pelo navegador">
+                        celular
+                      </span>
+                    )}
                     <span className="text-xs text-steel-400">
                       {formatPhone(n.phone)}
                     </span>

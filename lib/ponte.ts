@@ -225,7 +225,14 @@ export async function receberSinal(s: Sinal, agora = new Date()): Promise<Respos
     const fila = await db
       .select()
       .from(notifications)
-      .where(and(eq(notifications.status, "PENDENTE"), lte(notifications.scheduledFor, agora)))
+      .where(
+        and(
+          eq(notifications.status, "PENDENTE"),
+          // Só WhatsApp: o aviso no celular (PUSH) sai do site, em lib/dispatch.
+          eq(notifications.channel, "WHATSAPP"),
+          lte(notifications.scheduledFor, agora)
+        )
+      )
       .orderBy(asc(notifications.scheduledFor))
       .limit(LOTE + 1);
     sobrou = fila.length > LOTE;

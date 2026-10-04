@@ -50,7 +50,8 @@ export const APPT_KINDS = ["AVULSO", "ASSINANTE"] as const;
 export const SUB_STATUSES = ["ATIVA", "CANCELADA", "INADIMPLENTE"] as const;
 export const SUB_CYCLES = ["MENSAL", "ANUAL"] as const;
 export const NOTIF_STATUSES = ["PENDENTE", "ENVIADA", "ERRO", "CANCELADA"] as const;
-export const NOTIF_CHANNELS = ["WHATSAPP", "SMS", "EMAIL"] as const;
+// PUSH: aviso no celular pelo navegador (service worker), sem telefone.
+export const NOTIF_CHANNELS = ["WHATSAPP", "SMS", "EMAIL", "PUSH"] as const;
 export const NOTIF_KINDS = [
   "AGENDAMENTO_CRIADO",
   "LEMBRETE_24H",
@@ -578,6 +579,53 @@ export type ComandoPonte =
   | { tipo: "conectar" }
   | { tipo: "codigo"; fone: string }
   | { tipo: "sair" };
+
+// ───────────────────────── Avisos no celular (push) ─────────────────────────
+
+/**
+ * Cada aparelho em que alguém ligou os avisos. O endereço (endpoint) é
+ * dado pelo navegador e identifica o aparelho; vai com hash porque é
+ * comprido demais para índice único. Uma pessoa pode ter vários
+ * (celular e computador); a conta apagada leva os aparelhos junto.
+ */
+export const pushSubscriptions = mysqlTable(
+  "push_subscriptions",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    endpointHash: varchar("endpoint_hash", { length: 64 }).notNull(),
+    endpoint: text("endpoint").notNull(),
+    /** Chaves públicas do navegador para cifrar o aviso (RFC 8291). */
+    p256dh: varchar("p256dh", { length: 200 }).notNull(),
+    auth: varchar("auth", { length: 100 }).notNull(),
+    /** User-Agent resumido, para a pessoa reconhecer o aparelho na lista. */
+    aparelho: varchar("aparelho", { length: 200 }),
+    /** Falhas seguidas de entrega; zera ao entregar. */
+    falhas: int("falhas").notNull().default(0),
+    usadoEm: ts("usado_em"),
+    createdAt: tsNow("created_at"),
+  },
+  (t) => ({
+    endpointIdx: uniqueIndex("push_subscriptions_endpoint_idx").on(t.endpointHash),
+    userIdx: index("push_subscriptions_user_idx").on(t.userId),
+  })
+);
+
+/**
+ * As chaves VAPID que identificam o site perante o serviço de push de
+ * cada navegador. Geradas na primeira vez e guardadas aqui (linha única,
+ * id = 1), para não exigir mais uma variável na Vercel. Trocá-las
+ * invalida todos os aparelhos inscritos — por isso ficam no banco e não
+ * na memória de uma instância.
+ */
+export const pushVapid = mysqlTable("push_vapid", {
+  id: int("id").notNull().default(1).primaryKey(),
+  publicKey: varchar("public_key", { length: 120 }).notNull(),
+  privateKey: varchar("private_key", { length: 80 }).notNull(),
+  createdAt: tsNow("created_at"),
+});
 
 // ───────────────────────── Relações ─────────────────────────
 

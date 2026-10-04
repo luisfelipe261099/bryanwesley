@@ -110,6 +110,7 @@ export async function submitBooking(
       // Pedido feito pelo site, por quem não é da casa: é este caminho que
       // respeita a pausa da agenda, a antecedência e o limite de dias.
       publicRequest: !daCasa,
+      autorUserId: session?.id ?? null,
     });
     revalidatePath("/cliente");
     revalidatePath("/barbeiro");

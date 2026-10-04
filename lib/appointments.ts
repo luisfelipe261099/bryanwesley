@@ -30,6 +30,7 @@ import {
   queueNotification,
   cancelPendingNotifications,
 } from "./notifications";
+import { avisarEquipe, avisarCliente } from "./avisos";
 import { randomBytes } from "node:crypto";
 import {
   shopTimeToUtc,
@@ -99,6 +100,11 @@ export type CreateBookingInput = {
    * conflito consigo mesmo, nem para o teto de horários em aberto.
    */
   ignoreAppointmentId?: number;
+  /**
+   * Quem está fazendo (id da conta logada), para não receber aviso no
+   * celular da própria ação. Sem sessão, fica em branco.
+   */
+  autorUserId?: number | null;
 };
 
 export async function createBooking(input: CreateBookingInput) {
@@ -401,6 +407,14 @@ export async function createBooking(input: CreateBookingInput) {
       console.error("Falha ao enfileirar notificações:", e);
     }
 
+    // Aviso no celular, na hora: equipe e cliente. O horário fixo
+    // materializado pela varredura não avisa (seria um por semana, de
+    // madrugada); a remarcação avisa de "remarcado", em rescheduleBooking.
+    if (!input.fromRecurring && !input.skipConfirmation) {
+      const ctx = { autorUserId: input.autorUserId, barberName: barber.shortName };
+      await Promise.all([avisarEquipe("criado", appt, ctx), avisarCliente("AGENDAMENTO_CRIADO", appt, ctx)]);
+    }
+
     return appt;
   } catch (err) {
     if (
@@ -437,6 +451,8 @@ export async function rescheduleBooking(input: {
    * para levar o horário para daqui a meses ou para daqui a 10 minutos.
    */
   publicRequest?: boolean;
+  /** Quem remarca não recebe o aviso da própria remarcação. */
+  autorUserId?: number | null;
 }) {
   const appt = await db.query.appointments.findFirst({
     where: eq(appointments.id, input.appointmentId),
@@ -489,6 +505,7 @@ export async function rescheduleBooking(input: {
     recurringSlotId: appt.recurringSlotId,
     ignoreAppointmentId: appt.id,
     publicRequest: input.publicRequest,
+    autorUserId: input.autorUserId,
   });
 
   // Agora o antigo sai. O UPDATE é condicionado ao estado lido: se o
@@ -522,6 +539,11 @@ export async function rescheduleBooking(input: {
       appointment: novo,
       barberName: prof?.shortName,
     });
+    const ctx = { autorUserId: input.autorUserId, barberName: prof?.shortName };
+    await Promise.all([
+      avisarEquipe("remarcado", novo, ctx),
+      avisarCliente("AGENDAMENTO_REMARCADO", novo, ctx),
+    ]);
   } catch (e) {
     console.error("Falha ao avisar remarcação:", e);
   }
@@ -703,7 +725,16 @@ export type { ApptStatusName };
 
 export async function transitionAppointment(
   id: number,
-  next: ApptStatusName
+  next: ApptStatusName,
+  opts: {
+    /** Quem está fazendo: não recebe o aviso no celular da própria ação. */
+    autorUserId?: number | null;
+    /**
+     * Cancelamento em lote (barbeiro desativado): a equipe não precisa
+     * de um aviso por horário; o cliente de cada um continua sabendo.
+     */
+    semAvisoAEquipe?: boolean;
+  } = {}
 ) {
   const current = await db.query.appointments.findFirst({
     where: eq(appointments.id, id),
@@ -750,6 +781,11 @@ export async function transitionAppointment(
       } catch (e) {
         console.error("Falha ao enfileirar cancelamento:", e);
       }
+      const ctx = { autorUserId: opts.autorUserId };
+      await Promise.all([
+        opts.semAvisoAEquipe ? Promise.resolve() : avisarEquipe("cancelado", updated, ctx),
+        avisarCliente("AGENDAMENTO_CANCELADO", updated, ctx),
+      ]);
     }
   }
 

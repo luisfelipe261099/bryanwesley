@@ -21,6 +21,8 @@ import {
   rescheduleBooking,
   BookingError,
 } from "@/lib/appointments";
+import { avisarPedidoDePlano } from "@/lib/avisos";
+import { hitRateLimit } from "@/lib/rate-limit";
 import { chargeSubscription, isInfinitePayConfigured } from "@/lib/payments";
 import { materializeRecurring, cancelFutureOccurrences } from "@/lib/recurring";
 import { getSettings } from "@/lib/schedule";
@@ -58,7 +60,7 @@ export async function cancelMyAppointment(
   }
 
   try {
-    await transitionAppointment(appointmentId, "CANCELADO");
+    await transitionAppointment(appointmentId, "CANCELADO", { autorUserId: session.id });
   } catch (e) {
     if (e instanceof BookingError) return { ok: false, error: e.message };
     throw e;
@@ -342,7 +344,11 @@ export async function rescheduleMyAppointment(input: {
   }
 
   try {
-    await rescheduleBooking({ ...input, publicRequest: session.role !== "ADMIN" });
+    await rescheduleBooking({
+      ...input,
+      publicRequest: session.role !== "ADMIN",
+      autorUserId: session.id,
+    });
   } catch (e) {
     if (e instanceof BookingError) return { ok: false, error: e.message };
     throw e;
@@ -467,6 +473,17 @@ export async function requestPlan(input: {
           canceledAt: existente.canceledAt,
         })
         .where(eq(subscriptions.id, existente.id));
+    }
+  }
+
+  // Pedido para ativar no balcão: o admin fica sabendo no celular — só
+  // quando o pedido é novo ou mudou de plano/ciclo, e poucas vezes por
+  // dia por cliente. Clicar "pedir" dez vezes não vira dez avisos.
+  const mudou = !aberta || aberta.planId !== plan.id || aberta.cycle !== input.cycle;
+  if (mudou) {
+    const freio = await hitRateLimit(`push:pedido-plano:${session.id}`, 3, 24 * 3600_000);
+    if (freio.ok) {
+      await avisarPedidoDePlano({ nomeCliente: session.name, nomePlano: plan.name, ciclo: input.cycle });
     }
   }
 

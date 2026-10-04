@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { eq } from "drizzle-orm";
-import { ArrowLeft, KeyRound, UserRound } from "lucide-react";
+import { ArrowLeft, Bell, KeyRound, UserRound } from "lucide-react";
 import { Background } from "@/components/Background";
 import { AppHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
@@ -9,6 +9,10 @@ import { users } from "@/db/schema";
 import { requireRole } from "@/lib/auth";
 import { formatPhone } from "@/lib/phone";
 import { ChangePassword } from "@/app/cliente/MeusHorarios";
+import { AvisosPush } from "@/components/AvisosPush";
+import { MeusAparelhos } from "@/components/MeusAparelhos";
+import { chavePublicaPush, meusAparelhos } from "@/lib/push";
+import { labelAgo } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +21,11 @@ const HOME = { ADMIN: "/admin", BARBER: "/barbeiro", CLIENT: "/cliente" };
 
 export default async function Conta() {
   const session = await requireRole(["ADMIN", "BARBER", "CLIENT"]);
-  const user = (await db.query.users.findFirst({ where: eq(users.id, session.id) }))!;
+  const [user, chavePush, aparelhos] = await Promise.all([
+    db.query.users.findFirst({ where: eq(users.id, session.id) }).then((u) => u!),
+    chavePublicaPush(),
+    meusAparelhos(session.id),
+  ]);
 
   return (
     <>
@@ -54,6 +62,23 @@ export default async function Conta() {
               <dd className="mt-1 text-white">{user.email ?? "—"}</dd>
             </div>
           </dl>
+        </div>
+
+        <div className="glass mt-5 rounded-3xl p-7">
+          <div className="flex items-center gap-2">
+            <Bell className="h-5 w-5 text-electric" />
+            <h2 className="font-display text-lg text-white">Avisos no celular</h2>
+          </div>
+          <div className="mt-5">
+            <AvisosPush chavePublica={chavePush} usuarioId={session.id} papel={session.role} />
+            <MeusAparelhos
+              aparelhos={aparelhos.map((a) => ({
+                id: a.id,
+                nome: a.aparelho ?? "Aparelho",
+                quando: a.usadoEm ? `usado ${labelAgo(a.usadoEm)}` : `desde ${labelAgo(a.createdAt)}`,
+              }))}
+            />
+          </div>
         </div>
 
         <div className="glass mt-5 rounded-3xl p-7">

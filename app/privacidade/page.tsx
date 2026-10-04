@@ -29,6 +29,10 @@ const secoes = [
     p: "Quando você marca horário conversando com a gente no WhatsApp, as mensagens passam pelo nosso atendente automático. Para entender frases escritas do seu jeito, o texto da mensagem pode ser lido por um serviço de inteligência artificial do Google (Gemini) — só o que você escreveu, nunca seu telefone, cadastro ou histórico. Prefere falar com uma pessoa? É só pedir na conversa.",
   },
   {
+    t: "Avisos no celular",
+    p: "Se você ligar os avisos no celular, o navegador gera um endereço de entrega que guardamos para mandar confirmações e lembretes do seu horário. Só com a sua permissão, e você desliga quando quiser em Conta → Avisos no celular (ou nas configurações do navegador).",
+  },
+  {
     t: "Por quanto tempo",
     p: "Enquanto você for cliente e pelo prazo exigido por obrigações fiscais. Você pode pedir a exclusão a qualquer momento.",
   },

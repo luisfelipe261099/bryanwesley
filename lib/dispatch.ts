@@ -24,6 +24,9 @@ import { materializeRecurring, type MaterializeReport } from "./recurring";
 import { expireOverdueSubscriptions } from "./subscriptions";
 import { purgeRateLimits } from "./rate-limit";
 import { limparSessoesVelhas } from "./whatsapp-bot";
+import { enviarPush } from "./push";
+import { alertarWhatsappCaido } from "./avisos";
+import { TITULO_PUSH } from "./notifications";
 
 /** Intervalo mínimo entre varreduras disparadas pelo painel. */
 export const HEARTBEAT_INTERVAL_MS = 10 * 60_000;
@@ -55,7 +58,61 @@ export type DispatchReport = {
   interrompida: boolean;
   horariosFixos: MaterializeReport;
   assinaturasExpiradas: number;
+  /** Avisos no celular (lembretes do cliente) entregues nesta varredura. */
+  push: { enviadas: number; falhas: number; semAparelho: number };
 };
+
+/**
+ * Lembretes do cliente pelo celular. Independem do WhatsApp: saem daqui
+ * mesmo com a ponte instalada ou sem provedor nenhum. O cliente que
+ * desligou os avisos em todos os aparelhos não recebe — e a mensagem
+ * sai da fila com o motivo, em vez de gastar tentativa.
+ */
+export async function despacharPush(limit = 50, prazoMs = DISPATCH_BUDGET_MS) {
+  const fim = Date.now() + prazoMs;
+  const r = { enviadas: 0, falhas: 0, semAparelho: 0, interrompida: false };
+  const fila = await pendingNotifications(limit, "PUSH");
+  for (const n of fila) {
+    if (Date.now() > fim) {
+      r.interrompida = true;
+      break;
+    }
+    if (!n.userId) {
+      await db
+        .update(notifications)
+        .set({ status: "CANCELADA", error: "Aviso no celular sem conta de cliente" })
+        .where(eq(notifications.id, n.id));
+      r.semAparelho++;
+      continue;
+    }
+    const res = await enviarPush(
+      [n.userId],
+      {
+        titulo: TITULO_PUSH[n.kind],
+        corpo: n.body,
+        url: "/cliente",
+        tag: n.appointmentId ? `lembrete-${n.appointmentId}` : undefined,
+      },
+      // Lembrete que o celular desligado só receberia depois do horário
+      // não serve: o de 2h vale 2h, o de 24h vale até perto da hora.
+      { ttlSegundos: n.kind === "LEMBRETE_2H" ? 2 * 3600 : n.kind === "LEMBRETE_24H" ? 20 * 3600 : 24 * 3600 }
+    );
+    if (res.enviadas > 0) {
+      await markSent(n.id);
+      r.enviadas++;
+    } else if (res.aparelhos === 0) {
+      await db
+        .update(notifications)
+        .set({ status: "CANCELADA", error: "Nenhum aparelho com avisos ligados" })
+        .where(eq(notifications.id, n.id));
+      r.semAparelho++;
+    } else {
+      await markFailed(n.id, "Serviço de push não entregou em nenhum aparelho", n.attempts);
+      r.falhas++;
+    }
+  }
+  return r;
+}
 
 /** DATETIME(3) em UTC para SQL cru (o driver está em timezone "Z"). */
 function sqlDate(d: Date) {
@@ -169,6 +226,15 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
   // volta amanhã começa do menu, não de um "qual seu nome?" perdido.
   await limparSessoesVelhas();
 
+  // Avisos no celular primeiro: não dependem de provedor e são rápidos.
+  // Metade do tempo da varredura, no máximo — o WhatsApp vem depois.
+  const pushR = await despacharPush(limit, DISPATCH_BUDGET_MS / 2);
+  const push = { enviadas: pushR.enviadas, falhas: pushR.falhas, semAparelho: pushR.semAparelho };
+
+  // WhatsApp da barbearia caído (ponte sem sinal, número desconectado):
+  // o admin fica sabendo no celular, uma vez a cada 12 h.
+  await alertarWhatsappCaido();
+
   const fila = await pendingNotifications(limit);
 
   // Instalado pela ponte: quem entrega é o servidor da barbearia, que
@@ -181,9 +247,10 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
       falhas: 0,
       pendentes: fila.length,
       descartadas,
-      interrompida: false,
+      interrompida: pushR.interrompida,
       horariosFixos,
       assinaturasExpiradas,
+      push,
     };
   }
 
@@ -202,9 +269,9 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
 
   let enviadas = 0;
   let falhas = 0;
-  let interrompida = false;
+  let interrompida = pushR.interrompida;
   if (configurado) {
-    const limiteDeTempo = Date.now() + DISPATCH_BUDGET_MS;
+    const limiteDeTempo = Date.now() + DISPATCH_BUDGET_MS / 2;
     // No WAHA (número comum), rajada de mensagens é o que faz o WhatsApp
     // desconfiar de robô: entre uma e outra, uma pausa de gente.
     const intervalo = provedorAtivo() === "waha" ? () => 1500 + Math.random() * 2500 : null;
@@ -243,6 +310,7 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
     interrompida,
     horariosFixos,
     assinaturasExpiradas,
+    push,
   };
 }
 

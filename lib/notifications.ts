@@ -3,14 +3,28 @@
 // A regra de negócio só ENFILEIRA; a entrega é de um worker que chama
 // o provedor. Trocar WhatsApp por SMS não mexe em nada aqui.
 // ───────────────────────────────────────────────────────────
-import { and, eq, lte, desc, inArray, count as drizzleCount } from "drizzle-orm";
+import { and, eq, gt, lte, desc, inArray, count as drizzleCount } from "drizzle-orm";
 import { db } from "@/db/client";
 import { notifications, appointments } from "@/db/schema";
 import { getSettings } from "./schedule";
+import { contarAparelhos } from "./push";
 import { formatShopTime, labelFullDate, utcToShopParts } from "./time";
 import { formatBRL } from "./money";
 
 export type NotifKind = (typeof notifications.$inferSelect)["kind"];
+export type NotifChannel = (typeof notifications.$inferSelect)["channel"];
+
+/** Título do aviso no celular para cada tipo de mensagem da fila. */
+export const TITULO_PUSH: Record<NotifKind, string> = {
+  AGENDAMENTO_CRIADO: "Horário confirmado",
+  LEMBRETE_24H: "Seu horário é amanhã",
+  LEMBRETE_2H: "Seu horário é daqui a pouco",
+  AGENDAMENTO_CANCELADO: "Horário cancelado",
+  AGENDAMENTO_REMARCADO: "Horário remarcado",
+  ASSINATURA_RENOVADA: "Assinatura renovada",
+  ASSINATURA_FALHOU: "Problema na assinatura",
+  RESPOSTA_WHATSAPP: "Bryan Wesley Barbearia",
+};
 
 function whenLabel(startsAt: Date) {
   const p = utcToShopParts(startsAt);
@@ -62,6 +76,8 @@ export async function queueNotification(opts: {
   appointment: typeof appointments.$inferSelect;
   barberName?: string;
   scheduledFor?: Date;
+  /** PUSH: aviso no celular do cliente (precisa de clientUserId). */
+  channel?: NotifChannel;
 }) {
   const body = await renderTemplate(opts.kind, opts.appointment, {
     barberName: opts.barberName,
@@ -73,6 +89,7 @@ export async function queueNotification(opts: {
       appointmentId: opts.appointment.id,
       phone: opts.appointment.clientPhone,
       kind: opts.kind,
+      channel: opts.channel ?? "WHATSAPP",
       body,
       scheduledFor: opts.scheduledFor ?? new Date(),
     })
@@ -121,7 +138,58 @@ export async function queueBookingNotifications(
     );
   }
 
+  // Cliente com avisos ligados no celular recebe os lembretes também por
+  // lá — e por lá eles chegam mesmo com o WhatsApp da barbearia
+  // desligado. Quem ligar os avisos depois de marcar é coberto por
+  // garantirLembretesPush, na hora em que liga.
+  if (appt.clientUserId && (await contarAparelhos(appt.clientUserId)) > 0) {
+    for (const [kind, quando] of [["LEMBRETE_24H", h24], ["LEMBRETE_2H", h2]] as const) {
+      if (quando.getTime() > now) {
+        jobs.push(
+          queueNotification({ kind, appointment: appt, barberName, scheduledFor: quando, channel: "PUSH" })
+        );
+      }
+    }
+  }
+
   await Promise.all(jobs);
+}
+
+/**
+ * A pessoa acabou de ligar os avisos no celular: os lembretes dos
+ * horários que ela já tem marcados ganham a versão push, se ainda não
+ * têm. Olha os lembretes de WhatsApp pendentes dela e copia cada um.
+ */
+export async function garantirLembretesPush(userId: number) {
+  const pendentes = await db
+    .select()
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.userId, userId),
+        eq(notifications.status, "PENDENTE"),
+        inArray(notifications.kind, ["LEMBRETE_24H", "LEMBRETE_2H"]),
+        gt(notifications.scheduledFor, new Date())
+      )
+    );
+  const whats = pendentes.filter((n) => n.channel === "WHATSAPP" && n.appointmentId !== null);
+  const jaTem = new Set(
+    pendentes.filter((n) => n.channel === "PUSH").map((n) => `${n.appointmentId}:${n.kind}`)
+  );
+  const novos = whats.filter((n) => !jaTem.has(`${n.appointmentId}:${n.kind}`));
+  if (novos.length === 0) return 0;
+  await db.insert(notifications).values(
+    novos.map((n) => ({
+      userId: n.userId,
+      appointmentId: n.appointmentId,
+      phone: n.phone,
+      kind: n.kind,
+      channel: "PUSH" as const,
+      body: n.body,
+      scheduledFor: n.scheduledFor,
+    }))
+  );
+  return novos.length;
 }
 
 /**
@@ -171,16 +239,23 @@ export async function cancelPendingNotifications(appointmentId: number) {
     );
 }
 
-export async function pendingNotifications(limit = 50) {
+/**
+ * O que está na hora de sair, por canal. O WhatsApp é o padrão: o
+ * despacho e a ponte só mandam por ele; os avisos no celular (PUSH) têm
+ * entrega própria em lib/dispatch.
+ */
+export async function pendingNotifications(limit = 50, channel: NotifChannel = "WHATSAPP") {
   return db
     .select()
     .from(notifications)
     .where(
       and(
         eq(notifications.status, "PENDENTE"),
+        eq(notifications.channel, channel),
         lte(notifications.scheduledFor, new Date())
       )
     )
+    .orderBy(notifications.scheduledFor)
     .limit(limit);
 }
 

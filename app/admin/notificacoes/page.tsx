@@ -15,15 +15,19 @@ import { lastDispatchAt } from "@/lib/dispatch";
 import { NotificacoesPanel } from "./NotificacoesPanel";
 import { LinkDoWhatsapp } from "./LinkDoWhatsapp";
 import { ConexaoWhatsapp } from "./ConexaoWhatsapp";
+import { AvisosEquipe } from "./AvisosEquipe";
+import { aparelhosDaEquipe, chavePublicaPush } from "@/lib/push";
 import { listServices } from "@/lib/queries";
 import { getSettings } from "@/lib/schedule";
 import { publicBaseUrl } from "@/lib/qr";
+import { requireRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminNotificacoes() {
+  const session = await requireRole(["ADMIN"]);
   const webhookWaha = `${publicBaseUrl()}/api/whatsapp/waha`;
-  const [stats, rows, ultima, servicos, settings, pausadas, statusWaha, ponte] = await Promise.all([
+  const [stats, rows, ultima, servicos, settings, pausadas, statusWaha, ponte, chavePush, equipe] = await Promise.all([
     notificationStats(),
     recentNotifications(40),
     lastDispatchAt(),
@@ -34,6 +38,8 @@ export default async function AdminNotificacoes() {
     // esperaria um servidor que não existe.
     wahaConfigurado() ? wahaStatus(webhookWaha) : Promise.resolve(null),
     estadoDaPonte(),
+    chavePublicaPush(),
+    aparelhosDaEquipe(),
   ]);
 
   // Instalado pela ponte: com o painel aberto, o servidor dá sinal a cada
@@ -61,6 +67,7 @@ export default async function AdminNotificacoes() {
 
   return (
     <div className="space-y-5">
+      <AvisosEquipe chavePublica={chavePush} usuarioId={session.id} equipe={equipe} />
       <ConexaoWhatsapp
         provedor={pelaPonte ? "ponte" : provedorAtivo()}
         ponte={{
@@ -101,6 +108,7 @@ export default async function AdminNotificacoes() {
           id: n.id,
           phone: n.phone,
           kind: n.kind,
+          channel: n.channel,
           status: n.status,
           body: n.body,
           error: n.error,

@@ -32,6 +32,8 @@ import { formatPhone } from "@/lib/phone";
 import { AppointmentActions } from "./AgendaActions";
 import { appointmentStatus as statusStyles } from "@/lib/status";
 import { CheckinBox } from "./CheckinBox";
+import { AvisosPush } from "@/components/AvisosPush";
+import { chavePublicaPush } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +75,7 @@ export default async function BarbeiroPanel({
       ? searchParams.dia
       : today;
 
-  const [agenda, bloqueios, mes, hoje] = await Promise.all([
+  const [agenda, bloqueios, mes, hoje, chavePush] = await Promise.all([
     appointmentsOfDay(dateKey, barber.id),
     // Bloqueios do dia (almoço, folga, manutenção): o barbeiro via o
     // buraco na agenda sem saber que era bloqueio, e ia perguntar no
@@ -81,6 +83,7 @@ export default async function BarbeiroPanel({
     bloqueiosDoPeriodo(dayBounds(dateKey).start, dayBounds(dateKey).end, barber.id),
     barberMonthSummary(barber.id),
     barberTodaySummary(barber.id),
+    chavePublicaPush(),
   ]);
 
   // Meta individual, definida pelo admin em Equipe.
@@ -108,6 +111,7 @@ export default async function BarbeiroPanel({
       />
 
       <main className="mx-auto max-w-3xl px-5 pb-28 pt-24 lg:px-8">
+        <AvisosPush chavePublica={chavePush} usuarioId={session.id} papel={session.role === "ADMIN" ? "ADMIN" : "BARBER"} variante="banner" />
         {/* Identidade */}
         <Reveal>
           <div className="glass flex flex-wrap items-center justify-between gap-4 rounded-2xl p-5">

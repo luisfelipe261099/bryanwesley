@@ -31,6 +31,9 @@ import { openPlanRequests } from "@/lib/queries";
 import { appointmentStatus as statusStyles } from "@/lib/status";
 import { ApptControls } from "./AgendaHoje";
 import { PlanRequests } from "./PlanRequests";
+import { AvisosPush } from "@/components/AvisosPush";
+import { requireRole } from "@/lib/auth";
+import { chavePublicaPush } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
@@ -41,17 +44,20 @@ export const dynamic = "force-dynamic";
 // lugares com controles parecidos, e resultados diferentes, era metade da
 // confusão de quem abria o sistema.
 export default async function AdminDashboard() {
+  // O layout já conferiu o papel; aqui só se pega o id (leitura em cache).
+  const session = await requireRole(["ADMIN"]);
   const today = shopToday();
   const dateKey = today;
   const barberFilter = null;
 
-  const [kpi, agendaDia, semana, equipe, settings, pedidos] = await Promise.all([
+  const [kpi, agendaDia, semana, equipe, settings, pedidos, chavePush] = await Promise.all([
     adminOverview(),
     appointmentsOfDay(dateKey, barberFilter),
     weeklyRevenue(),
     teamPerformance(),
     getSettings(),
     openPlanRequests(),
+    chavePublicaPush(),
   ]);
   const agenda = agendaDia;
 
@@ -77,6 +83,7 @@ export default async function AdminDashboard() {
 
   return (
     <>
+      <AvisosPush chavePublica={chavePush} usuarioId={session.id} papel="ADMIN" variante="banner" />
       <Reveal>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>

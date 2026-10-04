@@ -178,6 +178,34 @@ Sem `WHATSAPP_TOKEN` configurado o sistema segue funcionando: as mensagens
 ficam gravadas na fila até o número ser aprovado. Horário fixo materializado
 pelo sistema não dispara confirmação (o membro já sabe), só os lembretes.
 
+## Avisos no celular (push)
+
+Agendamento novo, cancelamento, remarcação, pedido de plano e pagamento
+chegam como notificação no celular de quem é da equipe — com o site
+fechado, sem depender do WhatsApp. O cliente que ligar recebe a
+confirmação e os lembretes do horário dele também por ali.
+
+- Cada pessoa liga no **próprio aparelho**: ao abrir o painel aparece o
+  convite no topo; em **Conta → Avisos no celular** dá para ligar,
+  mandar um aviso de teste e desligar. Em **Mensagens** o admin vê quem
+  da equipe já ligou.
+- No iPhone o site precisa estar instalado (Compartilhar → Adicionar à
+  Tela de Início, iOS 16.4+); no Android e no computador funciona direto
+  no Chrome, Edge, Firefox e Samsung Internet.
+- Quem fez a mudança não recebe aviso dela: o admin que marcou o horário
+  no balcão não ganha um "Novo agendamento"; o barbeiro e o cliente, sim.
+- Não exige variável nenhuma: as chaves VAPID nascem na primeira vez e
+  ficam na tabela `push_vapid`. Quem quiser fixá-las usa
+  `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` (trocar as chaves obriga todo
+  mundo a ligar de novo — o painel percebe e desfaz a inscrição velha).
+- Os lembretes de 24h e 2h do cliente com avisos ligados entram na fila
+  (`notifications.channel = PUSH`) e saem na varredura normal, antes do
+  WhatsApp. Aparelho que o serviço de push diz não existir mais (404/410)
+  sai da lista sozinho.
+- O admin também é avisado quando o WhatsApp instalado pela ponte fica
+  mudo por mais de 15 minutos ou o número desconecta — uma vez a cada
+  12 horas.
+
 ## Rodar localmente
 
 ```bash
@@ -204,7 +232,7 @@ Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
 ## Testes
 
 ```bash
-npm test                  # 586 verificações
+npm test                  # 673 verificações
 npm run test:agenda       # 34 — motor de agenda, jornada por barbeiro, faixas de meta
 npm run test:fixo         # 17 — horário fixo, ocorrência cancelada, transição concorrente
 npm run test:seguranca    # 18 — teto de agendamentos, webhook, redirect, CSV, sessão
@@ -241,6 +269,11 @@ npm run test:revisao3     # 7 — a terceira revisão: aviso atrasado não sai n
                           #      rajada quando o WhatsApp for ligado, remarcar
                           #      pelo cliente segue as regras do site, dois
                           #      pedidos do mesmo telefone novo ao mesmo tempo
+npm run test:push         # 87 — avisos no celular: chaves VAPID nascendo no banco,
+                          #      inscrição conferida, aparelho morto (410) saindo,
+                          #      falha passageira, quem recebe o quê (admin,
+                          #      barbeiro, cliente — menos quem fez), lembretes
+                          #      pelo celular na fila e o alerta de WhatsApp caído
 ```
 
 Há ainda um roteiro de navegador (Playwright) com 305 verificações de ponta a

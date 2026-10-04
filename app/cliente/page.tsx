@@ -40,6 +40,8 @@ import { PagarPlano, CancelarPlano, ManterPlano } from "./MinhaAssinatura";
 import { isInfinitePayConfigured } from "@/lib/payments";
 import { listOpenDays } from "@/lib/schedule";
 import { KeyRound } from "lucide-react";
+import { AvisosPush } from "@/components/AvisosPush";
+import { chavePublicaPush } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +75,7 @@ export default async function ClienteDashboard({
 }) {
   const session = await requireRole(["CLIENT", "ADMIN"]);
 
-  const [subscription, vencida, stats, upcoming, history, totalVisits, fixo, team, services, settings] =
+  const [subscription, vencida, stats, upcoming, history, totalVisits, fixo, team, services, settings, chavePush] =
     await Promise.all([
       activeSubscription(session.id),
       // Vencida também aparece: sem isso o membro inadimplente via a tela
@@ -103,6 +105,7 @@ export default async function ClienteDashboard({
       listTeam(),
       listServices(),
       getSettings(),
+      chavePublicaPush(),
     ]);
   const days = listOpenDays(settings, 10);
   const teamChips = team.map((b) => ({ id: b.id, shortName: b.shortName }));
@@ -171,6 +174,13 @@ export default async function ClienteDashboard({
               : "Você não tem horário marcado. Bora agendar?"}
           </p>
         </Reveal>
+
+        <AvisosPush
+          chavePublica={chavePush}
+          usuarioId={session.id}
+          papel={session.role === "ADMIN" ? "ADMIN" : "CLIENT"}
+          variante="banner"
+        />
 
         {searchParams.assinatura === "pedida" && (
           <Reveal delay={0.02}>

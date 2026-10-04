@@ -49,6 +49,7 @@ import { shopTimeToUtc, parseDateKey } from "@/lib/time";
 import { normalizePhone, isValidPhone, nextPlaceholderPhone, isPlaceholderPhone } from "@/lib/phone";
 import { planClientImport, chaveNome } from "@/lib/import";
 import { nextRenewal } from "@/lib/subscriptions";
+import { avisarPlanoAtivado, nomesParaAviso } from "@/lib/avisos";
 import { formatBRL } from "@/lib/money";
 import { publicBaseUrl } from "@/lib/qr";
 import { wahaConfigurado, wahaConectar, wahaCodigoDePareamento } from "@/lib/providers/waha";
@@ -174,8 +175,8 @@ export async function adminTransition(
   next: "CONFIRMADO" | "CANCELADO" | "CONCLUIDO" | "NO_SHOW" | "EM_ANDAMENTO"
 ): Promise<Result> {
   try {
-    await admin();
-    await transitionAppointment(id, next);
+    const session = await admin();
+    await transitionAppointment(id, next, { autorUserId: session.id });
     return done("Agendamento atualizado.");
   } catch (e) {
     return fail(e);
@@ -354,7 +355,7 @@ export async function updateBarber(input: {
     let cancelados = 0;
     for (const a of futuros) {
       try {
-        await transitionAppointment(a.id, "CANCELADO");
+        await transitionAppointment(a.id, "CANCELADO", { autorUserId: session.id, semAvisoAEquipe: true });
         cancelados++;
       } catch (e) {
         console.error("Falha ao cancelar agendamento do barbeiro desativado:", e);
@@ -785,7 +786,7 @@ export async function bookForClient(input: {
   notes?: string;
 }): Promise<Result> {
   try {
-    await admin();
+    const session = await admin();
     const cliente = await db.query.users.findFirst({
       where: eq(users.id, input.userId),
     });
@@ -813,6 +814,7 @@ export async function bookForClient(input: {
       userId: cliente.id,
       // Encaixe do balcão: não é pedido público, então não esbarra na
       // pausa da agenda nem na antecedência mínima.
+      autorUserId: session.id,
     });
     return done(`Horário marcado. Código ${appt.code}.`);
   } catch (e) {
@@ -849,6 +851,9 @@ export async function subscribeClient(input: {
       cycle: input.cycle,
       renewsAt,
     });
+    // O cliente que ligou os avisos fica sabendo na hora.
+    const { nomePlano } = await nomesParaAviso(input.userId, input.planId);
+    await avisarPlanoAtivado({ userId: input.userId, nomePlano });
     return done("Assinatura ativada.");
   } catch (e) {
     return fail(e);
@@ -875,6 +880,8 @@ export async function renewSubscription(userId: number): Promise<Result> {
         canceledAt: null,
       })
       .where(eq(subscriptions.id, current.id));
+    const { nomePlano } = await nomesParaAviso(userId, current.planId);
+    await avisarPlanoAtivado({ userId, nomePlano, renovacao: true });
     return done("Renovação registrada.");
   } catch (e) {
     return fail(e);
@@ -1339,8 +1346,8 @@ export async function adminReschedule(input: {
   barberId: number | null;
 }): Promise<Result> {
   try {
-    await admin();
-    await rescheduleBooking(input);
+    const session = await admin();
+    await rescheduleBooking({ ...input, autorUserId: session.id });
     return done("Horário remarcado.");
   } catch (e) {
     return fail(e);
