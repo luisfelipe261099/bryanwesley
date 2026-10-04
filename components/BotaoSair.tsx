@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { LogOut } from "lucide-react";
 import { logout } from "@/app/entrar/actions";
 import { CHAVE_DONO } from "./AvisosPush";
@@ -7,33 +8,39 @@ import { CHAVE_DONO } from "./AvisosPush";
 /**
  * Sair também tira este aparelho dos avisos da conta: num celular
  * emprestado ou no tablet do balcão, quem saiu não pode continuar
- * recebendo "Novo agendamento". A inscrição do navegador fica — quem
- * entrar depois liga de novo com um toque, e aí o aparelho é dele.
+ * recebendo "Novo agendamento". O endereço do aparelho vai no próprio
+ * formulário, e a ação de sair o remove antes de apagar a sessão — sem
+ * corrida entre dois pedidos. A inscrição do navegador fica: quem entrar
+ * depois liga de novo com um toque, e aí o aparelho é dele.
  */
 export function BotaoSair() {
+  const [endpoint, setEndpoint] = useState("");
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    let vivo = true;
+    navigator.serviceWorker
+      .getRegistration("/")
+      .then((reg) => reg?.pushManager.getSubscription())
+      .then((sub) => {
+        if (vivo && sub) setEndpoint(sub.endpoint);
+      })
+      .catch(() => {});
+    return () => {
+      vivo = false;
+    };
+  }, []);
+
   const limparAvisos = () => {
     try {
       localStorage.removeItem(CHAVE_DONO);
       sessionStorage.removeItem("avisos-push:sincronizado");
     } catch {}
-    if (!("serviceWorker" in navigator)) return;
-    // Não espera: o pedido segue (keepalive) enquanto a página troca.
-    navigator.serviceWorker
-      .getRegistration("/")
-      .then((reg) => reg?.pushManager.getSubscription())
-      .then((sub) => {
-        if (!sub) return;
-        return fetch("/api/push/inscricao", {
-          method: "DELETE",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ endpoint: sub.endpoint }),
-          keepalive: true,
-        });
-      })
-      .catch(() => {});
   };
+
   return (
     <form action={logout} onSubmit={limparAvisos}>
+      <input type="hidden" name="pushEndpoint" value={endpoint} />
       <button
         type="submit"
         aria-label="Sair"

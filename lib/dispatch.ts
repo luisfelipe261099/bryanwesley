@@ -25,7 +25,7 @@ import { expireOverdueSubscriptions } from "./subscriptions";
 import { purgeRateLimits } from "./rate-limit";
 import { limparSessoesVelhas } from "./whatsapp-bot";
 import { enviarPush } from "./push";
-import { alertarWhatsappCaido } from "./avisos";
+import { alertarWhatsappCaido, alertarWahaDesconectado } from "./avisos";
 import { TITULO_PUSH } from "./notifications";
 
 /** Intervalo mínimo entre varreduras disparadas pelo painel. */
@@ -68,15 +68,35 @@ export type DispatchReport = {
  * desligou os avisos em todos os aparelhos não recebe — e a mensagem
  * sai da fila com o motivo, em vez de gastar tentativa.
  */
+/** Segundos até o atendimento começar — ou um dia, para o que não é lembrete. */
+export function ttlAteOHorario(kind: string, scheduledFor: Date, agora = Date.now()) {
+  const antes = kind === "LEMBRETE_24H" ? 24 : kind === "LEMBRETE_2H" ? 2 : 0;
+  if (!antes) return 24 * 3600;
+  const inicio = scheduledFor.getTime() + antes * 3600_000;
+  return Math.max(60, Math.round((inicio - agora) / 1000));
+}
+
 export async function despacharPush(limit = 50, prazoMs = DISPATCH_BUDGET_MS) {
   const fim = Date.now() + prazoMs;
   const r = { enviadas: 0, falhas: 0, semAparelho: 0, interrompida: false };
   const fila = await pendingNotifications(limit, "PUSH");
+  const vistos = new Set<string>();
   for (const n of fila) {
     if (Date.now() > fim) {
       r.interrompida = true;
       break;
     }
+    // Duas abas ligando os avisos ao mesmo tempo podem ter copiado o
+    // mesmo lembrete duas vezes: só o primeiro de cada (horário, tipo) sai.
+    const chave = `${n.appointmentId}:${n.kind}`;
+    if (n.appointmentId && vistos.has(chave)) {
+      await db
+        .update(notifications)
+        .set({ status: "CANCELADA", error: "Duplicado: o mesmo lembrete já saiu" })
+        .where(eq(notifications.id, n.id));
+      continue;
+    }
+    vistos.add(chave);
     if (!n.userId) {
       await db
         .update(notifications)
@@ -94,8 +114,9 @@ export async function despacharPush(limit = 50, prazoMs = DISPATCH_BUDGET_MS) {
         tag: n.appointmentId ? `lembrete-${n.appointmentId}` : undefined,
       },
       // Lembrete que o celular desligado só receberia depois do horário
-      // não serve: o de 2h vale 2h, o de 24h vale até perto da hora.
-      { ttlSegundos: n.kind === "LEMBRETE_2H" ? 2 * 3600 : n.kind === "LEMBRETE_24H" ? 20 * 3600 : 24 * 3600 }
+      // não serve: vale até a hora do atendimento, que a fila carrega na
+      // própria hora marcada (o de 24h sai 24h antes; o de 2h, 2h antes).
+      { ttlSegundos: ttlAteOHorario(n.kind, n.scheduledFor) }
     );
     if (res.enviadas > 0) {
       await markSent(n.id);
@@ -264,6 +285,8 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
     if (status !== "WORKING") {
       configurado = false;
       desconectado = true;
+      // O admin fica sabendo no celular (uma vez a cada 12 h).
+      await alertarWahaDesconectado();
     }
   }
 

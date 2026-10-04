@@ -9,6 +9,8 @@ type Papel = "ADMIN" | "BARBER" | "CLIENT";
 
 type Estado =
   | "carregando"
+  /** O navegador tem push, mas não deu para conferir agora (sem rede, sw.js barrado). */
+  | "erro"
   /** Navegador sem push (ou iOS antigo). Nada a fazer. */
   | "sem-suporte"
   /** iPhone/iPad no Safari comum: o push só existe com o site instalado. */
@@ -54,6 +56,15 @@ function bytesParaChave(buf: ArrayBuffer | null | undefined) {
   let s = "";
   for (const b of Array.from(bytes)) s += String.fromCharCode(b);
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** Sem o "=" do fim: a chave pode vir com ou sem ele, e é a mesma. */
+const semPadding = (s: string) => s.replace(/=+$/, "");
+
+/** A chave da inscrição deste navegador é a chave atual do site? */
+function mesmaChave(sub: PushSubscription, chavePublica: string) {
+  const daInscricao = bytesParaChave(sub.options.applicationServerKey);
+  return !daInscricao || daInscricao === semPadding(chavePublica);
 }
 
 function ehIos() {
@@ -128,6 +139,7 @@ export function AvisosPush({
   const [estado, setEstado] = useState<Estado>("carregando");
   const [ocupado, setOcupado] = useState(false);
   const [soneca, setSoneca] = useState(false);
+  const [tentativa, setTentativa] = useState(0);
   const [testando, startTeste] = useTransition();
 
   // Lê a situação deste aparelho: inscrito? permissão? chave atual?
@@ -156,8 +168,7 @@ export function AvisosPush({
         }
         // Chave do site mudou: a inscrição antiga não recebe mais nada.
         // Desfaz para a pessoa religar com a chave nova.
-        const chaveDaInscricao = bytesParaChave(sub.options.applicationServerKey);
-        if (chaveDaInscricao && chaveDaInscricao !== chavePublica) {
+        if (!mesmaChave(sub, chavePublica)) {
           await sub.unsubscribe().catch(() => {});
           setEstado("desligado");
           return;
@@ -177,13 +188,26 @@ export function AvisosPush({
           }
         } catch {}
       } catch {
-        if (vivo) setEstado("sem-suporte");
+        // O navegador até tem push, mas não deu para conferir (sem rede,
+        // sw.js barrado): não é "sem suporte" — é "tente de novo".
+        if (vivo) setEstado("erro");
       }
     })();
     return () => {
       vivo = false;
     };
-  }, [chavePublica, variante, usuarioId]);
+  }, [chavePublica, variante, usuarioId, tentativa]);
+
+  // A lista de aparelhos (em Conta) removeu justamente este: a tela
+  // acompanha, em vez de seguir dizendo "ligados".
+  useEffect(() => {
+    const aoRemover = () => {
+      guardar(CHAVE_DONO, null);
+      setEstado((e) => (e === "ligado" ? "desligado" : e));
+    };
+    window.addEventListener("avisos-push:removido", aoRemover);
+    return () => window.removeEventListener("avisos-push:removido", aoRemover);
+  }, []);
 
   const ligar = useCallback(async () => {
     setOcupado(true);
@@ -196,7 +220,7 @@ export function AvisosPush({
       }
       const reg = await registrar();
       let sub = await reg.pushManager.getSubscription();
-      if (sub && bytesParaChave(sub.options.applicationServerKey) !== chavePublica) {
+      if (sub && !mesmaChave(sub, chavePublica)) {
         await sub.unsubscribe().catch(() => {});
         sub = null;
       }
@@ -219,11 +243,10 @@ export function AvisosPush({
           : "Avisos ligados neste aparelho."
       );
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "";
-      toast(
-        `Não deu para ligar os avisos neste navegador${msg ? ` (${msg})` : ""}. Tente de novo ou use outro navegador.`,
-        "erro"
-      );
+      // A mensagem do navegador vem em inglês e não ajuda quem lê; o que
+      // importa fica no console para quem for investigar.
+      console.error("Avisos no celular:", e);
+      toast("Não deu para ligar os avisos neste navegador agora. Tente de novo ou use outro navegador.", "erro");
       setEstado(Notification.permission === "denied" ? "negado" : "desligado");
     } finally {
       setOcupado(false);
@@ -270,7 +293,7 @@ export function AvisosPush({
 
   // ───────────── banner ─────────────
   if (variante === "banner") {
-    if (soneca || estado === "carregando" || estado === "ligado" || estado === "sem-suporte") return null;
+    if (soneca || estado === "carregando" || estado === "ligado" || estado === "sem-suporte" || estado === "erro") return null;
     return (
       <div
         data-testid="avisos-push-banner"
@@ -325,6 +348,22 @@ export function AvisosPush({
       {estado === "carregando" && (
         <p className="inline-flex items-center gap-2 text-sm text-steel-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Conferindo este aparelho…
+        </p>
+      )}
+
+      {estado === "erro" && (
+        <p className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3.5 py-3 text-sm text-amber-200">
+          Não deu para conferir este aparelho agora (sem conexão?).
+          <button
+            type="button"
+            onClick={() => {
+              setEstado("carregando");
+              setTentativa((t) => t + 1);
+            }}
+            className="rounded-full border border-amber-300/40 px-3 py-1.5 text-xs font-semibold text-amber-100 hover:bg-amber-400/10"
+          >
+            Tentar de novo
+          </button>
         </p>
       )}
 

@@ -27,7 +27,6 @@ self.addEventListener("push", (event) => {
   const opcoes = {
     body: dados.corpo || "",
     icon: "/icon-192.png",
-    badge: "/icon-192.png",
     data: { url: dados.url || "/" },
     // Avisos do mesmo horário substituem o anterior em vez de empilhar.
     tag: dados.tag || undefined,
@@ -53,8 +52,13 @@ self.addEventListener("notificationclick", (event) => {
         // Aba do site já aberta: leva para a tela e traz para a frente.
         for (const aba of abas) {
           if (new URL(aba.url).origin === self.location.origin && "focus" in aba) {
+            // navigate() recusa aba que este worker não controla: cai
+            // para abrir uma nova em vez de não fazer nada.
             if ("navigate" in aba) {
-              return aba.navigate(destino.href).then((a) => (a || aba).focus());
+              return aba
+                .navigate(destino.href)
+                .then((a) => (a || aba).focus())
+                .catch(() => self.clients.openWindow(destino.href));
             }
             return aba.focus();
           }

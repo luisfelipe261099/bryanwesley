@@ -107,7 +107,12 @@ export async function autenticarPonte(req: Request) {
 export async function desligarPonte() {
   await db
     .update(whatsappPonte)
-    .set({ segredoHash: null, status: null, numero: null, nome: null, qr: null, codigoWhatsapp: null, comandos: [] })
+    // Zera também o pareamento e o último sinal: ponte desligada não é
+    // ponte caída, e o alerta de "fora do ar" olha para estes carimbos.
+    .set({
+      segredoHash: null, status: null, numero: null, nome: null, qr: null, codigoWhatsapp: null, comandos: [],
+      pareadaEm: null, vistoEm: null, painelAte: null,
+    })
     .where(eq(whatsappPonte.id, 1));
 }
 

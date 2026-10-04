@@ -10,6 +10,7 @@ import {
   mysqlEnum,
   int,
   varchar,
+  char,
   text,
   mediumtext,
   boolean,
@@ -595,7 +596,7 @@ export const pushSubscriptions = mysqlTable(
     userId: int("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    endpointHash: varchar("endpoint_hash", { length: 64 }).notNull(),
+    endpointHash: char("endpoint_hash", { length: 64 }).notNull(),
     endpoint: text("endpoint").notNull(),
     /** Chaves públicas do navegador para cifrar o aviso (RFC 8291). */
     p256dh: varchar("p256dh", { length: 200 }).notNull(),

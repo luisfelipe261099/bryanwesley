@@ -1,5 +1,7 @@
 "use server";
 
+import { removerInscricao } from "@/lib/push";
+
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, eq, or, sql as rawSql } from "drizzle-orm";
@@ -11,6 +13,7 @@ import {
   SESSION_COOKIE,
   signSession,
   sessionCookieOptions,
+  verifySession,
 } from "@/lib/auth/session";
 import { normalizePhone, isValidPhone } from "@/lib/phone";
 import { safeNext } from "@/lib/url";
@@ -269,7 +272,20 @@ export async function signup(
   redirect("/cliente");
 }
 
-export async function logout() {
+export async function logout(formData?: FormData) {
+  // Sair também tira este aparelho dos avisos no celular da conta: num
+  // celular emprestado ou no tablet do balcão, quem saiu não pode
+  // continuar recebendo "Novo agendamento". O endereço do aparelho vem
+  // do formulário (o botão Sair o preenche no navegador).
+  const endpoint = formData?.get("pushEndpoint");
+  if (typeof endpoint === "string" && endpoint) {
+    try {
+      const session = await verifySession(cookies().get(SESSION_COOKIE)?.value);
+      if (session) await removerInscricao(session.id, endpoint);
+    } catch (e) {
+      console.error("Sair: não deu para tirar o aparelho dos avisos:", e);
+    }
+  }
   cookies().delete(SESSION_COOKIE);
   redirect("/entrar");
 }

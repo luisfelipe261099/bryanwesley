@@ -481,9 +481,19 @@ export async function requestPlan(input: {
   // dia por cliente. Clicar "pedir" dez vezes não vira dez avisos.
   const mudou = !aberta || aberta.planId !== plan.id || aberta.cycle !== input.cycle;
   if (mudou) {
-    const freio = await hitRateLimit(`push:pedido-plano:${session.id}`, 3, 24 * 3600_000);
-    if (freio.ok) {
-      await avisarPedidoDePlano({ nomeCliente: session.name, nomePlano: plan.name, ciclo: input.cycle });
+    try {
+      const freio = await hitRateLimit(`push:pedido-plano:${session.id}`, 3, 24 * 3600_000);
+      if (freio.ok) {
+        await avisarPedidoDePlano({
+          userId: session.id,
+          nomeCliente: session.name,
+          nomePlano: plan.name,
+          ciclo: input.cycle,
+        });
+      }
+    } catch (e) {
+      // O pedido já está gravado; o aviso é extra.
+      console.error("Aviso de pedido de plano:", e);
     }
   }
 

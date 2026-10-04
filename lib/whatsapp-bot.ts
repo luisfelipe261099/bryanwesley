@@ -498,6 +498,9 @@ async function fecharAgendamento(fone: string, dados: Dados): Promise<SaidaBot[]
   }
 
   try {
+    // Quem marca pelo WhatsApp não precisa do aviso no celular da própria
+    // reserva: o "Tá marcado!" já chega na conversa.
+    const cliente = await db.query.users.findFirst({ columns: { id: true }, where: eq(users.phone, fone) });
     const appt = await createBooking({
       serviceIds: dados.serviceIds,
       dateKey: dados.dateKey,
@@ -509,6 +512,7 @@ async function fecharAgendamento(fone: string, dados: Dados): Promise<SaidaBot[]
       // Pedido do cliente: vale a pausa da agenda, a antecedência mínima
       // e o limite de dias — as mesmas regras do site.
       publicRequest: true,
+      autorUserId: cliente?.id ?? null,
     });
     await limparSessao(fone);
 
@@ -614,7 +618,7 @@ async function cancelar(fone: string, id: number): Promise<SaidaBot[]> {
     ];
   }
   try {
-    await transitionAppointment(appt.id, "CANCELADO");
+    await transitionAppointment(appt.id, "CANCELADO", { autorUserId: appt.clientUserId });
   } catch {
     return [texto_(fone, "Não consegui cancelar agora. Tenta de novo.")];
   }

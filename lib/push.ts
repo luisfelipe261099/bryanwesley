@@ -97,7 +97,10 @@ export async function chavesVapid(): Promise<Chaves> {
   const pub = process.env.VAPID_PUBLIC_KEY?.trim();
   const priv = process.env.VAPID_PRIVATE_KEY?.trim();
   if (pub && priv) {
-    if (chavesValidas(pub, priv)) return (chavesCache = { publicKey: pub, privateKey: priv });
+    // Sem o "=" do fim: o navegador compara a chave da inscrição com esta.
+    if (chavesValidas(pub, priv)) {
+      return (chavesCache = { publicKey: pub.replace(/=+$/, ""), privateKey: priv.replace(/=+$/, "") });
+    }
     if (!avisouEnv) {
       avisouEnv = true;
       console.error("Push: VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY inválidas — ignoradas; valem as chaves do banco.");
@@ -400,6 +403,8 @@ export async function enviarPush(
     urgencia?: "high" | "normal" | "low";
     /** Por quanto tempo o serviço guarda o aviso para um aparelho desligado (padrão: 1 dia). */
     ttlSegundos?: number;
+    /** Tempo máximo esperando o serviço de push (padrão: TIMEOUT_MS). */
+    prazoMs?: number;
   } = {}
 ): Promise<ResultadoPush> {
   const fora = new Set((opcoes.excluir ?? []).filter((x): x is number => typeof x === "number"));
@@ -424,11 +429,12 @@ export async function enviarPush(
     tag: aviso.tag,
     quando: Date.now(),
   });
+  const prazo = Math.max(500, Math.min(TIMEOUT_MS, opcoes.prazoMs ?? TIMEOUT_MS));
   const requisicao: RequestOptions = {
     vapidDetails: { subject: assunto(), publicKey: chaves.publicKey, privateKey: chaves.privateKey },
     TTL: Math.max(60, Math.min(TTL_S, Math.round(opcoes.ttlSegundos ?? TTL_S))),
     urgency: opcoes.urgencia ?? "high",
-    timeout: TIMEOUT_MS,
+    timeout: prazo,
     contentEncoding: "aes128gcm",
   };
 
@@ -436,7 +442,7 @@ export async function enviarPush(
     inscricoes.map((i) =>
       comPrazo(
         transporte({ endpoint: i.endpoint, keys: { p256dh: i.p256dh, auth: i.auth } }, payload, requisicao),
-        TIMEOUT_MS + 1_000
+        prazo + 1_000
       )
     )
   );

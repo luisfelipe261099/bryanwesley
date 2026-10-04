@@ -17,7 +17,8 @@ export type NotifChannel = (typeof notifications.$inferSelect)["channel"];
 /** Título do aviso no celular para cada tipo de mensagem da fila. */
 export const TITULO_PUSH: Record<NotifKind, string> = {
   AGENDAMENTO_CRIADO: "Horário confirmado",
-  LEMBRETE_24H: "Seu horário é amanhã",
+  // Sem "amanhã": pela mesma razão do texto do WhatsApp, o lembrete pode sair atrasado.
+  LEMBRETE_24H: "Lembrete do seu horário",
   LEMBRETE_2H: "Seu horário é daqui a pouco",
   AGENDAMENTO_CANCELADO: "Horário cancelado",
   AGENDAMENTO_REMARCADO: "Horário remarcado",

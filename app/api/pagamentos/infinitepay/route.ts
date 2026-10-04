@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { settlePayment } from "@/lib/payments";
 
 export const dynamic = "force-dynamic";
+// Confere o pagamento no provedor e avisa no celular: mais que o padrão.
+export const maxDuration = 30;
 
 /**
  * Webhook da InfinitePay. Responde 200 no sucesso e 400 para que o

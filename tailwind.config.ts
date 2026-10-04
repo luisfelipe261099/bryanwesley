@@ -13,6 +13,11 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      // O projeto inteiro usa bordas como border-white/6, /8 e /12. O
+      // Tailwind só gera o modificador de opacidade para a escala padrão
+      // (5, 10, 15…): sem estas três, as classes não existiam e a borda
+      // saía na cor padrão do navegador.
+      opacity: { 6: "0.06", 8: "0.08", 12: "0.12" },
       colors: {
         // Neutro base — azul-petróleo quase preto
         ink: {

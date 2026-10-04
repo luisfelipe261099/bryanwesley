@@ -232,7 +232,7 @@ Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
 ## Testes
 
 ```bash
-npm test                  # 673 verificações
+npm test                  # 702 verificações
 npm run test:agenda       # 34 — motor de agenda, jornada por barbeiro, faixas de meta
 npm run test:fixo         # 17 — horário fixo, ocorrência cancelada, transição concorrente
 npm run test:seguranca    # 18 — teto de agendamentos, webhook, redirect, CSV, sessão
@@ -269,7 +269,7 @@ npm run test:revisao3     # 7 — a terceira revisão: aviso atrasado não sai n
                           #      rajada quando o WhatsApp for ligado, remarcar
                           #      pelo cliente segue as regras do site, dois
                           #      pedidos do mesmo telefone novo ao mesmo tempo
-npm run test:push         # 87 — avisos no celular: chaves VAPID nascendo no banco,
+npm run test:push         # 116 — avisos no celular: chaves VAPID nascendo no banco,
                           #      inscrição conferida, aparelho morto (410) saindo,
                           #      falha passageira, quem recebe o quê (admin,
                           #      barbeiro, cliente — menos quem fez), lembretes

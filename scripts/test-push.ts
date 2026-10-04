@@ -5,7 +5,7 @@ import "../db/load-env";
 import webpush from "web-push";
 import { db, pool } from "../db/client";
 import {
-  appointments, appointmentServices, appointmentCommissions, notifications, barbers,
+  appointments, appointmentServices, appointmentCommissions, notifications, barbers, plans,
   planRequests, pushSubscriptions, pushVapid, rateLimits, services as sv, subscriptions, users, whatsappPonte,
 } from "../db/schema";
 import {
@@ -14,12 +14,12 @@ import {
   aparelhosDaEquipe, MAX_APARELHOS_POR_PESSOA, chavesValidas, type Transporte,
 } from "../lib/push";
 import {
-  avisarEquipe, avisarCliente, avisarPedidoDePlano, avisarPagamento, alertarWhatsappCaido, quandoCurto, PONTE_ALERTA_MS,
-  TETO_AVISOS_POR_CLIENTE_HORA,
+  avisarEquipe, avisarCliente, avisarPedidoDePlano, avisarPagamento, alertarWhatsappCaido, alertarWahaDesconectado,
+  quandoCurto, PONTE_ALERTA_MS, TETO_AVISOS_POR_CLIENTE_HORA,
 } from "../lib/avisos";
 import { createBooking, rescheduleBooking, transitionAppointment } from "../lib/appointments";
 import { garantirLembretesPush, pendingNotifications } from "../lib/notifications";
-import { despacharPush, runDispatch } from "../lib/dispatch";
+import { despacharPush, runDispatch, ttlAteOHorario } from "../lib/dispatch";
 import { receberSinal } from "../lib/ponte";
 import { getSettings, getAvailability } from "../lib/schedule";
 import { shopToday, addDays, weekdayOf } from "../lib/time";
@@ -304,6 +304,19 @@ async function main() {
     ok("admin que remarcou não recebe", recebeu("admin-cel").length === 0);
     ok("cliente recebe o novo horário", recebeu("cli-cel").length === 1 && (recebeu("cli-cel")[0].payload as { corpo: string }).corpo.includes(novo.code));
     ok("nenhum aviso de 'criado' vazou na remarcação", !enviados.some((e) => (e.payload as { titulo: string }).titulo === "Novo agendamento"));
+    ok("o aviso de remarcado substitui o 'Novo agendamento' do horário antigo (mesma tag)", (recebeu("barb-cel")[0].payload as { tag: string }).tag === `agendamento-${appt3.id}`);
+
+    // Remarcação para OUTRO barbeiro: o antigo fica sabendo que o horário saiu.
+    const [{ id: outroUserId }] = await db.insert(users).values({ name: `${MARCA} Outro`, phone: FONE(4), role: "BARBER" }).$returningId();
+    const [{ id: outroBarberId }] = await db.insert(barbers).values({ userId: outroUserId, slug: `${MARCA.toLowerCase()}-outro`, shortName: "ZZOutro", title: "Barbeiro", sortOrder: 98 }).$returningId();
+    await salvarInscricao(outroUserId, INSC("outro-cel"), "Android · Chrome");
+    const { dia: d3, livres: l3 } = await diaComVagas(corte.durationMin, 1, outroBarberId);
+    zerar();
+    const novo2 = await rescheduleBooking({ appointmentId: novo.id, dateKey: d3, time: l3[0], barberId: outroBarberId, autorUserId: adminId });
+    ok("o barbeiro novo recebe 'Horário remarcado'", recebeu("outro-cel").length === 1 && (recebeu("outro-cel")[0].payload as { titulo: string }).titulo === "Horário remarcado", JSON.stringify(recebeu("outro-cel")));
+    ok("o barbeiro antigo recebe 'Horário saiu da sua agenda'", recebeu("barb-cel").length === 1 && (recebeu("barb-cel")[0].payload as { titulo: string }).titulo === "Horário saiu da sua agenda", JSON.stringify(recebeu("barb-cel")));
+    ok("com a tag do horário antigo (substitui o aviso de antes)", (recebeu("barb-cel")[0].payload as { tag: string }).tag === `agendamento-${novo.id}`);
+    void novo2;
 
     // Barbeiro que também é admin recebe uma vez só.
     zerar();
@@ -321,18 +334,30 @@ async function main() {
     const appt = (await db.query.appointments.findFirst({ where: eq(appointments.clientUserId, clienteId) }))!;
     for (let i = 0; i < TETO_AVISOS_POR_CLIENTE_HORA + 2; i++) await avisarEquipe("criado", appt);
     ok(`no máximo ${TETO_AVISOS_POR_CLIENTE_HORA} avisos à equipe por cliente por hora`, recebeu("admin-cel").length === TETO_AVISOS_POR_CLIENTE_HORA, String(recebeu("admin-cel").length));
+    zerar();
+    await avisarEquipe("cancelado", appt);
+    ok("cancelamento passa pelo freio sempre", recebeu("admin-cel").length === 1);
+    zerar();
+    await avisarEquipe("criado", appt, { autorUserId: adminId });
+    ok("o balcão (admin marcando) não entra na conta do freio", recebeu("barb-cel").length === 1, String(recebeu("barb-cel").length));
+    zerar();
+    const passado = { ...appt, startsAt: new Date(Date.now() - 2 * 3600_000) };
+    await avisarEquipe("cancelado", passado);
+    await avisarCliente("AGENDAMENTO_CANCELADO", passado);
+    ok("cancelar horário que já passou não avisa ninguém (é arrumação)", enviados.length === 0);
     await db.delete(rateLimits).where(like(rateLimits.chave, "push:equipe:%"));
   }
 
   console.log("\n6. Pedido de plano, pagamento e o cliente");
   {
     zerar();
-    await avisarPedidoDePlano({ nomeCliente: "Fulano", nomePlano: "Plano Gold", ciclo: "ANUAL" });
+    await avisarPedidoDePlano({ userId: clienteId, nomeCliente: "Fulano", nomePlano: "Plano Gold", ciclo: "ANUAL" });
     const a = recebeu("admin-cel");
     ok("admin recebe 'Pedido de plano' e abre o painel", a.length === 1 && (a[0].payload as { titulo: string; url: string; corpo: string }).titulo === "Pedido de plano" && (a[0].payload as { url: string }).url === "/admin" && (a[0].payload as { corpo: string }).corpo.includes("anual"));
     ok("barbeiro não recebe pedido de plano", recebeu("barb-cel").length === 0);
     zerar();
-    await avisarPagamento({ userId: clienteId, nomeCliente: "Fulano", nomePlano: "Plano Gold" });
+    const planoQualquer = (await db.query.plans.findFirst())!;
+    await avisarPagamento({ userId: clienteId, planId: planoQualquer.id });
     ok("pagamento: admin sabe e o cliente também", recebeu("admin-cel").length === 1 && recebeu("cli-cel").length === 1 && (recebeu("cli-cel")[0].payload as { titulo: string }).titulo === "Plano ativo");
     zerar();
     await avisarCliente("AGENDAMENTO_CRIADO", { ...((await db.query.appointments.findFirst({ where: eq(appointments.clientUserId, clienteId) }))!), clientUserId: null });
@@ -354,8 +379,15 @@ async function main() {
     ok("a fila push tem o lembrete de 24h", prontas.some((n) => n.appointmentId === appt.id && n.kind === "LEMBRETE_24H"));
 
     const r = await despacharPush(50);
-    ok("o despacho entregou o lembrete no celular", r.enviadas >= 1 && recebeu("cli-cel").some((e) => (e.payload as { titulo: string }).titulo === "Seu horário é amanhã"), JSON.stringify(r));
-    ok("lembrete de 24h vale 20h no serviço de push (não chega depois da hora)", recebeu("cli-cel").find((e) => (e.payload as { titulo: string }).titulo === "Seu horário é amanhã")?.ttl === 20 * 3600);
+    ok("o despacho entregou o lembrete no celular", r.enviadas >= 1 && recebeu("cli-cel").some((e) => (e.payload as { titulo: string }).titulo === "Lembrete do seu horário"), JSON.stringify(r));
+    {
+      const ttl = recebeu("cli-cel").find((e) => (e.payload as { titulo: string }).titulo === "Lembrete do seu horário")?.ttl ?? 0;
+      // O teste adiantou o scheduledFor para "agora": a função conta 24h a
+      // partir dele, com teto de um dia.
+      ok("lembrete vale até a hora do atendimento no serviço de push (teto de 1 dia)", ttl > 24 * 3600 - 300 && ttl <= 24 * 3600, String(ttl));
+      ok("a conta pela hora do atendimento é exata", ttlAteOHorario("LEMBRETE_2H", new Date(Date.now() + 30 * 60_000)) - 2.5 * 3600 < 2 && ttlAteOHorario("LEMBRETE_24H", new Date(Date.now() - 23 * 3600_000)) - 3600 < 2);
+      ok("lembrete já vencido vale o mínimo de 1 min", ttlAteOHorario("LEMBRETE_2H", new Date(Date.now() - 3 * 3600_000)) === 60);
+    }
     const linha = await db.query.notifications.findFirst({
       where: and(eq(notifications.appointmentId, appt.id), eq(notifications.kind, "LEMBRETE_24H"), eq(notifications.channel, "PUSH")),
     });
@@ -413,25 +445,51 @@ async function main() {
     await db.delete(rateLimits).where(like(rateLimits.chave, "push:%"));
     ok("sem ponte instalada, nenhum alerta", (await alertarWhatsappCaido()).aparelhos === 0 && enviados.length === 0);
     const agora = new Date();
-    await db.insert(whatsappPonte).values({
-      id: 1, segredoHash: "x".repeat(64), pareadaEm: new Date(agora.getTime() - 3600_000),
-      vistoEm: new Date(agora.getTime() - PONTE_ALERTA_MS - 60_000), status: "WORKING",
-    }).onDuplicateKeyUpdate({ set: { vistoEm: new Date(agora.getTime() - PONTE_ALERTA_MS - 60_000), status: "WORKING", pareadaEm: new Date(agora.getTime() - 3600_000) } });
+    const h = (n: number) => new Date(agora.getTime() - n * 3600_000);
+    const ponte = async (campos: Partial<typeof whatsappPonte.$inferInsert>) => {
+      await db.delete(whatsappPonte);
+      await db.insert(whatsappPonte).values({ id: 1, segredoHash: "x".repeat(64), pareadaEm: h(3), vistoEm: agora, status: "WORKING", ...campos });
+    };
+
+    await ponte({ vistoEm: new Date(agora.getTime() - PONTE_ALERTA_MS - 60_000) });
     const r = await alertarWhatsappCaido(agora);
     ok("ponte muda há mais de 15 min: admin recebe 'WhatsApp fora do ar'", r.enviadas === 1 && (recebeu("admin-cel")[0]?.payload as { titulo: string })?.titulo === "WhatsApp fora do ar", JSON.stringify(r));
     ok("barbeiro não recebe", recebeu("barb-cel").length === 0);
+    ok("o texto não exagera o tempo (piso, não arredondamento)", /há mais de 1[56] min/.test((recebeu("admin-cel")[0]?.payload as { corpo: string })?.corpo ?? ""), (recebeu("admin-cel")[0]?.payload as { corpo: string })?.corpo);
     zerar();
     const r2 = await alertarWhatsappCaido(agora);
     ok("de novo em seguida, não repete", r2.enviadas === 0 && enviados.length === 0);
+
     await db.delete(rateLimits).where(like(rateLimits.chave, "push:%"));
-    await db.update(whatsappPonte).set({ vistoEm: agora, status: "SCAN_QR_CODE" }).where(eq(whatsappPonte.id, 1));
+    await ponte({ status: "SCAN_QR_CODE" });
     const r3 = await alertarWhatsappCaido(agora);
-    ok("ponte viva mas número desconectado: avisa para ler o QR", r3.enviadas === 1 && /QR/.test((recebeu("admin-cel")[0]?.payload as { corpo: string })?.corpo ?? ""));
+    ok("ponte viva mas número desconectado (depois de já ter funcionado): avisa para ler o QR", r3.enviadas === 1 && /QR/.test((recebeu("admin-cel")[0]?.payload as { corpo: string })?.corpo ?? ""));
+    zerar();
+
+    await db.delete(rateLimits).where(like(rateLimits.chave, "push:%"));
+    await ponte({ status: "SCAN_QR_CODE", pareadaEm: h(0.5) });
+    ok("primeiro QR de uma ponte recém-instalada não é alarme", (await alertarWhatsappCaido(agora)).enviadas === 0);
+    await ponte({ status: "INSTALANDO", vistoEm: null, pareadaEm: h(0.1) });
+    ok("instalação em andamento não é alarme", (await alertarWhatsappCaido(agora)).enviadas === 0);
+    await ponte({ status: "WORKING" });
+    ok("tudo certo: silêncio", (await alertarWhatsappCaido(agora)).enviadas === 0);
+
+    // Desligada pelo painel: nem o carimbo antigo faz alarme.
+    await ponte({ segredoHash: null, vistoEm: new Date(agora.getTime() - PONTE_ALERTA_MS * 10) });
+    ok("ponte desligada pelo painel não é ponte caída", (await alertarWhatsappCaido(agora)).enviadas === 0);
+    await ponte({ vistoEm: new Date(agora.getTime() - PONTE_ALERTA_MS * 10) });
+    process.env.WHATSAPP_PROVIDER = "meta";
+    ok("com outro provedor escolhido, a ponte não conta", (await alertarWhatsappCaido(agora)).enviadas === 0);
+    delete process.env.WHATSAPP_PROVIDER;
+
+    // WAHA próprio desconectado: mesmo alerta, mesma cadência.
     zerar();
     await db.delete(rateLimits).where(like(rateLimits.chave, "push:%"));
-    await db.update(whatsappPonte).set({ vistoEm: agora, status: "WORKING" }).where(eq(whatsappPonte.id, 1));
-    ok("tudo certo: silêncio", (await alertarWhatsappCaido(agora)).enviadas === 0);
+    ok("WAHA próprio desconectado avisa para conectar de novo", (await alertarWahaDesconectado(agora)).enviadas === 1 && /conecte de novo/.test((recebeu("admin-cel")[0]?.payload as { corpo: string })?.corpo ?? ""));
+    ok("e respeita a cadência de 12 h", (await alertarWahaDesconectado(agora)).enviadas === 0);
+    zerar();
     await db.delete(whatsappPonte);
+    await db.delete(rateLimits).where(like(rateLimits.chave, "push:%"));
   }
 
   console.log("\n9. O painel vê quem da equipe ligou");

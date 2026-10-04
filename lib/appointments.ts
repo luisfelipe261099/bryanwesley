@@ -539,7 +539,14 @@ export async function rescheduleBooking(input: {
       appointment: novo,
       barberName: prof?.shortName,
     });
-    const ctx = { autorUserId: input.autorUserId, barberName: prof?.shortName };
+    // O aviso substitui o "Novo agendamento" do horário antigo nos
+    // aparelhos; se trocou de barbeiro, o antigo também fica sabendo.
+    const ctx = {
+      autorUserId: input.autorUserId,
+      barberName: prof?.shortName,
+      substituiId: appt.id,
+      barbeiroAnteriorId: appt.barberId,
+    };
     await Promise.all([
       avisarEquipe("remarcado", novo, ctx),
       avisarCliente("AGENDAMENTO_REMARCADO", novo, ctx),

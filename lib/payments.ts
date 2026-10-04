@@ -7,7 +7,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { payments, planRequests, plans, subscriptions, users } from "@/db/schema";
-import { avisarPagamento, nomesParaAviso } from "./avisos";
+import { avisarPagamento } from "./avisos";
 import {
   createPaymentLink,
   checkPayment,
@@ -182,8 +182,7 @@ export async function settlePayment(input: {
         );
 
       // Admin e cliente ficam sabendo no celular, na hora.
-      const nomes = await nomesParaAviso(sub.userId, payment.planId ?? sub.planId);
-      await avisarPagamento({ userId: sub.userId, ...nomes });
+      await avisarPagamento({ userId: sub.userId, planId: payment.planId ?? sub.planId });
     }
   }
 

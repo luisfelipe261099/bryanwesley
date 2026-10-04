@@ -43,13 +43,13 @@ import {
   discardNotification as discardNotificationRow,
 } from "@/lib/notifications";
 import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
-import { claimDispatchSlot, runDispatch } from "@/lib/dispatch";
+import { claimDispatchSlot, runDispatch, despacharPush } from "@/lib/dispatch";
 import { chargeSubscription } from "@/lib/payments";
 import { shopTimeToUtc, parseDateKey } from "@/lib/time";
 import { normalizePhone, isValidPhone, nextPlaceholderPhone, isPlaceholderPhone } from "@/lib/phone";
 import { planClientImport, chaveNome } from "@/lib/import";
 import { nextRenewal } from "@/lib/subscriptions";
-import { avisarPlanoAtivado, nomesParaAviso } from "@/lib/avisos";
+import { avisarPlanoAtivado } from "@/lib/avisos";
 import { formatBRL } from "@/lib/money";
 import { publicBaseUrl } from "@/lib/qr";
 import { wahaConfigurado, wahaConectar, wahaCodigoDePareamento } from "@/lib/providers/waha";
@@ -852,8 +852,7 @@ export async function subscribeClient(input: {
       renewsAt,
     });
     // O cliente que ligou os avisos fica sabendo na hora.
-    const { nomePlano } = await nomesParaAviso(input.userId, input.planId);
-    await avisarPlanoAtivado({ userId: input.userId, nomePlano });
+    await avisarPlanoAtivado({ userId: input.userId, planId: input.planId });
     return done("Assinatura ativada.");
   } catch (e) {
     return fail(e);
@@ -880,8 +879,7 @@ export async function renewSubscription(userId: number): Promise<Result> {
         canceledAt: null,
       })
       .where(eq(subscriptions.id, current.id));
-    const { nomePlano } = await nomesParaAviso(userId, current.planId);
-    await avisarPlanoAtivado({ userId, nomePlano, renovacao: true });
+    await avisarPlanoAtivado({ userId, planId: current.planId, renovacao: true });
     return done("Renovação registrada.");
   } catch (e) {
     return fail(e);
@@ -1206,17 +1204,22 @@ export async function discardNotification(id: number): Promise<Result> {
 export async function flushNotifications(): Promise<Result> {
   try {
     await admin();
+    // Os avisos no celular saem daqui mesmo, com ou sem WhatsApp: o botão
+    // conta todos os prontos, então todos têm que sair.
+    const push = await despacharPush(50);
+    const pushTxt = push.enviadas ? ` ${push.enviadas} aviso(s) no celular enviado(s).` : "";
     if (!process.env.WHATSAPP_PROVIDER && (await pontePareada())) {
       // Pela ponte, quem manda é o servidor da barbearia: o painel aberto
       // já faz ele perguntar a cada 3 segundos.
       await painelAberto();
-      return done("O servidor do WhatsApp manda a fila nos próximos segundos.");
+      return done(`O servidor do WhatsApp manda a fila nos próximos segundos.${pushTxt}`);
     }
     if (!isWhatsappConfigured()) {
       const fila = await pendingNotifications(50);
+      if (fila.length === 0 && push.enviadas > 0) return done(pushTxt.trim());
       return {
         ok: false,
-        error: `WhatsApp não configurado. ${fila.length} mensagem(ns) aguardando na fila.`,
+        error: `WhatsApp não configurado. ${fila.length} mensagem(ns) aguardando na fila.${pushTxt}`,
       };
     }
     const vez = await claimDispatchSlot(5_000);
@@ -1234,6 +1237,8 @@ export async function flushNotifications(): Promise<Result> {
       };
     }
     const partes = [`${r.enviadas} mensagem(ns) enviada(s)`];
+    const avisos = push.enviadas + r.push.enviadas;
+    if (avisos) partes.push(`${avisos} aviso(s) no celular`);
     if (r.falhas) partes.push(`${r.falhas} falha(s)`);
     if (r.descartadas) partes.push(`${r.descartadas} vencida(s) descartada(s)`);
     if (r.interrompida) partes.push("o resto da fila sai na próxima varredura");

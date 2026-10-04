@@ -75,7 +75,8 @@ export default async function Conta() {
               aparelhos={aparelhos.map((a) => ({
                 id: a.id,
                 nome: a.aparelho ?? "Aparelho",
-                quando: a.usadoEm ? `usado ${labelAgo(a.usadoEm)}` : `desde ${labelAgo(a.createdAt)}`,
+                endpointHash: a.endpointHash,
+                quando: `ativo ${labelAgo(a.usadoEm ?? a.createdAt)}`,
               }))}
             />
           </div>

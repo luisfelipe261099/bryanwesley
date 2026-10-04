@@ -52,7 +52,7 @@ export function AvisosEquipe({
                 className={`label inline-flex flex-none items-center gap-1.5 rounded-full px-2.5 py-1.5 ${
                   p.aparelhos > 0 ? "bg-neon/10 text-neon" : "bg-white/5 text-steel-400"
                 }`}
-                title={p.ultimo ? `Último aviso ${labelAgo(p.ultimo)}` : undefined}
+                title={p.ultimo ? `Ativo ${labelAgo(p.ultimo)}` : undefined}
               >
                 <Smartphone className="h-3.5 w-3.5" />
                 {p.aparelhos > 0 ? `${p.aparelhos} aparelho${p.aparelhos === 1 ? "" : "s"}` : "sem avisos"}
