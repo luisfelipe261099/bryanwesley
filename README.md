@@ -178,6 +178,12 @@ Sem `WHATSAPP_TOKEN` configurado o sistema segue funcionando: as mensagens
 ficam gravadas na fila até o número ser aprovado. Horário fixo materializado
 pelo sistema não dispara confirmação (o membro já sabe), só os lembretes.
 
+## Tutorial para a equipe
+
+`docs/Tutorial-Bryan-Wesley.pdf` — guia ilustrado, com as telas reais, para
+barbeiros e administração: como entrar e instalar no celular, avisos no
+celular, agenda do dia, check-in, comissão, e cada área do painel do admin.
+
 ## Avisos no celular (push)
 
 Agendamento novo, cancelamento, remarcação, pedido de plano e pagamento
