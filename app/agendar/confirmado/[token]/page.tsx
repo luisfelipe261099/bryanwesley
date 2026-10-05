@@ -121,7 +121,7 @@ export default async function Confirmado({
             <Line label="Barbeiro">{appt.barber.user.name}</Line>
             <Line label="Serviço">{servicos}</Line>
             <Line label="Duração">{formatDuration(appt.durationMin)}</Line>
-            <Line label="Onde">{info.address}</Line>
+            {info.address && <Line label="Onde">{info.address}</Line>}
             <div className="flex items-center justify-between gap-4 border-t border-white/8 pt-3">
               <span className="text-steel-400">
                 {appt.kind === "ASSINANTE" ? "Cobrança" : "Total"}

@@ -82,7 +82,8 @@ export default async function Privacidade() {
           ))}
         </div>
         <p className="mt-8 text-xs text-steel-400">
-          Contato para assuntos de privacidade: {shop.phone} · {shop.address}.
+          Contato para assuntos de privacidade:{" "}
+          {[shop.phone, shop.address].filter(Boolean).join(" · ") || "fale com a barbearia no balcão"}.
         </p>
       </main>
       <Footer />

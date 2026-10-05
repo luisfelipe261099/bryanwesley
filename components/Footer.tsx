@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { MapPin, Phone, Clock, Instagram } from "lucide-react";
 import { Logo } from "./Logo";
-import { shopFrom } from "@/lib/shop";
+import { shopFrom, instagramUrl, whatsappDaLoja } from "@/lib/shop";
 import { getSettings } from "@/lib/schedule";
 
 export async function Footer() {
   const shop = shopFrom(await getSettings().catch(() => undefined));
+  const insta = instagramUrl(shop.instagram);
+  const whats = whatsappDaLoja(shop.phone);
   return (
     <footer
       id="contato"
@@ -19,28 +21,51 @@ export async function Footer() {
               Precisão, estilo e cuidado em cada corte. Agende online, entre no
               Clube VIP e nunca mais perca o ponto da sua barba e cabelo.
             </p>
-            <Link
-              href="https://instagram.com"
-              className="mt-5 inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2.5 text-sm font-medium text-steel-300 transition-colors hover:border-electric/45 hover:text-white"
-            >
-              <Instagram className="h-4 w-4 text-electric" />
-              {shop.instagram}
-            </Link>
+            {insta && (
+              <a
+                href={insta}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-5 inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2.5 text-sm font-medium text-steel-300 transition-colors hover:border-electric/45 hover:text-white"
+              >
+                <Instagram className="h-4 w-4 text-electric" />
+                {shop.instagram.startsWith("@") || /^https?:/i.test(shop.instagram) ? shop.instagram : `@${shop.instagram}`}
+              </a>
+            )}
           </div>
 
-          <div>
-            <h4 className="label text-steel-200">Contato</h4>
-            <ul className="mt-4 space-y-3 text-sm text-steel-400">
-              <li className="flex items-start gap-2.5">
-                <MapPin className="mt-0.5 h-4 w-4 flex-none text-electric" />
-                {shop.address}
-              </li>
-              <li className="flex items-center gap-2.5">
-                <Phone className="h-4 w-4 flex-none text-electric" />
-                {shop.phone}
-              </li>
-            </ul>
-          </div>
+          {(shop.address || shop.phone) && (
+            <div>
+              <h4 className="label text-steel-200">Contato</h4>
+              <ul className="mt-4 space-y-3 text-sm text-steel-400">
+                {shop.address && (
+                  <li className="flex items-start gap-2.5">
+                    <MapPin className="mt-0.5 h-4 w-4 flex-none text-electric" />
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(shop.address)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:text-electric"
+                    >
+                      {shop.address}
+                    </a>
+                  </li>
+                )}
+                {shop.phone && (
+                  <li className="flex items-center gap-2.5">
+                    <Phone className="h-4 w-4 flex-none text-electric" />
+                    {whats ? (
+                      <a href={whats} target="_blank" rel="noopener noreferrer" className="hover:text-electric">
+                        {shop.phone}
+                      </a>
+                    ) : (
+                      shop.phone
+                    )}
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
 
           <div>
             <h4 className="label text-steel-200">Horários</h4>
