@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Bell, BellOff, BellRing, Loader2, Smartphone, X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { testarAvisoPush } from "@/app/conta/actions";
@@ -33,10 +33,9 @@ const SONECA_MS = 7 * 86400_000;
 const CHAVE_SONECA = "avisos-push:agora-nao";
 const CHAVE_SYNC = "avisos-push:sincronizado";
 /**
- * Quem ligou os avisos neste aparelho. Num tablet do balcão, o barbeiro
- * que entra depois do admin não herda a inscrição sem querer: para ele a
- * tela mostra "desligados" até ele mesmo ligar — e aí o aparelho passa
- * a ser dele.
+ * Para quem este aparelho está inscrito. Os avisos são ligados por
+ * padrão: quando outra conta entra no mesmo aparelho, a inscrição passa
+ * para ela na hora (a anterior já saiu dela ao clicar em Sair).
  */
 export const CHAVE_DONO = "avisos-push:dono";
 
@@ -173,18 +172,16 @@ export function AvisosPush({
           setEstado("desligado");
           return;
         }
-        // Inscrição de outra pessoa neste aparelho: para esta conta, está
-        // desligado. Ligar aqui passa o aparelho para ela.
-        if (ler(CHAVE_DONO) !== String(usuarioId)) {
-          setEstado("desligado");
-          return;
-        }
+        // Ligados por padrão: a inscrição que o aparelho já tem passa a ser
+        // de quem está logado agora (quem saiu foi tirado dela ao sair).
+        // Uma sincronização por sessão da aba, ou quando troca a conta.
+        const trocouDeConta = ler(CHAVE_DONO) !== String(usuarioId);
         setEstado("ligado");
-        // Mantém o site em dia com o navegador (uma vez por sessão da aba).
         try {
-          if (sessionStorage.getItem(CHAVE_SYNC) !== "1") {
+          if (trocouDeConta || sessionStorage.getItem(CHAVE_SYNC) !== "1") {
             sessionStorage.setItem(CHAVE_SYNC, "1");
             await enviarInscricao(sub);
+            guardar(CHAVE_DONO, String(usuarioId));
           }
         } catch {}
       } catch {
@@ -209,13 +206,20 @@ export function AvisosPush({
     return () => window.removeEventListener("avisos-push:removido", aoRemover);
   }, []);
 
-  const ligar = useCallback(async () => {
+  /**
+   * Liga os avisos neste aparelho. `automatico` é o caminho padrão (ao
+   * abrir a tela ou no primeiro toque): quieto quando não dá — o convite
+   * continua lá para a pessoa tentar pelo botão.
+   */
+  const ligar = useCallback(async (automatico = false) => {
     setOcupado(true);
     try {
       const permissao = await Notification.requestPermission();
       if (permissao !== "granted") {
         setEstado(permissao === "denied" ? "negado" : "desligado");
-        if (permissao === "denied") toast("Permissão negada. Libere as notificações nas configurações do navegador.", "erro");
+        if (permissao === "denied" && !automatico) {
+          toast("Permissão negada. Libere as notificações nas configurações do navegador.", "erro");
+        }
         return;
       }
       const reg = await registrar();
@@ -246,12 +250,42 @@ export function AvisosPush({
       // A mensagem do navegador vem em inglês e não ajuda quem lê; o que
       // importa fica no console para quem for investigar.
       console.error("Avisos no celular:", e);
-      toast("Não deu para ligar os avisos neste navegador agora. Tente de novo ou use outro navegador.", "erro");
+      if (!automatico) {
+        toast("Não deu para ligar os avisos neste navegador agora. Tente de novo ou use outro navegador.", "erro");
+      }
       setEstado(Notification.permission === "denied" ? "negado" : "desligado");
     } finally {
       setOcupado(false);
     }
   }, [chavePublica, usuarioId]);
+
+  // Ligados por padrão. Com a permissão já dada, liga ao abrir a tela; sem
+  // ela, pede no primeiro toque ou tecla em qualquer ponto da página — o
+  // navegador só mostra o pedido de permissão a partir de um gesto da
+  // pessoa (Safari e Firefox exigem). Quem disse "agora não" fica em paz.
+  const tentouAuto = useRef(false);
+  useEffect(() => {
+    if (estado !== "desligado" || soneca || tentouAuto.current) return;
+    if (Notification.permission === "granted") {
+      tentouAuto.current = true;
+      void ligar(true);
+      return;
+    }
+    if (Notification.permission !== "default") return;
+    const aoTocar = () => {
+      if (tentouAuto.current) return;
+      tentouAuto.current = true;
+      limpar();
+      void ligar(true);
+    };
+    const limpar = () => {
+      window.removeEventListener("pointerdown", aoTocar);
+      window.removeEventListener("keydown", aoTocar);
+    };
+    window.addEventListener("pointerdown", aoTocar);
+    window.addEventListener("keydown", aoTocar);
+    return limpar;
+  }, [estado, soneca, ligar]);
 
   const desligar = useCallback(async () => {
     setOcupado(true);
@@ -313,13 +347,15 @@ export function AvisosPush({
               Configurações do site → Notificações para receber os avisos.
             </>
           ) : (
-            TEXTO[papel]
+            <>
+              {TEXTO[papel]} <span className="text-steel-400">Ligam sozinhos ao tocar na tela — ou aqui:</span>
+            </>
           )}
         </span>
         {estado === "desligado" && (
           <button
             type="button"
-            onClick={ligar}
+            onClick={() => ligar()}
             disabled={ocupado}
             className="btn-royal inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
           >
@@ -409,7 +445,7 @@ export function AvisosPush({
           {estado === "desligado" ? (
             <button
               type="button"
-              onClick={ligar}
+              onClick={() => ligar()}
               disabled={ocupado}
               className="btn-royal inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
             >

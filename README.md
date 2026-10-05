@@ -185,10 +185,12 @@ chegam como notificação no celular de quem é da equipe — com o site
 fechado, sem depender do WhatsApp. O cliente que ligar recebe a
 confirmação e os lembretes do horário dele também por ali.
 
-- Cada pessoa liga no **próprio aparelho**: ao abrir o painel aparece o
-  convite no topo; em **Conta → Avisos no celular** dá para ligar,
-  mandar um aviso de teste e desligar. Em **Mensagens** o admin vê quem
-  da equipe já ligou.
+- **Ligados por padrão**: ao abrir o painel, o aparelho entra nos avisos
+  sozinho — com a permissão já dada, na hora; sem ela, o navegador pede no
+  primeiro toque na tela (só um gesto da pessoa libera o pedido). O
+  convite no topo e **Conta → Avisos no celular** ficam como reserva:
+  ligar, mandar um aviso de teste, desligar. Em **Mensagens** o admin vê
+  quem da equipe já está recebendo.
 - No iPhone o site precisa estar instalado (Compartilhar → Adicionar à
   Tela de Início, iOS 16.4+); no Android e no computador funciona direto
   no Chrome, Edge, Firefox e Samsung Internet.
