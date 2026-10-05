@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, gt, inArray, like, sql as rawSql } from "drizzle-orm";
-import { z } from "zod";
+import { and, eq, gt, inArray, like, lt, sql as rawSql } from "drizzle-orm";
+import { z } from "@/lib/zod-pt";
 import { db } from "@/db/client";
 import {
   appointments,
@@ -25,8 +25,8 @@ import {
   signSession,
   sessionCookieOptions,
 } from "@/lib/auth/session";
-import { cancelFutureOccurrences } from "@/lib/recurring";
-import { isNextControlFlow, dbErrorMessage } from "@/lib/errors";
+import { cancelFutureOccurrences, desligarFixosDe } from "@/lib/recurring";
+import { isNextControlFlow, dbErrorMessage, dbErrorCode } from "@/lib/errors";
 import { hashPassword } from "@/lib/auth/password";
 import {
   createBooking,
@@ -50,6 +50,7 @@ import { normalizePhone, isValidPhone, nextPlaceholderPhone, isPlaceholderPhone 
 import { planClientImport, chaveNome } from "@/lib/import";
 import { nextRenewal } from "@/lib/subscriptions";
 import { avisarPlanoAtivado } from "@/lib/avisos";
+import { whatsappEnviando } from "@/lib/whatsapp-status";
 import { formatBRL } from "@/lib/money";
 import { publicBaseUrl } from "@/lib/qr";
 import { wahaConfigurado, wahaConectar, wahaCodigoDePareamento } from "@/lib/providers/waha";
@@ -95,21 +96,43 @@ function fail(e: unknown): Result {
   if (isNextControlFlow(e)) throw e;
   if (e instanceof BookingError) return { ok: false, error: e.message };
   if (e instanceof z.ZodError) return { ok: false, error: e.issues[0].message };
+  if (dbErrorCode(e) === "ER_DUP_ENTRY") {
+    return { ok: false, error: "Já existe um cadastro com esses dados (nome, e-mail ou telefone repetido)." };
+  }
   console.error(e);
   return { ok: false, error: "Não foi possível concluir a ação." };
+}
+
+/**
+ * Slug livre para um serviço ou plano novo. Criar "Corte" de novo (o slug
+ * "corte" já é do serviço do seed, mesmo renomeado) batia no índice único
+ * e o dono via só "Não foi possível concluir a ação".
+ */
+async function slugLivre(tabela: "services" | "plans", base: string) {
+  const alvo = tabela === "services" ? services : plans;
+  const existentes = await db
+    .select({ slug: alvo.slug })
+    .from(alvo)
+    .where(like(alvo.slug, `${base}%`));
+  const usados = new Set(existentes.map((e) => e.slug));
+  if (!usados.has(base)) return base;
+  for (let i = 2; i < 500; i++) {
+    if (!usados.has(`${base}-${i}`)) return `${base}-${i}`;
+  }
+  return `${base}-${Date.now().toString(36)}`;
 }
 
 // ───────────────────────── Configurações da agenda ─────────────────────────
 
 const settingsSchema = z.object({
   acceptingBookings: z.boolean(),
-  minAdvanceHours: z.number().int().min(0).max(72),
-  slotMinutes: z.number().int().min(10).max(120),
-  openMinute: z.number().int().min(0).max(1439),
-  closeMinute: z.number().int().min(1).max(1440),
+  minAdvanceHours: z.number({ message: "Informe a antecedência mínima (em horas)." }).int().min(0, "Antecedência mínima: de 0 a 72 horas.").max(72, "Antecedência mínima: de 0 a 72 horas."),
+  slotMinutes: z.number({ message: "Informe o intervalo da grade." }).int().min(10, "A grade vai de 10 a 120 minutos.").max(120, "A grade vai de 10 a 120 minutos."),
+  openMinute: z.number({ message: "Informe o horário de abertura." }).int().min(0).max(1439),
+  closeMinute: z.number({ message: "Informe o horário de fechamento." }).int().min(1).max(1440),
   closedWeekdays: z.array(z.number().int().min(0).max(6)),
-  maxAdvanceDays: z.number().int().min(1).max(365),
-  defaultBarberPct: z.number().int().min(0).max(100),
+  maxAdvanceDays: z.number({ message: "Informe até quantos dias à frente o cliente marca." }).int().min(1, "A janela vai de 1 a 365 dias.").max(365, "A janela vai de 1 a 365 dias."),
+  defaultBarberPct: z.number({ message: "Informe a comissão sugerida." }).int().min(0, "Comissão de 0 a 100%.").max(100, "Comissão de 0 a 100%."),
 });
 
 export async function saveSettings(
@@ -142,16 +165,47 @@ export async function addBlock(input: {
 }): Promise<Result> {
   try {
     await admin();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.dateKey ?? "")) {
+      return { ok: false, error: "Escolha o dia do bloqueio." };
+    }
+    if (
+      !Number.isFinite(input.startMinute) ||
+      !Number.isFinite(input.endMinute) ||
+      input.startMinute < 0 ||
+      input.endMinute > 24 * 60
+    ) {
+      return { ok: false, error: "Preencha o horário de início e de fim." };
+    }
     if (input.endMinute <= input.startMinute) {
       return { ok: false, error: "O fim precisa ser depois do início." };
     }
     const { year, month, day } = parseDateKey(input.dateKey);
+    const startsAt = shopTimeToUtc(year, month, day, input.startMinute);
+    const endsAt = shopTimeToUtc(year, month, day, input.endMinute);
     await db.insert(scheduleBlocks).values({
       barberId: input.barberId,
-      startsAt: shopTimeToUtc(year, month, day, input.startMinute),
-      endsAt: shopTimeToUtc(year, month, day, input.endMinute),
+      startsAt,
+      endsAt,
       reason: input.reason?.trim() || null,
     });
+    // O bloqueio não mexe em quem já estava marcado: esses clientes
+    // continuam confirmados. O dono precisa saber para remarcar ou avisar.
+    const [{ n }] = await db
+      .select({ n: rawSql<number>`count(*)` })
+      .from(appointments)
+      .where(
+        and(
+          inArray(appointments.status, ["PENDENTE", "CONFIRMADO", "EM_ANDAMENTO"]),
+          lt(appointments.startsAt, endsAt),
+          gt(appointments.endsAt, startsAt),
+          input.barberId ? eq(appointments.barberId, input.barberId) : undefined
+        )
+      );
+    if (Number(n) > 0) {
+      return done(
+        `Bloqueio criado. Atenção: ${n} atendimento(s) já marcado(s) nesse horário continuam de pé — remarque ou cancele pela Agenda.`
+      );
+    }
     return done("Bloqueio criado.");
   } catch (e) {
     return fail(e);
@@ -195,8 +249,15 @@ const barberSchema = z.object({
   isAdmin: z.boolean().default(false),
 });
 
+/** Começo da mensagem que pede confirmação para promover uma conta de cliente. */
+const AVISO_CONTA_CLIENTE = "Essa pessoa já tem conta de cliente";
+
 export async function createBarber(
-  input: z.input<typeof barberSchema> & { password?: string }
+  input: z.input<typeof barberSchema> & {
+    password?: string;
+    /** O admin confirmou: a conta de cliente com esse WhatsApp vira barbeiro. */
+    converterConta?: boolean;
+  }
 ): Promise<Result> {
   try {
     await admin();
@@ -232,11 +293,18 @@ export async function createBarber(
     // vira barbeiro por aqui. Conta com senha é de alguém: sobrescrever
     // papel e senha dela seria tomar a conta.
     if (existing?.passwordHash) {
-      return {
-        ok: false,
-        error:
-          "Já existe uma conta com esse WhatsApp. Use outro número ou peça para a pessoa entrar em contato.",
-      };
+      // Conta de cliente com senha: o próprio barbeiro já tinha usado o
+      // site. Vira barbeiro só com a confirmação explícita do admin — e a
+      // senha passa a ser a informada aqui. Conta da equipe nunca.
+      if (existing.role !== "CLIENT") {
+        return { ok: false, error: "Esse WhatsApp já é de alguém da equipe." };
+      }
+      if (!input.converterConta) {
+        return {
+          ok: false,
+          error: `${AVISO_CONTA_CLIENTE} (${existing.name}). Confirme para transformá-la em conta de barbeiro — a senha passa a ser a definida aqui.`,
+        };
+      }
     }
     const emailDono = await db.query.users.findFirst({
       where: eq(users.email, userData.email),
@@ -245,7 +313,10 @@ export async function createBarber(
       return { ok: false, error: "Esse e-mail já está em outra conta." };
     }
     if (existing) {
-      await db.update(users).set(userData).where(eq(users.id, existing.id));
+      await db
+        .update(users)
+        .set({ ...userData, tokenVersion: rawSql`${users.tokenVersion} + 1` })
+        .where(eq(users.id, existing.id));
       userId = existing.id;
     } else {
       const [{ id }] = await db
@@ -279,9 +350,87 @@ export async function updateBarber(input: {
   commissionPct: number;
   monthlyGoalCents: number;
   active: boolean;
+  /** Dados da conta de login — para trocar os de demonstração pelos reais. */
+  name?: string;
+  email?: string;
+  phone?: string;
+  isAdmin?: boolean;
 }): Promise<Result> {
   try {
     const session = await admin();
+
+    if (input.shortName.trim().length < 2) {
+      return { ok: false, error: "Informe o nome curto (ao menos 2 letras)." };
+    }
+    if (!Number.isInteger(input.commissionPct) || input.commissionPct < 0 || input.commissionPct > 100) {
+      return { ok: false, error: "A comissão precisa ser um número de 0 a 100." };
+    }
+    if (!Number.isFinite(input.monthlyGoalCents) || input.monthlyGoalCents < 0) {
+      return { ok: false, error: "Meta do mês inválida." };
+    }
+
+    const cartao = await db.query.barbers.findFirst({ where: eq(barbers.id, input.id) });
+    if (!cartao) return { ok: false, error: "Barbeiro não encontrado." };
+    const conta = await db.query.users.findFirst({ where: eq(users.id, cartao.userId) });
+    if (!conta) return { ok: false, error: "Conta do barbeiro não encontrada." };
+
+    // Nome, e-mail, WhatsApp e papel ficam na conta (users). Sem isto, o
+    // dono não tinha como transformar o barbeiro de demonstração no real:
+    // o site seguia mostrando o nome antigo e o login seguia o mesmo.
+    const contaPatch: Partial<typeof users.$inferInsert> = {};
+    let mudouAcesso = false;
+    if (input.name !== undefined) {
+      const nome = input.name.trim();
+      if (nome.length < 3) return { ok: false, error: "Informe o nome completo." };
+      if (nome !== conta.name) contaPatch.name = nome;
+    }
+    if (input.email !== undefined) {
+      const email = input.email.trim().toLowerCase();
+      if (!z.string().email().safeParse(email).success) return { ok: false, error: "E-mail inválido." };
+      if (email !== (conta.email ?? "")) {
+        const outro = await db.query.users.findFirst({ where: eq(users.email, email) });
+        if (outro && outro.id !== conta.id) return { ok: false, error: "Esse e-mail já está em outra conta." };
+        contaPatch.email = email;
+        mudouAcesso = true;
+      }
+    }
+    if (input.phone !== undefined) {
+      if (!isValidPhone(input.phone)) return { ok: false, error: "WhatsApp inválido." };
+      const phone = normalizePhone(input.phone);
+      if (phone !== conta.phone) {
+        const outro = await db.query.users.findFirst({ where: eq(users.phone, phone) });
+        if (outro && outro.id !== conta.id) {
+          return { ok: false, error: `Esse WhatsApp já é de outra conta (${outro.name}).` };
+        }
+        contaPatch.phone = phone;
+        mudouAcesso = true;
+      }
+    }
+    if (input.isAdmin !== undefined) {
+      const role = input.isAdmin ? "ADMIN" : "BARBER";
+      if (role !== conta.role) {
+        if (role === "BARBER") {
+          if (conta.id === session.id) {
+            return { ok: false, error: "Você não pode tirar o seu próprio acesso de administrador." };
+          }
+          const [{ n }] = await db
+            .select({ n: rawSql<number>`count(*)` })
+            .from(users)
+            .where(and(eq(users.role, "ADMIN"), eq(users.active, true)));
+          if (Number(n) <= 1) {
+            return { ok: false, error: "Esse é o último administrador ativo." };
+          }
+        }
+        contaPatch.role = role;
+        mudouAcesso = true;
+      }
+    }
+    if (Object.keys(contaPatch).length > 0) {
+      await db
+        .update(users)
+        .set(mudouAcesso ? { ...contaPatch, tokenVersion: rawSql`${users.tokenVersion} + 1` } : contaPatch)
+        .where(eq(users.id, conta.id));
+    }
 
     // Desativar um barbeiro desativa a conta dele. Sem esta guarda o admin
     // desativa o próprio cartão e fica trancado para fora do sistema — não
@@ -322,7 +471,7 @@ export async function updateBarber(input: {
       .set({
         shortName: input.shortName.trim(),
         title: input.title.trim(),
-        commissionPct: Math.max(0, Math.min(100, input.commissionPct)),
+        commissionPct: input.commissionPct,
         monthlyGoalCents: Math.max(0, Math.round(input.monthlyGoalCents)),
         active: input.active,
       })
@@ -371,8 +520,11 @@ export async function updateBarber(input: {
       .where(
         and(eq(recurringSlots.barberId, input.id), eq(recurringSlots.active, true))
       );
+    const avisaWhatsapp = await whatsappEnviando().catch(() => false);
     const aviso = cancelados
-      ? ` ${cancelados} agendamento(s) futuro(s) cancelado(s) — os clientes foram avisados.`
+      ? ` ${cancelados} agendamento(s) futuro(s) cancelado(s) — ${
+          avisaWhatsapp ? "os clientes foram avisados pelo WhatsApp" : "avise os clientes (o WhatsApp ainda não está conectado)"
+        }.`
       : "";
     if (fixos.length === 0) {
       return done(`Barbeiro desativado e acesso encerrado.${aviso}`);
@@ -396,11 +548,26 @@ export async function setBarberHours(input: {
   weekday: number;
   openMinute: number | null;
   closeMinute: number | null;
+  /** Marca o dia como folga desse profissional. */
+  folga?: boolean;
 }): Promise<Result> {
   try {
     await admin();
     const { barberHours } = await import("@/db/schema");
+    if (!Number.isInteger(input.weekday) || input.weekday < 0 || input.weekday > 6) {
+      return { ok: false, error: "Dia da semana inválido." };
+    }
+    if (input.folga) {
+      // Folga é uma linha 0–0 (lib/schedule: workingWindows).
+      await db
+        .insert(barberHours)
+        .values({ barberId: input.barberId, weekday: input.weekday, openMinute: 0, closeMinute: 0 })
+        .onDuplicateKeyUpdate({ set: { openMinute: 0, closeMinute: 0 } });
+      return done("Folga marcada nesse dia.");
+    }
     if (input.openMinute === null || input.closeMinute === null) {
+      // Dia em branco segue o horário da loja — e só ele: os outros dias
+      // continuam como estavam.
       await db
         .delete(barberHours)
         .where(
@@ -409,20 +576,7 @@ export async function setBarberHours(input: {
             eq(barberHours.weekday, input.weekday)
           )
         );
-      // Com jornada própria em QUALQUER dia, o dia sem linha é folga
-      // (lib/schedule: workingWindows). A mensagem prometia o contrário —
-      // "volta a valer o horário da loja" — e o dono tirava o profissional
-      // da agenda sem perceber. Só quando não sobra nenhuma linha é que a
-      // loja volta a mandar.
-      const [{ n: restantes }] = await db
-        .select({ n: rawSql<number>`count(*)` })
-        .from(barberHours)
-        .where(eq(barberHours.barberId, input.barberId));
-      return done(
-        Number(restantes) > 0
-          ? "Dia em branco: folga desse profissional."
-          : "Jornada limpa — ele volta a seguir o horário da loja."
-      );
+      return done("Esse dia volta a seguir o horário da loja.");
     }
     if (input.closeMinute <= input.openMinute) {
       return { ok: false, error: "O fim precisa ser depois do início." };
@@ -453,6 +607,12 @@ export async function upsertCommissionTier(input: {
 }): Promise<Result> {
   try {
     await admin();
+    if (!Number.isInteger(input.minRevenueCents) || input.minRevenueCents <= 0) {
+      return { ok: false, error: "Informe a partir de quanto gerado no mês vale a faixa (ex.: 8.000)." };
+    }
+    if (!Number.isInteger(input.barberPct) || input.barberPct < 0 || input.barberPct > 100) {
+      return { ok: false, error: "A comissão da faixa precisa ser de 0 a 100%." };
+    }
     if (input.id) {
       await db
         .update(commissionTiers)
@@ -497,10 +657,10 @@ const money = z
 const serviceSchema = z.object({
   id: z.number().int().optional(),
   name: z.string().trim().min(2, "Informe o nome do serviço."),
-  description: z.string().trim().max(200).default(""),
+  description: z.string().trim().max(200, "Descrição: no máximo 200 caracteres.").default(""),
   priceCents: money,
-  durationMin: z.number().int().min(5).max(480),
-  tag: z.string().trim().max(30).nullable().default(null),
+  durationMin: z.number({ message: "Informe a duração em minutos." }).int().min(5, "A duração mínima é 5 minutos.").max(480, "A duração máxima é 8 horas."),
+  tag: z.string().trim().max(30, "Selo: no máximo 30 caracteres.").nullable().default(null),
   active: z.boolean().default(true),
 });
 
@@ -523,13 +683,15 @@ export async function saveService(
         })
         .where(eq(services.id, data.id));
     } else {
-      const slug =
+      const slug = await slugLivre(
+        "services",
         data.name
           .toLowerCase()
           .normalize("NFD")
           .replace(/[̀-ͯ]/g, "")
           .replace(/[^a-z0-9]+/g, "-")
-          .replace(/(^-|-$)/g, "") || `servico-${Date.now()}`;
+          .replace(/(^-|-$)/g, "") || `servico-${Date.now()}`
+      );
       await db.insert(services).values({
         slug,
         name: data.name,
@@ -580,15 +742,17 @@ export async function toggleService(id: number, active: boolean): Promise<Result
 const planSchema = z.object({
   id: z.number().int().optional(),
   name: z.string().trim().min(2, "Informe o nome do plano."),
-  kicker: z.string().trim().max(40).default(""),
-  tagline: z.string().trim().max(120).default(""),
+  kicker: z.string().trim().max(40, "Rótulo: no máximo 40 caracteres.").default(""),
+  tagline: z.string().trim().max(120, "Chamada: no máximo 120 caracteres.").default(""),
   priceCents: money,
   annualPriceCents: money,
-  features: z.array(z.string().trim().min(1)).max(10),
+  features: z.array(z.string().trim().min(1)).max(10, "No máximo 10 benefícios."),
   highlight: z.boolean().default(false),
-  badge: z.string().trim().max(30).nullable().default(null),
+  badge: z.string().trim().max(30, "Selo: no máximo 30 caracteres.").nullable().default(null),
   active: z.boolean().default(true),
   serviceIds: z.array(z.number().int()).default([]),
+  /** Cota mensal por serviço ("id" → vezes por mês; vazio = ilimitado). */
+  quotas: z.record(z.string(), z.number().int().min(1, "A cota mínima é 1 por mês.").max(31).nullable()).default({}),
 });
 
 export async function savePlan(
@@ -615,13 +779,15 @@ export async function savePlan(
         })
         .where(eq(plans.id, planId));
     } else {
-      const slug =
+      const slug = await slugLivre(
+        "plans",
         data.name
           .toLowerCase()
           .normalize("NFD")
           .replace(/[̀-ͯ]/g, "")
           .replace(/[^a-z0-9]+/g, "-")
-          .replace(/(^-|-$)/g, "") || `plano-${Date.now()}`;
+          .replace(/(^-|-$)/g, "") || `plano-${Date.now()}`
+      );
       const [{ id }] = await db
         .insert(plans)
         .values({
@@ -654,7 +820,13 @@ export async function savePlan(
     if (data.serviceIds.length > 0) {
       await db
         .insert(planServices)
-        .values(data.serviceIds.map((sid) => ({ planId: planId!, serviceId: sid })))
+        .values(
+          data.serviceIds.map((sid) => ({
+            planId: planId!,
+            serviceId: sid,
+            monthlyQuota: data.quotas[String(sid)] ?? null,
+          }))
+        )
         .onDuplicateKeyUpdate({ set: { planId: rawSql`${planServices.planId}` } });
     }
 
@@ -758,7 +930,7 @@ export async function createClientManually(input: {
 export async function liberarFixoDoCliente(userId: number): Promise<Result> {
   try {
     await admin();
-    const liberados = await liberarFixosDe([userId]);
+    const liberados = await desligarFixosDe([userId]);
     return done(
       liberados > 0
         ? `Horário fixo encerrado — ${liberados} semana(s) liberada(s) na agenda.`
@@ -952,7 +1124,7 @@ export async function cancelSubscription(userId: number): Promise<Result> {
     // O horário fixo é benefício de membro: sem plano, a cadeira volta para
     // a agenda. Sem isto o ex-membro seguia ocupando o mesmo horário toda
     // semana e o barbeiro não conseguia vender aquele espaço.
-    const liberados = await liberarFixosDe([userId]);
+    const liberados = await desligarFixosDe([userId]);
     return done(
       liberados > 0
         ? `Assinatura cancelada. O horário fixo foi liberado (${liberados} horário(s) futuro(s)).`
@@ -961,25 +1133,6 @@ export async function cancelSubscription(userId: number): Promise<Result> {
   } catch (e) {
     return fail(e);
   }
-}
-
-/**
- * Desliga os horários fixos de quem deixou de ser membro e devolve as
- * semanas já reservadas para a agenda. Devolve quantos horários futuros
- * foram liberados.
- */
-export async function liberarFixosDe(userIds: number[]): Promise<number> {
-  if (userIds.length === 0) return 0;
-  const ativos = await db
-    .select({ id: recurringSlots.id })
-    .from(recurringSlots)
-    .where(
-      and(inArray(recurringSlots.userId, userIds), eq(recurringSlots.active, true))
-    );
-  if (ativos.length === 0) return 0;
-  const ids = ativos.map((a) => a.id);
-  await db.update(recurringSlots).set({ active: false }).where(inArray(recurringSlots.id, ids));
-  return cancelFutureOccurrences(ids);
 }
 
 /**
@@ -1152,6 +1305,27 @@ export async function saveShopInfo(input: {
 }): Promise<Result> {
   try {
     await admin();
+    // Instagram colado como link de compartilhar ("https://www.instagram.com/
+    // perfil?igsh=…") vira só o @perfil — o link passava das 80 letras da
+    // coluna e derrubava o salvamento inteiro com erro genérico.
+    let instagram = input.shopInstagram.trim();
+    const doLink = instagram.match(/instagram\.com\/([A-Za-z0-9._]+)/i);
+    if (doLink) instagram = `@${doLink[1]}`;
+    const campos: [string, string, number][] = [
+      ["Nome", input.shopName.trim(), 120],
+      ["Unidade", input.shopUnit.trim(), 80],
+      ["WhatsApp", input.shopPhone.trim(), 20],
+      ["Endereço", input.shopAddress.trim(), 200],
+      ["Instagram", instagram, 80],
+      ["Horário exibido", input.shopHoursLabel.trim(), 80],
+    ];
+    const grande = campos.find(([, v, max]) => v.length > max);
+    if (grande) {
+      return { ok: false, error: `${grande[0]}: no máximo ${grande[2]} caracteres.` };
+    }
+    if (input.shopPhone.trim() && !isValidPhone(input.shopPhone)) {
+      return { ok: false, error: "WhatsApp da barbearia inválido — use DDD + número." };
+    }
     await db
       .update(settingsTable)
       .set({
@@ -1159,7 +1333,7 @@ export async function saveShopInfo(input: {
         shopUnit: input.shopUnit.trim(),
         shopPhone: input.shopPhone.trim(),
         shopAddress: input.shopAddress.trim(),
-        shopInstagram: input.shopInstagram.trim(),
+        shopInstagram: instagram,
         shopHoursLabel: input.shopHoursLabel.trim(),
       })
       .where(eq(settingsTable.id, 1));

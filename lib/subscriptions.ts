@@ -7,6 +7,7 @@
 import { and, eq, isNotNull, lt } from "drizzle-orm";
 import { db } from "@/db/client";
 import { subscriptions } from "@/db/schema";
+import { desligarFixosDe } from "./recurring";
 
 export async function expireOverdueSubscriptions() {
   const agora = new Date();
@@ -14,6 +15,16 @@ export async function expireOverdueSubscriptions() {
   // Quem pediu para cancelar no site continua membro até o fim do ciclo
   // que já pagou. Vencido o ciclo, a assinatura encerra de vez — virar
   // INADIMPLENTE cobraria de quem avisou que estava saindo.
+  const saindo = await db
+    .select({ userId: subscriptions.userId })
+    .from(subscriptions)
+    .where(
+      and(
+        eq(subscriptions.status, "ATIVA"),
+        lt(subscriptions.renewsAt, agora),
+        isNotNull(subscriptions.canceledAt)
+      )
+    );
   const [saiu] = await db
     .update(subscriptions)
     .set({ status: "CANCELADA" })
@@ -24,6 +35,10 @@ export async function expireOverdueSubscriptions() {
         isNotNull(subscriptions.canceledAt)
       )
     );
+
+  // Sem plano, o horário fixo sai da agenda: as semanas já reservadas
+  // seguiam como "Incluso no plano", segurando a cadeira de graça.
+  if (saindo.length) await desligarFixosDe(saindo.map((s) => s.userId));
 
   const [res] = await db
     .update(subscriptions)

@@ -71,6 +71,15 @@ export default async function Confirmado({
   const servicos = appt.items.map((i) => i.name).join(" + ");
   const cancelado = appt.status === "CANCELADO" || appt.status === "NO_SHOW";
 
+  const voltar =
+    session?.role === "ADMIN"
+      ? { href: `/admin/agenda?dia=${p.dateKey}`, label: "Voltar à agenda" }
+      : session?.role === "BARBER"
+        ? { href: `/barbeiro?dia=${p.dateKey}`, label: "Voltar à agenda" }
+        : session?.role === "CLIENT"
+          ? { href: "/cliente", label: "Meus horários" }
+          : null;
+
   return (
     <>
       <Background />
@@ -151,12 +160,16 @@ export default async function Confirmado({
         </p>
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
-          <Link
-            href="/cliente"
-            className="label inline-flex items-center justify-center gap-2 rounded-full border border-white/12 px-6 py-4 text-steel-200 transition-colors hover:border-electric/45 hover:text-white"
-          >
-            Meus horários
-          </Link>
+          {/* Cada um volta para a própria casa: o barbeiro que lançou o
+              encaixe ia para /cliente e caía em "sem permissão". */}
+          {voltar && (
+            <Link
+              href={voltar.href}
+              className="label inline-flex items-center justify-center gap-2 rounded-full border border-white/12 px-6 py-4 text-steel-200 transition-colors hover:border-electric/45 hover:text-white"
+            >
+              {voltar.label}
+            </Link>
+          )}
           <Link
             href="/"
             className="btn-royal label inline-flex items-center justify-center gap-2 rounded-full px-6 py-4 text-white"

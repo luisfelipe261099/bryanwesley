@@ -27,8 +27,18 @@ import {
   shopTimeToUtc,
 } from "./time";
 
-/** Quantas semanas à frente o fixo é garantido na agenda. */
+/**
+ * Mínimo de dias à frente em que o fixo é garantido na agenda. Na prática
+ * vale o maior entre isto e a janela da agenda pública (maxAdvanceDays):
+ * com só 35 dias reservados e o site abrindo 60, um avulso marcava a
+ * terça do membro na 7ª semana e o fixo se perdia sem aviso.
+ */
 const HORIZON_DAYS = 35;
+
+/** Até onde reservar: nunca menos que a janela em que o público consegue marcar. */
+export function horizonteDoFixo(maxAdvanceDays: number) {
+  return Math.max(HORIZON_DAYS, maxAdvanceDays + 1);
+}
 
 /** As datas que um horário fixo ocupa dentro da janela. */
 export function occurrencesFor(
@@ -60,7 +70,7 @@ export function occurrencesFor(
 export type MaterializeReport = {
   criados: number;
   jaExistiam: number;
-  conflitos: { dateKey: string; motivo: string }[];
+  conflitos: { dateKey: string; motivo: string; lojaFechada?: boolean; slotId?: number; userId?: number }[];
 };
 
 /**
@@ -70,9 +80,14 @@ export type MaterializeReport = {
  * e o caso é reportado para o admin resolver.
  */
 export async function materializeRecurring(
-  opts: { slotId?: number } = {}
+  opts: {
+    slotId?: number;
+    /** Troca de fixo: as semanas do fixo antigo não contam como conflito. */
+    ignorarAppointmentIds?: number[];
+  } = {}
 ): Promise<MaterializeReport> {
   const settings = await getSettings();
+  const horizonte = horizonteDoFixo(settings.maxAdvanceDays);
   const report: MaterializeReport = { criados: 0, jaExistiam: 0, conflitos: [] };
 
   // Com slotId, só aquele fixo: o relatório de conflitos é do membro que
@@ -111,7 +126,7 @@ export async function materializeRecurring(
     if (svcs.length === 0) continue;
     const durationMin = svcs.reduce((a, s) => a + s.durationMin, 0);
 
-    for (const dateKey of occurrencesFor(slot)) {
+    for (const dateKey of occurrencesFor(slot, shopToday(), horizonte)) {
       if (settings.closedWeekdays.includes(weekdayOf(dateKey))) {
         // Entra como conflito, não some em silêncio: um fixo mensal cujo
         // dia caia sempre em domingo salvava dizendo "reservado" sem
@@ -119,6 +134,7 @@ export async function materializeRecurring(
         report.conflitos.push({
           dateKey,
           motivo: "A barbearia não abre nesse dia.",
+          lojaFechada: true,
         });
         continue;
       }
@@ -169,6 +185,7 @@ export async function materializeRecurring(
           notes: "Horário fixo do plano",
           fromRecurring: true,
           recurringSlotId: slot.id,
+          ignoreAppointmentIds: opts.ignorarAppointmentIds,
         });
         report.criados++;
       } catch (e) {
@@ -176,12 +193,51 @@ export async function materializeRecurring(
           dateKey,
           motivo:
             e instanceof BookingError ? e.message : "Falha ao criar o horário",
+          slotId: slot.id,
+          userId: slot.userId,
         });
       }
     }
   }
 
   return report;
+}
+
+/**
+ * Desliga os horários fixos de quem deixou de ser membro e devolve as
+ * semanas já reservadas para a agenda. Devolve quantos horários futuros
+ * foram liberados.
+ *
+ * Mora aqui, e não num arquivo "use server": exportada de lá ela virava
+ * uma Server Action pública, que qualquer um chamava sem login para
+ * cancelar o fixo de todos os membros.
+ */
+export async function desligarFixosDe(userIds: number[]): Promise<number> {
+  if (userIds.length === 0) return 0;
+  const ativos = await db
+    .select({ id: recurringSlots.id })
+    .from(recurringSlots)
+    .where(and(inArray(recurringSlots.userId, userIds), eq(recurringSlots.active, true)));
+  if (ativos.length === 0) return 0;
+  const ids = ativos.map((a) => a.id);
+  await db.update(recurringSlots).set({ active: false }).where(inArray(recurringSlots.id, ids));
+  return cancelFutureOccurrences(ids);
+}
+
+/** Ids das ocorrências futuras ainda de pé de um conjunto de fixos. */
+export async function ocorrenciasFuturas(slotIds: number[]): Promise<number[]> {
+  if (slotIds.length === 0) return [];
+  const rows = await db
+    .select({ id: appointments.id })
+    .from(appointments)
+    .where(
+      and(
+        inArray(appointments.recurringSlotId, slotIds),
+        gt(appointments.startsAt, new Date()),
+        inArray(appointments.status, ["PENDENTE", "CONFIRMADO"])
+      )
+    );
+  return rows.map((r) => r.id);
 }
 
 /**

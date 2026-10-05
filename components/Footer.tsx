@@ -74,7 +74,9 @@ export async function Footer() {
                 <Clock className="h-4 w-4 flex-none text-electric" />
                 {shop.hoursLabel}
               </li>
-              <li className="pl-[26px] text-steel-400/70">{shop.closedLabel}</li>
+              {shop.closedLabel && (
+                <li className="pl-[26px] text-steel-400/70">{shop.closedLabel}</li>
+              )}
             </ul>
           </div>
         </div>

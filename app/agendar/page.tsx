@@ -10,6 +10,7 @@ import { users } from "@/db/schema";
 import { getSettings, listOpenDays } from "@/lib/schedule";
 import { listServices, listPlans, listTeam, activeSubscription } from "@/lib/queries";
 import { getSession } from "@/lib/auth";
+import { usoDoPlanoNoMes } from "@/lib/appointments";
 import { formatPhone, normalizePhone } from "@/lib/phone";
 import { BookingForm } from "./BookingForm";
 
@@ -36,7 +37,10 @@ export default async function Agendar({
     whatsappEnviando(),
   ]);
 
-  const days = listOpenDays(settings, 10);
+  // Quem é da casa (admin, barbeiro) lança encaixe: vê mais dias à frente
+  // e não esbarra na pausa da agenda pública.
+  const daCasa = session?.role === "ADMIN" || session?.role === "BARBER";
+  const days = listOpenDays(settings, daCasa ? 21 : 10);
 
   // Assinante ativo agenda pelo plano; os serviços cobertos saem sem preço.
   const subscription =
@@ -44,6 +48,18 @@ export default async function Agendar({
   const plan = subscription
     ? plans.find((p) => p.id === subscription.planId) ?? null
     : null;
+
+  // Cota do plano (ex.: Silver, 2 cortes/mês): quanto já foi usado em cada
+  // mês da janela, para a tela não prometer "Incluso" além da cota.
+  const usoPorMes: Record<string, Record<number, number>> = {};
+  if (plan && session) {
+    const comCota = plan.covers.filter((c) => c.quota !== null).map((c) => c.id);
+    const meses = Array.from(new Set(days.map((d) => d.dateKey.slice(0, 7))));
+    for (const mes of meses) {
+      const uso = await usoDoPlanoNoMes(session.id, `${mes}-01`, comCota);
+      usoPorMes[mes] = Object.fromEntries(uso);
+    }
+  }
 
   // Só o cliente logado tem os próprios dados preenchidos; barbeiro ou
   // admin fazendo um encaixe começam com o formulário vazio.
@@ -89,7 +105,14 @@ export default async function Agendar({
           </p>
         </div>
 
-        {!settings.acceptingBookings ? (
+        {!settings.acceptingBookings && daCasa && (
+          <div className="mb-5 flex items-start gap-3 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
+            <Ban className="mt-0.5 h-4 w-4 flex-none" />
+            <span>Agenda online pausada: só a equipe consegue lançar horários agora.</span>
+          </div>
+        )}
+
+        {!settings.acceptingBookings && !daCasa ? (
           <div className="flex items-start gap-3 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-4 text-sm text-amber-200">
             <Ban className="mt-0.5 h-5 w-5 flex-none" />
             <span>
@@ -111,6 +134,8 @@ export default async function Agendar({
             }))}
             days={days}
             plan={plan}
+            usoPorMes={usoPorMes}
+            barberPadrao={daCasa ? session?.barberId ?? null : null}
             viewer={viewer}
             prefill={prefill}
             minAdvanceHours={settings.minAdvanceHours}

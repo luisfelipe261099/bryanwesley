@@ -12,7 +12,7 @@ import {
   type Msg,
 } from "@/components/admin/Feedback";
 import { toast } from "@/lib/toast";
-import { formatBRL } from "@/lib/money";
+import { formatBRL, parseMoneyToCents } from "@/lib/money";
 import {
   resetUserPassword,
   createBarber,
@@ -29,6 +29,9 @@ type BarberRow = {
   /** Conta de login do barbeiro (users.id). */
   userId: number;
   name: string;
+  phone: string;
+  email: string;
+  isAdmin: boolean;
   shortName: string;
   title: string;
   commissionPct: number;
@@ -51,8 +54,11 @@ function toMin(v: string) {
 export function EquipeManager({
   team,
   tiers,
+  comissaoPadrao,
 }: {
   team: BarberRow[];
+  /** "Comissão padrão" de Ajustes: o valor inicial de quem é cadastrado. */
+  comissaoPadrao: number;
   tiers: {
     id: number;
     barberId: number | null;
@@ -66,7 +72,7 @@ export function EquipeManager({
       {team.map((b) => (
         <BarberCard key={b.id} barber={b} />
       ))}
-      <NewBarber />
+      <NewBarber comissaoPadrao={comissaoPadrao} />
       <Tiers tiers={tiers} team={team} />
     </div>
   );
@@ -82,14 +88,26 @@ function BarberCard({ barber }: { barber: BarberRow }) {
 
   function save() {
     setMsg(null);
+    // Desativar não é folga: encerra o acesso, cancela os horários futuros
+    // e desliga os fixos — e nada disso volta ao religar.
+    if (barber.active && !form.active) {
+      const ok = window.confirm(
+        `Desativar ${barber.shortName}?\n\nIsso encerra o acesso dele ao sistema, cancela todos os horários futuros na agenda dele e desliga os horários fixos dos membros. Não dá para desfazer religando.\n\nPara uma folga, use "Folga" na jornada ou um bloqueio em Ajustes.`
+      );
+      if (!ok) return;
+    }
     start(async () => {
       const res = await updateBarber({
         id: barber.id,
         shortName: form.shortName,
         title: form.title,
         commissionPct: form.commissionPct,
-        monthlyGoalCents: Math.round(Number(goal.replace(/\./g, "").replace(",", ".")) * 100) || 0,
+        monthlyGoalCents: parseMoneyToCents(goal),
         active: form.active,
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        isAdmin: form.isAdmin,
       });
       setMsg(notify(res, "Salvo."));
     });
@@ -104,7 +122,26 @@ function BarberCard({ barber }: { barber: BarberRow }) {
           : "Não aparece para os clientes. Ligue \u201cAtivo na agenda\u201d e salve para trazer de volta."
       }
     >
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <TextInput
+          label="Nome completo"
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
+        />
+        <TextInput
+          label="WhatsApp"
+          inputMode="tel"
+          value={form.phone}
+          onChange={(e) => setForm({ ...form, phone: e.target.value })}
+        />
+        <TextInput
+          label="E-mail (login)"
+          type="email"
+          value={form.email}
+          onChange={(e) => setForm({ ...form, email: e.target.value })}
+        />
+      </div>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <TextInput
           label="Nome curto"
           value={form.shortName}
@@ -133,16 +170,22 @@ function BarberCard({ barber }: { barber: BarberRow }) {
         />
       </div>
 
-      <div className="mt-4">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <Toggle
           checked={form.active}
           onChange={(v) => setForm({ ...form, active: v })}
           label="Ativo na agenda"
           hint={
             form.active
-              ? "Aparece para os clientes"
-              : "Some da escolha de barbeiro"
+              ? "Aparece para os clientes e tem acesso ao sistema"
+              : "Ao salvar: perde o acesso e os horários futuros são cancelados"
           }
+        />
+        <Toggle
+          checked={form.isAdmin}
+          onChange={(v) => setForm({ ...form, isAdmin: v })}
+          label="Também é administrador"
+          hint="Dá acesso ao painel de gestão"
         />
       </div>
 
@@ -280,14 +323,15 @@ function BarberHours({
   const [pending, start] = useTransition();
   const map = new Map(hours.map((h) => [h.weekday, h]));
 
-  function save(weekday: number, open: string, close: string, clear = false) {
+  function save(weekday: number, open: string, close: string, clear = false, folga = false) {
     setMsg(null);
     start(async () => {
       const res = await setBarberHours({
         barberId,
         weekday,
-        openMinute: clear ? null : toMin(open),
-        closeMinute: clear ? null : toMin(close),
+        openMinute: clear || folga ? null : toMin(open),
+        closeMinute: clear || folga ? null : toMin(close),
+        folga,
       });
       setMsg(notify(res, "Salvo."));
     });
@@ -297,14 +341,24 @@ function BarberHours({
     <div className="mt-4 rounded-2xl border border-white/8 bg-white/[0.02] p-4">
       <p className="text-sm font-semibold text-white">Jornada própria</p>
       <p className="mt-1 text-xs text-steel-400">
-        Deixe em branco para seguir o horário geral da loja.
+        Dia em branco segue o horário da loja. Preencha só os dias em que ele
+        entra ou sai em outro horário, e toque em <strong className="text-steel-200">Folga</strong> no dia em que não trabalha.
       </p>
       <div className="mt-3 space-y-2">
         {WEEKDAYS.map((d, i) => {
-          const h = map.get(i);
+          const linha = map.get(i);
+          const folga = !!linha && linha.closeMinute <= linha.openMinute;
+          const h = folga ? undefined : linha;
           return (
             <div key={d} className="flex flex-wrap items-center gap-2">
               <span className="label w-10 flex-none text-steel-400">{d}</span>
+              <span
+                className={`label w-14 flex-none rounded-full px-2 py-1 text-center ${
+                  folga ? "bg-amber-400/10 text-amber-200" : h ? "bg-electric/10 text-electric" : "bg-white/5 text-steel-400"
+                }`}
+              >
+                {folga ? "Folga" : h ? "Próprio" : "Loja"}
+              </span>
               <input
                 type="time"
                 aria-label={`Abertura de ${d}`}
@@ -336,6 +390,26 @@ function BarberHours({
               >
                 Aplicar
               </button>
+              {!folga && (
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => save(i, "", "", false, true)}
+                  className="label rounded-full border border-white/12 px-3 py-2 text-steel-400 transition-colors hover:border-amber-300/40 hover:text-amber-200 disabled:opacity-50"
+                >
+                  Folga
+                </button>
+              )}
+              {linha && (
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => save(i, "", "", true)}
+                  className="label rounded-full px-3 py-2 text-steel-400 transition-colors hover:text-white disabled:opacity-50"
+                >
+                  Usar horário da loja
+                </button>
+              )}
             </div>
           );
         })}
@@ -345,7 +419,7 @@ function BarberHours({
   );
 }
 
-function NewBarber() {
+function NewBarber({ comissaoPadrao }: { comissaoPadrao: number }) {
   const [open, setOpen] = useState(false);
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, start] = useTransition();
@@ -356,14 +430,19 @@ function NewBarber() {
     phone: "",
     email: "",
     password: "",
-    commissionPct: 50,
+    commissionPct: comissaoPadrao,
     isAdmin: false,
   });
 
   function submit() {
     setMsg(null);
     start(async () => {
-      const res = await createBarber(f);
+      let res = await createBarber(f);
+      // O WhatsApp é de uma conta de cliente (o barbeiro já tinha usado o
+      // site): transforma em conta de barbeiro só com confirmação.
+      if (!res.ok && res.error.startsWith("Essa pessoa já tem conta de cliente")) {
+        if (window.confirm(res.error)) res = await createBarber({ ...f, converterConta: true });
+      }
       setMsg(notify(res, "Cadastrado."));
       if (res.ok) {
         setF({ ...f, name: "", shortName: "", phone: "", email: "", password: "" });
@@ -488,7 +567,8 @@ function Tiers({
     start(async () => {
       const res = await upsertCommissionTier({
         barberId: f.barberId ? Number(f.barberId) : null,
-        minRevenueCents: Math.round(Number(f.meta.replace(",", ".")) * 100),
+        // "8.000" é oito mil, não oito reais.
+        minRevenueCents: parseMoneyToCents(f.meta),
         barberPct: f.pct,
         label: f.label,
       });
@@ -520,7 +600,7 @@ function Tiers({
           label="A partir de (R$ gerados)"
           inputMode="decimal"
           value={f.meta}
-          placeholder="8000"
+          placeholder="8.000"
           onChange={(e) => setF({ ...f, meta: e.target.value })}
         />
         <TextInput

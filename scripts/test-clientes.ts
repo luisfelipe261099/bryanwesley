@@ -43,6 +43,16 @@ async function limpar() {
   }
 }
 
+/** Regra de produção: iniciar e concluir só no dia. O teste traz o horário para hoje antes. */
+async function paraHoje(id: number) {
+  const a = (await db.query.appointments.findFirst({ where: eq(appointments.id, id) }))!;
+  const inicio = new Date(Date.now() - 60 * 60_000);
+  await db
+    .update(appointments)
+    .set({ startsAt: inicio, endsAt: new Date(inicio.getTime() + a.durationMin * 60_000) })
+    .where(eq(appointments.id, id));
+}
+
 async function main() {
   await limpar();
 
@@ -190,6 +200,7 @@ async function main() {
     ok("ainda não conta como atendimento", antes.concluidos === 0);
     ok("sem plano, sem assinatura na ficha", antes.assinatura === null);
 
+    await paraHoje(appt.id);
     await transitionAppointment(appt.id, "EM_ANDAMENTO");
     await transitionAppointment(appt.id, "CONCLUIDO");
     const depois = (await clientDetail(cliente.id))!;

@@ -24,7 +24,7 @@ import {
 import { avisarPedidoDePlano } from "@/lib/avisos";
 import { hitRateLimit } from "@/lib/rate-limit";
 import { chargeSubscription, isInfinitePayConfigured } from "@/lib/payments";
-import { materializeRecurring, cancelFutureOccurrences } from "@/lib/recurring";
+import { materializeRecurring, cancelFutureOccurrences, ocorrenciasFuturas } from "@/lib/recurring";
 import { getSettings } from "@/lib/schedule";
 import { shopToday, minutesToHHMM } from "@/lib/time";
 
@@ -190,15 +190,24 @@ export async function saveRecurringSlot(input: {
   }).$returningId();
 
   // Já deixa os próximos horários garantidos na agenda — só deste fixo.
-  // Com o fixo antigo ainda de pé, o horário dele aparece ocupado: as
-  // ocorrências do próprio membro não contam como conflito.
+  // As semanas do fixo antigo do próprio membro não contam como conflito:
+  // passar de 10:00 para 10:30 com o mesmo barbeiro esbarrava nelas.
   const idsAntigos = antigos.map((a) => a.id);
-  const report = await materializeRecurring({ slotId: novoId });
+  const ocorrenciasAntigas = await ocorrenciasFuturas(idsAntigos);
+  const report = await materializeRecurring({
+    slotId: novoId,
+    ignorarAppointmentIds: ocorrenciasAntigas,
+  });
+  // Dia em que a loja não abre (fixo mensal no dia 12, que este mês cai
+  // numa segunda) não é "ocupado": nos meses seguintes ele entra sozinho.
+  const ocupados = report.conflitos.filter((c) => !c.lojaFechada);
+  const fechados = report.conflitos.filter((c) => c.lojaFechada);
 
   if (
     report.criados === 0 &&
     report.jaExistiam === 0 &&
-    report.conflitos.length === 0
+    ocupados.length === 0 &&
+    fechados.length === 0
   ) {
     // Nenhuma data, nenhum conflito: o fixo não reservaria nada nas
     // próximas semanas e ficaria de enfeite na tela, "ativo" e vazio.
@@ -214,7 +223,7 @@ export async function saveRecurringSlot(input: {
     };
   }
 
-  if (report.criados === 0 && report.conflitos.length > 0) {
+  if (report.criados === 0 && ocupados.length > 0) {
     // Nenhuma data coube: descarta só o fixo NOVO e devolve o membro ao
     // estado em que ele estava — com o fixo antigo e as semanas dele.
     await db
@@ -224,7 +233,7 @@ export async function saveRecurringSlot(input: {
     revalidatePath("/cliente");
     return {
       ok: false,
-      error: `Esse horário não está livre: ${report.conflitos[0].motivo} Escolha outro. Seu horário fixo atual continua valendo.`,
+      error: `Esse horário não está livre: ${ocupados[0].motivo} Escolha outro. Seu horário fixo atual continua valendo.`,
     };
   }
 
@@ -241,16 +250,24 @@ export async function saveRecurringSlot(input: {
   revalidatePath("/barbeiro");
   revalidatePath("/admin");
 
-  if (report.conflitos.length > 0) {
+  const dataCurta = (k: string) => `${k.slice(8, 10)}/${k.slice(5, 7)}`;
+  const avisos: string[] = [];
+  if (ocupados.length > 0) {
     // Parte das semanas coube, parte não: o membro precisa saber quais
     // datas ficaram de fora em vez de achar que está tudo reservado.
-    const dias = report.conflitos.map(
-      (c) => `${c.dateKey.slice(8, 10)}/${c.dateKey.slice(5, 7)}`
+    const dias = ocupados.map((c) => dataCurta(c.dateKey));
+    avisos.push(
+      `${dias.length === 1 ? "o dia" : "os dias"} ${dias.join(", ")} já ${dias.length === 1 ? "estava ocupado" : "estavam ocupados"} — marque avulso nessas datas`
     );
-    return {
-      ok: true,
-      warning: `Fixo salvo, mas ${dias.length === 1 ? "o dia" : "os dias"} ${dias.join(", ")} já ${dias.length === 1 ? "estava ocupado" : "estavam ocupados"}. Marque avulso nessas datas.`,
-    };
+  }
+  if (fechados.length > 0) {
+    const dias = fechados.map((c) => dataCurta(c.dateKey));
+    avisos.push(
+      `${dias.length === 1 ? "o dia" : "os dias"} ${dias.join(", ")} ${dias.length === 1 ? "cai" : "caem"} quando a barbearia não abre — nos outros meses ele entra normalmente`
+    );
+  }
+  if (avisos.length > 0) {
+    return { ok: true, warning: `Fixo salvo, mas ${avisos.join("; ")}.` };
   }
   return { ok: true };
 }

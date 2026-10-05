@@ -16,7 +16,7 @@ export function PlanCard({
   plan: Plan;
   cycle?: "mensal" | "anual";
 }) {
-  const Icon = planIcons[plan.id] ?? Shield;
+  const Icon = planIcons[plan.slug] ?? Shield;
   const priceCents =
     cycle === "anual" ? plan.annualPriceCents : plan.priceCents;
   // Preço inteiro em destaque; centavos raramente existem nos planos.

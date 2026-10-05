@@ -3,7 +3,7 @@
 // Toda a disponibilidade sai do banco — jornada da loja, agendamentos
 // já gravados, bloqueios do admin e antecedência mínima.
 // ───────────────────────────────────────────────────────────
-import { and, eq, gte, lt, ne, inArray, asc, sql as rawSql } from "drizzle-orm";
+import { and, eq, gte, lt, ne, inArray, notInArray, asc, sql as rawSql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointments,
@@ -95,9 +95,13 @@ type Busy = { start: number; end: number }; // instantes em ms
 async function busyIntervals(
   dateKey: string,
   barberIds: number[],
-  /** Remarcação: o horário que vai sair do lugar não ocupa a si mesmo. */
-  ignorarAppointmentId?: number
+  /**
+   * Remarcação: o horário que vai sair do lugar não ocupa a si mesmo. Na
+   * troca de horário fixo, são as semanas do fixo antigo do membro.
+   */
+  ignorar?: number | number[]
 ) {
+  const ignorarIds = ignorar === undefined ? [] : Array.isArray(ignorar) ? ignorar : [ignorar];
   const { year, month, day } = parseDateKey(dateKey);
   const dayStart = shopTimeToUtc(year, month, day, 0);
   const dayEnd = shopTimeToUtc(year, month, day, 24 * 60);
@@ -116,9 +120,7 @@ async function busyIntervals(
           inArray(appointments.status, [...BLOCKING_STATUSES]),
           lt(appointments.startsAt, dayEnd),
           gte(appointments.endsAt, dayStart),
-          ignorarAppointmentId
-            ? ne(appointments.id, ignorarAppointmentId)
-            : undefined
+          ignorarIds.length ? notInArray(appointments.id, ignorarIds) : undefined
         )
       ),
     db
@@ -158,8 +160,13 @@ async function busyIntervals(
 
 /**
  * Janela de trabalho de cada barbeiro no dia.
- * Sem jornada própria cadastrada vale o horário da loja; com jornada
- * cadastrada e nenhuma linha para este dia da semana, o barbeiro folga.
+ *
+ * Dia sem linha em barber_hours segue o horário da loja — é o que a tela
+ * de Equipe promete ("deixe em branco para seguir o horário da loja").
+ * A regra antiga tratava o dia sem linha como folga assim que existisse
+ * qualquer outra linha: preencher só a terça tirava o barbeiro da agenda
+ * de quarta a sábado, sem aviso. Folga agora é explícita: uma linha com
+ * abertura igual ao fechamento (0–0).
  */
 export async function workingWindows(
   barberIds: number[],
@@ -173,24 +180,21 @@ export async function workingWindows(
         .where(inArray(barberHours.barberId, barberIds))
     : [];
 
-  const hasOwn = new Set(rows.map((r) => r.barberId));
   const out = new Map<number, { open: number; close: number } | null>();
   for (const id of barberIds) {
-    if (!hasOwn.has(id)) {
+    const today = rows.find((r) => r.barberId === id && r.weekday === weekday);
+    if (!today) {
       out.set(id, { open: s.openMinute, close: s.closeMinute });
       continue;
     }
-    const today = rows.find((r) => r.barberId === id && r.weekday === weekday);
-    out.set(
-      id,
-      today
-        ? {
-            // A jornada própria nunca extrapola a da loja.
-            open: Math.max(today.openMinute, s.openMinute),
-            close: Math.min(today.closeMinute, s.closeMinute),
-          }
-        : null
-    );
+    if (today.closeMinute <= today.openMinute) {
+      out.set(id, null); // folga marcada
+      continue;
+    }
+    // A jornada própria nunca extrapola a da loja.
+    const open = Math.max(today.openMinute, s.openMinute);
+    const close = Math.min(today.closeMinute, s.closeMinute);
+    out.set(id, close > open ? { open, close } : null);
   }
   return out;
 }
@@ -216,9 +220,36 @@ export async function capacidadeDoDia(
     weekdayOf(dateKey),
     s
   );
+  // Bloqueios do dia (feriado, almoço, manutenção) saem da capacidade:
+  // sem isto, o feriado bloqueado aparecia como "0% de 33h" e todo dia
+  // com almoço mostrava ocupação abaixo da real.
+  const { year, month, day } = parseDateKey(dateKey);
+  const inicioDia = shopTimeToUtc(year, month, day, 0);
+  const fimDia = shopTimeToUtc(year, month, day, 24 * 60);
+  const bloqueios = await db
+    .select({ barberId: scheduleBlocks.barberId, startsAt: scheduleBlocks.startsAt, endsAt: scheduleBlocks.endsAt })
+    .from(scheduleBlocks)
+    .where(and(lt(scheduleBlocks.startsAt, fimDia), gte(scheduleBlocks.endsAt, inicioDia)));
+  const emMinutos = (d: Date) =>
+    Math.max(0, Math.min(24 * 60, Math.round((d.getTime() - inicioDia.getTime()) / 60_000)));
+
   let total = 0;
-  for (const j of janelas.values()) {
-    if (j) total += Math.max(0, j.close - j.open);
+  for (const [id, j] of janelas) {
+    if (!j) continue;
+    // Minutos livres da janela depois de tirar os bloqueios dele e os da loja.
+    const cortes = bloqueios
+      .filter((b) => b.barberId === null || b.barberId === id)
+      .map((b) => ({ a: Math.max(j.open, emMinutos(b.startsAt)), b: Math.min(j.close, emMinutos(b.endsAt)) }))
+      .filter((c) => c.b > c.a)
+      .sort((x, y) => x.a - y.a);
+    let bloqueado = 0;
+    let ate = j.open;
+    for (const c of cortes) {
+      const ini = Math.max(c.a, ate);
+      if (c.b > ini) bloqueado += c.b - ini;
+      ate = Math.max(ate, c.b);
+    }
+    total += Math.max(0, j.close - j.open - bloqueado);
   }
   return total;
 }
@@ -272,8 +303,8 @@ export async function getAvailability(opts: {
    * está atrás do balcão sabe o que está fazendo.
    */
   ignorarAntecedencia?: boolean;
-  /** Remarcação: ignora o próprio agendamento ao montar a agenda. */
-  ignorarAppointmentId?: number;
+  /** Remarcação: ignora o próprio agendamento (ou os do fixo antigo) ao montar a agenda. */
+  ignorarAppointmentId?: number | number[];
 }): Promise<AvailabilityResult> {
   const s = opts.settings ?? (await getSettings());
   const { dateKey } = opts;

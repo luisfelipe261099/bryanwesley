@@ -38,7 +38,7 @@ export function LoginForm({
       {tab === "entrar" ? (
         <SignInForm proximo={proximo} />
       ) : (
-        <SignUpForm />
+        <SignUpForm proximo={proximo} />
       )}
 
       <div className="mt-6 border-t border-white/8 pt-5">
@@ -90,11 +90,13 @@ function SignInForm({ proximo }: { proximo: string }) {
   );
 }
 
-function SignUpForm() {
+function SignUpForm({ proximo }: { proximo: string }) {
   const [state, action] = useFormState<SignupState, FormData>(signup, undefined);
   const needsCode = !!state?.needsCode;
   return (
     <form action={action} className="space-y-4">
+      {/* Quem veio de "Assinar" volta para o plano que estava assinando. */}
+      <input type="hidden" name="proximo" value={proximo} />
       <Field
         label="Nome completo"
         name="name"

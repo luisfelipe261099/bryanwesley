@@ -15,7 +15,7 @@
     "test:seguranca": "tsx scripts/test-seguranca.ts",
     "test:despacho": "tsx scripts/test-despacho.ts",
     "test:import": "tsx scripts/test-import.ts",
-    "test": "tsx scripts/test-agenda.ts && tsx scripts/test-fixo.ts && tsx scripts/test-seguranca.ts && tsx scripts/test-despacho.ts && tsx scripts/test-import.ts && tsx scripts/test-clientes.ts && tsx scripts/test-clube.ts && tsx scripts/test-auditoria.ts && tsx scripts/test-auditoria2.ts && tsx scripts/test-whatsapp.ts && tsx scripts/test-whatsapp-texto.ts && tsx scripts/test-waha.ts && tsx scripts/test-ponte.ts && tsx scripts/test-revisao3.ts && tsx scripts/test-push.ts",
+    "test": "tsx scripts/test-agenda.ts && tsx scripts/test-fixo.ts && tsx scripts/test-seguranca.ts && tsx scripts/test-despacho.ts && tsx scripts/test-import.ts && tsx scripts/test-clientes.ts && tsx scripts/test-clube.ts && tsx scripts/test-auditoria.ts && tsx scripts/test-auditoria2.ts && tsx scripts/test-whatsapp.ts && tsx scripts/test-whatsapp-texto.ts && tsx scripts/test-waha.ts && tsx scripts/test-ponte.ts && tsx scripts/test-revisao3.ts && tsx scripts/test-push.ts && tsx scripts/test-revisao4.ts",
     "test:clientes": "tsx scripts/test-clientes.ts",
     "test:clube": "tsx scripts/test-clube.ts",
     "test:auditoria": "tsx scripts/test-auditoria.ts",
@@ -24,7 +24,8 @@
     "test:waha": "tsx scripts/test-waha.ts",
     "test:ponte": "tsx scripts/test-ponte.ts",
     "test:revisao3": "tsx scripts/test-revisao3.ts",
-    "test:push": "tsx scripts/test-push.ts"
+    "test:push": "tsx scripts/test-push.ts",
+    "test:revisao4": "tsx scripts/test-revisao4.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -33,7 +34,7 @@
     "jose": "^6.2.12",
     "lucide-react": "^0.428.0",
     "mysql2": "^3.24.4",
-    "next": "14.2.15",
+    "next": "14.2.35",
     "qrcode": "^1.5.4",
     "react": "18.3.1",
     "react-dom": "18.3.1",

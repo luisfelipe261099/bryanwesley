@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
+import { z } from "@/lib/zod-pt";
 import { getAvailability, getSettings } from "@/lib/schedule";
 import { createBooking, BookingError } from "@/lib/appointments";
 import { getSession } from "@/lib/auth";

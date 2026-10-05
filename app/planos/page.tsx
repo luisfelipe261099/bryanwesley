@@ -11,17 +11,6 @@ import { getSettings } from "@/lib/schedule";
 import { shopFrom } from "@/lib/shop";
 import { PlanosGrid } from "./PlanosGrid";
 
-const comparison = [
-  { feature: "Cortes de cabelo", silver: "2/mês", gold: "Ilimitado", diamond: "Ilimitado" },
-  { feature: "Barboterapia", silver: "—", gold: "Semanal", diamond: "Ilimitada" },
-  { feature: "Sobrancelha", silver: "—", gold: "Inclusa", diamond: "Inclusa" },
-  { feature: "Spa capilar", silver: "—", gold: "—", diamond: "1/mês" },
-  { feature: "Prioridade na agenda", silver: true, gold: true, diamond: true },
-  { feature: "Lounge VIP privativo", silver: false, gold: false, diamond: true },
-  { feature: "Convidado mensal grátis", silver: false, gold: false, diamond: true },
-  { feature: "OFF em produtos", silver: "10%", gold: "20%", diamond: "25%" },
-];
-
 const faq = [
   {
     q: "Posso cancelar quando quiser?",
@@ -37,7 +26,7 @@ const faq = [
   },
   {
     q: "O plano vale para outras pessoas?",
-    a: "O plano é individual, vinculado ao seu cadastro e WhatsApp. O Diamond dá 1 convidado por mês.",
+    a: "O plano é individual, vinculado ao seu cadastro e WhatsApp.",
   },
 ];
 
@@ -59,6 +48,20 @@ export default async function Planos() {
   ]);
   const info = shopFrom(settings);
 
+
+  // A comparação sai do que está cadastrado: uma linha por serviço coberto
+  // por algum plano, com a cota do mês. A tabela fixa (Silver/Gold/Diamond)
+  // desalinhava quando o dono criava, desativava ou mudava um plano.
+  const servicosComparados = Array.from(
+    new Map(plans.flatMap((p) => p.covers).map((c) => [c.id, c])).values()
+  ).sort((a, b) => a.sortOrder - b.sortOrder);
+  const comparison = servicosComparados.map((svc) => ({
+    feature: svc.name,
+    celulas: plans.map((p) => {
+      const c = p.covers.find((x) => x.id === svc.id);
+      return c ? (c.quota ? `${c.quota}/mês` : "Ilimitado") : false;
+    }),
+  }));
   return (
     <>
       <Background />
@@ -100,10 +103,11 @@ export default async function Planos() {
         </Reveal>
 
         {/* Tabela comparativa */}
+        {comparison.length > 0 && (
         <Reveal>
           <div className="mt-20">
             <h2 className="text-center font-display text-3xl text-white">
-              Compare os planos
+              O que cada plano cobre
             </h2>
             <div className="mt-8 overflow-x-auto">
               <table className="w-full min-w-[640px] border-separate border-spacing-0">
@@ -134,27 +138,16 @@ export default async function Planos() {
                       >
                         {row.feature}
                       </td>
-                      <td
-                        className={`py-3.5 text-center ${
-                          i === 0 ? "" : "border-t border-white/6"
-                        }`}
-                      >
-                        <Cell value={row.silver} />
-                      </td>
-                      <td
-                        className={`bg-electric/[0.05] py-3.5 text-center ${
-                          i === 0 ? "" : "border-t border-white/6"
-                        }`}
-                      >
-                        <Cell value={row.gold} />
-                      </td>
-                      <td
-                        className={`py-3.5 text-center ${
-                          i === 0 ? "" : "border-t border-white/6"
-                        }`}
-                      >
-                        <Cell value={row.diamond} />
-                      </td>
+                      {row.celulas.map((valor, j) => (
+                        <td
+                          key={plans[j].id}
+                          className={`py-3.5 text-center ${plans[j].highlight ? "bg-electric/[0.05]" : ""} ${
+                            i === 0 ? "" : "border-t border-white/6"
+                          }`}
+                        >
+                          <Cell value={valor} />
+                        </td>
+                      ))}
                     </tr>
                   ))}
                 </tbody>
@@ -162,6 +155,7 @@ export default async function Planos() {
             </div>
           </div>
         </Reveal>
+        )}
 
         {/* FAQ */}
         <Reveal>

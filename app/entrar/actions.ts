@@ -5,7 +5,7 @@ import { removerInscricao } from "@/lib/push";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, eq, or, sql as rawSql } from "drizzle-orm";
-import { z } from "zod";
+import { z } from "@/lib/zod-pt";
 import { db } from "@/db/client";
 import { users, barbers, appointments, subscriptions } from "@/db/schema";
 import { verifyPassword, hashPassword } from "@/lib/auth/password";
@@ -269,7 +269,8 @@ export async function signup(
     v: conta?.tokenVersion ?? 0,
   });
   cookies().set(SESSION_COOKIE, token, sessionCookieOptions);
-  redirect("/cliente");
+  // Veio de "Assinar Gold"? Volta para o checkout do plano, não para o painel.
+  redirect(safeNext(formData.get("proximo")) ?? "/cliente");
 }
 
 export async function logout(formData?: FormData) {

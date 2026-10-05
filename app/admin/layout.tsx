@@ -4,6 +4,8 @@ import { BottomNav } from "@/components/BottomNav";
 import { Heartbeat } from "@/components/Heartbeat";
 import { requireRole } from "@/lib/auth";
 import { AdminNav } from "./AdminNav";
+import { ProvedorAvisoWhatsapp } from "./AgendaHoje";
+import { whatsappEnviando } from "@/lib/whatsapp-status";
 
 export default async function AdminLayout({
   children,
@@ -11,6 +13,7 @@ export default async function AdminLayout({
   children: React.ReactNode;
 }) {
   const session = await requireRole(["ADMIN"]);
+  const avisa = await whatsappEnviando().catch(() => false);
   return (
     <>
       <Background />
@@ -20,7 +23,7 @@ export default async function AdminLayout({
       />
       <main className="mx-auto max-w-7xl overflow-x-clip px-5 pb-28 pt-24 lg:px-8">
         <AdminNav />
-        {children}
+        <ProvedorAvisoWhatsapp ligado={avisa}>{children}</ProvedorAvisoWhatsapp>
       </main>
       <BottomNav active="admin" role={session.role} />
       <Heartbeat />

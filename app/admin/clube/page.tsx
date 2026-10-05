@@ -66,6 +66,7 @@ export default async function AdminClube({
         badge: p.badge,
         active: p.active,
         serviceIds: p.covers.map((c) => c.id),
+        quotas: Object.fromEntries(p.covers.map((c) => [c.id, c.quota])),
       }))}
       servicos={servicos.map((s) => ({ id: s.id, name: s.name }))}
       assinantes={assinantes.map((a) => ({

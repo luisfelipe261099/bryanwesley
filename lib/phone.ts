@@ -7,6 +7,14 @@ export function normalizePhone(input: string) {
   // costuma vir com o 55 na frente. Só corta acima de 11 dígitos — DDD 55
   // existe (Santa Maria/RS) e não pode ser confundido com o país.
   if (d.length > 11 && d.startsWith("55")) d = d.slice(2);
+  // Celular sem o nono dígito (41 8888-7777): é o mesmo cliente de
+  // 41 9 8888-7777. Sem isto, o cliente importado assim do sistema antigo
+  // virava outro cadastro ao agendar com o número completo — e perdia o
+  // plano e o histórico. Fixo começa com 2 a 5; celular, com 6 a 9. O
+  // número reservado ("00…") fica como está.
+  if (d.length === 10 && !d.startsWith("00") && /[6-9]/.test(d[2])) {
+    d = `${d.slice(0, 2)}9${d.slice(2)}`;
+  }
   return d;
 }
 

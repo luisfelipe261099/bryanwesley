@@ -379,7 +379,7 @@ export default async function ClienteDashboard({
                         balcão ou pelo WhatsApp.
                       </p>
                     )}
-                    <CancelarPlano />
+                    <CancelarPlano vencido />
                   </div>
                 </div>
               ) : (

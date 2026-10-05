@@ -497,7 +497,7 @@ function LinhaAssinante({
               >
                 {trocando ? "Fechar" : "Trocar plano"}
               </button>
-              {assinante.status === "ATIVA" && (
+              {(assinante.status === "ATIVA" || assinante.status === "INADIMPLENTE") && (
                 <button
                   type="button"
                   onClick={cancelar}

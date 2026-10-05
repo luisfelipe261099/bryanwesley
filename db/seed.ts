@@ -81,7 +81,9 @@ export async function runSeed() {
     await db.delete(planServices).where(eq(planServices.planId, planId));
     for (const slug of p.covers) {
       const svc = await db.query.services.findFirst({ where: eq(services.slug, slug) });
-      if (svc) await db.insert(planServices).values({ planId, serviceId: svc.id });
+      // O Silver promete "2 cortes de cabelo por mês".
+      const monthlyQuota = p.slug === "silver" && slug === "corte" ? 2 : null;
+      if (svc) await db.insert(planServices).values({ planId, serviceId: svc.id, monthlyQuota });
     }
   }
   console.log(`✓ ${PLANS.length} planos`);

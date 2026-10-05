@@ -240,7 +240,7 @@ Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
 ## Testes
 
 ```bash
-npm test                  # 702 verificações
+npm test                  # 736 verificações
 npm run test:agenda       # 34 — motor de agenda, jornada por barbeiro, faixas de meta
 npm run test:fixo         # 17 — horário fixo, ocorrência cancelada, transição concorrente
 npm run test:seguranca    # 18 — teto de agendamentos, webhook, redirect, CSV, sessão
@@ -282,6 +282,13 @@ npm run test:push         # 116 — avisos no celular: chaves VAPID nascendo no 
                           #      falha passageira, quem recebe o quê (admin,
                           #      barbeiro, cliente — menos quem fez), lembretes
                           #      pelo celular na fila e o alerta de WhatsApp caído
+npm run test:revisao4     # 34 — a revisão antes do teste em produção: nenhuma
+                          #      Server Action sem login, cota mensal do plano,
+                          #      plano só para o próprio telefone, iniciar/
+                          #      concluir/falta só no dia, jornada com folga
+                          #      explícita, nono dígito, troca de horário fixo,
+                          #      fim de plano soltando o fixo, ocupação sem os
+                          #      bloqueios e comissão pendente lançada
 ```
 
 Há ainda um roteiro de navegador (Playwright) com 305 verificações de ponta a

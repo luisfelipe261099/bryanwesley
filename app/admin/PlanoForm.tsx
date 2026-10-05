@@ -26,6 +26,8 @@ export type PlanoEditavel = {
   badge: string | null;
   active: boolean;
   serviceIds: number[];
+  /** Cota mensal de cada serviço incluso (serviceId → vezes; null = ilimitado). */
+  quotas: Record<number, number | null>;
 };
 
 /** Plano em branco, para cadastrar um novo. */
@@ -41,6 +43,7 @@ const EM_BRANCO: PlanoEditavel = {
   badge: null,
   active: true,
   serviceIds: [],
+  quotas: {},
 };
 
 const reais = (cents: number) => (cents / 100).toFixed(2).replace(".", ",");
@@ -87,6 +90,12 @@ export function PlanoForm({
         badge: f.badge || null,
         active: f.active,
         serviceIds: f.serviceIds,
+        quotas: Object.fromEntries(
+          f.serviceIds.map((id) => {
+            const v = Number(f.quotas[id] ?? 0);
+            return [String(id), Number.isInteger(v) && v > 0 ? v : null];
+          })
+        ),
       });
       setMsg(notify(res, novo ? "Plano criado." : "Salvo."));
       if (res.ok) onSalvo?.();
@@ -173,6 +182,40 @@ export function PlanoForm({
             );
           })}
         </div>
+        {f.serviceIds.length > 0 && (
+          <div className="mt-3 space-y-2 rounded-xl border border-white/8 bg-white/[0.02] p-3">
+            <p className="text-xs text-steel-400">
+              Quantas vezes por mês o plano cobre cada serviço. Em branco = ilimitado.
+              Passou da cota, o serviço sai cobrado como avulso naquele mês.
+            </p>
+            {services
+              .filter((s) => f.serviceIds.includes(s.id))
+              .map((s) => (
+                <label key={s.id} className="flex items-center justify-between gap-3 text-sm text-steel-200">
+                  <span className="min-w-0 truncate">{s.name}</span>
+                  <span className="flex flex-none items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={31}
+                      inputMode="numeric"
+                      placeholder="∞"
+                      aria-label={`Vezes por mês: ${s.name}`}
+                      value={f.quotas[s.id] ?? ""}
+                      onChange={(e) =>
+                        setF({
+                          ...f,
+                          quotas: { ...f.quotas, [s.id]: e.target.value === "" ? null : Number(e.target.value) },
+                        })
+                      }
+                      className="w-16 rounded-lg border border-white/10 bg-surface-2 px-2 py-1.5 text-center text-white outline-none focus:border-electric/60"
+                    />
+                    <span className="text-xs text-steel-400">por mês</span>
+                  </span>
+                </label>
+              ))}
+          </div>
+        )}
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">

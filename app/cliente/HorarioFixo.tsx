@@ -59,9 +59,12 @@ export function HorarioFixo({
     return horarios.includes(atual) ? atual : (horarios[0] ?? atual);
   });
   const [barberId, setBarberId] = useState(existing?.barberId ?? team[0]?.id);
-  const [picked, setPicked] = useState<number[]>(
-    existing?.serviceIds ?? (services[0] ? [services[0].id] : [])
-  );
+  // Só o que o plano oferece hoje: um serviço que saiu do plano ficava
+  // marcado sem chip para desmarcar, e todo "Reservar" era recusado.
+  const [picked, setPicked] = useState<number[]>(() => {
+    const validos = (existing?.serviceIds ?? []).filter((id) => services.some((s) => s.id === id));
+    return validos.length ? validos : services[0] ? [services[0].id] : [];
+  });
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 

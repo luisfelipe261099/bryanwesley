@@ -54,6 +54,16 @@ async function diaComVaga(barberId: number, durationMin: number, pular: string[]
   throw new Error("sem vaga para montar o teste");
 }
 
+/** Regra de produção: iniciar e concluir só no dia. O teste traz o horário para hoje antes. */
+async function paraHoje(id: number) {
+  const a = (await db.query.appointments.findFirst({ where: eq(appointments.id, id) }))!;
+  const inicio = new Date(Date.now() - 60 * 60_000);
+  await db
+    .update(appointments)
+    .set({ startsAt: inicio, endsAt: new Date(inicio.getTime() + a.durationMin * 60_000) })
+    .where(eq(appointments.id, id));
+}
+
 async function main() {
   await limpar();
   const gold = (await db.query.plans.findFirst({ where: eq(plans.slug, "gold") }))!;
@@ -81,6 +91,7 @@ async function main() {
     ok("e o agendamento fica no cadastro dele", gravado.clientUserId === membro.id);
 
     console.log("\n2. Faturamento do dia conta o atendimento do assinante");
+    await paraHoje(appt.id);
     await transitionAppointment(appt.id, "EM_ANDAMENTO");
     await transitionAppointment(appt.id, "CONCLUIDO");
     const com = await db.query.appointmentCommissions.findFirst({

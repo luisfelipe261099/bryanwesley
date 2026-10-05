@@ -48,7 +48,9 @@ export type AppointmentFull = Appointment & {
   barber: BarberWithUser;
   items: AppointmentItem[];
 };
-export type PlanWithCovers = Plan & { covers: Service[] };
+/** Serviço coberto pelo plano, com a cota do mês (null = ilimitado). */
+export type ServicoCoberto = Service & { quota: number | null };
+export type PlanWithCovers = Plan & { covers: ServicoCoberto[] };
 
 // ───────────────────────── Catálogo ─────────────────────────
 
@@ -77,14 +79,16 @@ export async function listPlans(
   if (rows.length === 0) return [];
 
   const covers = await db
-    .select({ planId: planServices.planId, service: services })
+    .select({ planId: planServices.planId, quota: planServices.monthlyQuota, service: services })
     .from(planServices)
     .innerJoin(services, eq(services.id, planServices.serviceId))
     .where(inArray(planServices.planId, rows.map((p) => p.id)));
 
   return rows.map((p) => ({
     ...p,
-    covers: covers.filter((c) => c.planId === p.id).map((c) => c.service),
+    covers: covers
+      .filter((c) => c.planId === p.id)
+      .map((c) => ({ ...c.service, quota: c.quota ?? null })),
   }));
 }
 
@@ -545,12 +549,25 @@ export async function barberTodaySummary(barberId: number) {
   const ativos = rows.filter((r) =>
     (BLOCKING_STATUSES as readonly string[]).includes(r.status)
   );
+  // Faturado = base da comissão dos concluídos de hoje (a mesma conta do
+  // painel do admin). Pelo total cobrado, atendimento de assinante entrava
+  // como R$ 0 e o barbeiro via "R$ 0,00 faturados" num dia cheio de membros.
+  const [base] = await db
+    .select({ cents: sql<number>`coalesce(sum(${appointmentCommissions.baseCents}), 0)` })
+    .from(appointmentCommissions)
+    .innerJoin(appointments, eq(appointments.id, appointmentCommissions.appointmentId))
+    .where(
+      and(
+        eq(appointments.barberId, barberId),
+        eq(appointments.status, "CONCLUIDO"),
+        gte(appointments.startsAt, start),
+        lt(appointments.startsAt, end)
+      )
+    );
   return {
     total: ativos.length,
     concluidos: rows.filter((r) => r.status === "CONCLUIDO").length,
-    faturamentoCents: rows
-      .filter((r) => r.status === "CONCLUIDO")
-      .reduce((acc, r) => acc + r.totalCents, 0),
+    faturamentoCents: Number(base?.cents ?? 0),
   };
 }
 

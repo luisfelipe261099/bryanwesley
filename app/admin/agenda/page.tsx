@@ -218,6 +218,7 @@ function paraLinha(
   return {
     id: a.id,
     dateKey: partes.dateKey,
+    inicioIso: a.startsAt.toISOString(),
     hora: formatShopTime(a.startsAt),
     minutos: partes.hour * 60 + partes.minute,
     fim: formatShopTime(a.endsAt),

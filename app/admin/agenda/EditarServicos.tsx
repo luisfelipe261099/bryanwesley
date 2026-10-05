@@ -48,7 +48,9 @@ export function EditarServicos({
   const duracao = selecionados.reduce((a, s) => a + s.durationMin, 0);
 
   function abrir() {
-    setEscolhidos(atuais);
+    // Serviço que saiu do catálogo não tem chip para desmarcar: começar com
+    // ele travava todo "Salvar" em "não está mais no catálogo".
+    setEscolhidos(atuais.filter((id) => servicos.some((s) => s.id === id)));
     setErro(null);
     setOpen(true);
   }

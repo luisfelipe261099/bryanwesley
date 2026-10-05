@@ -10,6 +10,9 @@ import {
   Lock,
   Receipt,
   MessageCircle,
+  ChevronLeft,
+  ChevronRight,
+  UserRound,
   type LucideIcon,
 } from "lucide-react";
 import { Background } from "@/components/Background";
@@ -27,7 +30,10 @@ import {
   getBarberWithUser,
 } from "@/lib/queries";
 import { formatBRL, formatDuration } from "@/lib/money";
-import { formatShopTime, shopToday, addDays, labelWeekday, labelFullDate } from "@/lib/time";
+import { formatShopTime, shopToday, addDays, labelWeekday, labelFullDate, utcToShopParts } from "@/lib/time";
+import { and, asc, eq } from "drizzle-orm";
+import { db } from "@/db/client";
+import { appointments } from "@/db/schema";
 import { formatPhone } from "@/lib/phone";
 import { AppointmentActions } from "./AgendaActions";
 import { appointmentStatus as statusStyles } from "@/lib/status";
@@ -86,19 +92,31 @@ export default async function BarbeiroPanel({
     chavePublicaPush(),
   ]);
 
-  // Meta individual, definida pelo admin em Equipe.
+  // Meta individual, definida pelo admin em Equipe. Meta zerada é "sem
+  // meta" — a conta dividia por zero e mostrava "NaN%".
   const metaCents = barber.monthlyGoalCents;
-  const metaPct = Math.min(
-    100,
-    Math.round((mes.barberCents / metaCents) * 100)
-  );
+  const metaPct =
+    metaCents > 0 ? Math.min(100, Math.round((mes.barberCents / metaCents) * 100)) : null;
 
-  const week = Array.from({ length: 6 }, (_, i) => {
-    const key = addDays(today, i - 2);
+  // A tira de dias acompanha o dia aberto, com setas para a semana
+  // anterior e a próxima: antes ela ia só de anteontem a daqui a 3 dias,
+  // e o barbeiro não tinha como ver quem vem no sábado que vem.
+  const week = Array.from({ length: 7 }, (_, i) => {
+    const key = addDays(dateKey, i - 3);
     return { key, weekday: labelWeekday(key), dayNum: key.slice(-2) };
   });
 
-  const emAndamento = agenda.find((a) => a.status === "EM_ANDAMENTO");
+  // "Em atendimento" é agora, não no dia que está aberto na tela. E o
+  // atendimento esquecido aberto num dia anterior aparece no topo para ser
+  // finalizado — escondido, ele travava o início automático do check-in.
+  const abertos = await db
+    .select({ id: appointments.id, startsAt: appointments.startsAt, clientName: appointments.clientName })
+    .from(appointments)
+    .where(and(eq(appointments.barberId, barber.id), eq(appointments.status, "EM_ANDAMENTO")))
+    .orderBy(asc(appointments.startsAt));
+  const inicioDeHoje = dayBounds(today).start;
+  const esquecidos = abertos.filter((a) => a.startsAt < inicioDeHoje);
+  const emAndamento = abertos.find((a) => a.startsAt >= inicioDeHoje);
   // Iniciar/finalizar só faz sentido no dia (ou para regularizar o passado).
   const podeAgir = dateKey <= today;
 
@@ -159,17 +177,26 @@ export default async function BarbeiroPanel({
               <p className="mt-3 font-display text-3xl text-white">
                 {formatBRL(mes.barberCents)}
               </p>
-              <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-white/8">
-                <div
-                  className="h-full rounded-full bg-royal-grad"
-                  style={{ width: `${metaPct}%` }}
-                />
-              </div>
-              <p className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs text-steel-400">
-                <Target className="h-3.5 w-3.5 text-electric" />
-                Meta {formatBRL(metaCents)} ·{" "}
-                <span className="font-semibold text-electric">{metaPct}%</span>
-              </p>
+              {metaPct !== null ? (
+                <>
+                  <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-white/8">
+                    <div
+                      className="h-full rounded-full bg-royal-grad"
+                      style={{ width: `${metaPct}%` }}
+                    />
+                  </div>
+                  <p className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs text-steel-400">
+                    <Target className="h-3.5 w-3.5 text-electric" />
+                    Meta {formatBRL(metaCents)} ·{" "}
+                    <span className="font-semibold text-electric">{metaPct}%</span>
+                  </p>
+                </>
+              ) : (
+                <p className="mt-4 flex items-center gap-1.5 text-xs text-steel-400">
+                  <Target className="h-3.5 w-3.5 text-electric" />
+                  Sem meta definida para o mês.
+                </p>
+              )}
               <p className="mt-1.5 text-xs text-steel-400">
                 Gerou {formatBRL(mes.baseCents)} para a casa em{" "}
                 {mes.atendimentos} atendimento(s).
@@ -203,6 +230,26 @@ export default async function BarbeiroPanel({
           </Reveal>
         </div>
 
+        {esquecidos.length > 0 && (
+          <div className="mt-5 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
+            <p className="font-semibold">Atendimento de outro dia ainda em andamento</p>
+            <p className="mt-1 text-xs text-amber-100/80">
+              Finalize para lançar a comissão e liberar o início automático do check-in.
+            </p>
+            <ul className="mt-3 space-y-2">
+              {esquecidos.map((a) => (
+                <li key={a.id} className="flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    {a.clientName} · {labelFullDate(utcToShopParts(a.startsAt).dateKey)} às{" "}
+                    {formatShopTime(a.startsAt)}
+                  </span>
+                  <AppointmentActions id={a.id} status="EM_ANDAMENTO" />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* Check-in */}
         <Reveal delay={0.1}>
           <div className="mt-5">
@@ -220,7 +267,34 @@ export default async function BarbeiroPanel({
               </span>
             </div>
 
-            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+            <div className="mt-4 flex items-center gap-2">
+              <Link
+                href={`/barbeiro?dia=${addDays(dateKey, -7)}`}
+                scroll={false}
+                aria-label="Semana anterior"
+                className="grid h-9 w-9 flex-none place-items-center rounded-full border border-white/10 text-steel-300 hover:border-electric/40 hover:text-white"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Link>
+              {dateKey !== today && (
+                <Link
+                  href="/barbeiro"
+                  scroll={false}
+                  className="label rounded-full border border-electric/40 px-3 py-2 text-electric"
+                >
+                  Hoje
+                </Link>
+              )}
+              <Link
+                href={`/barbeiro?dia=${addDays(dateKey, 7)}`}
+                scroll={false}
+                aria-label="Próxima semana"
+                className="ml-auto grid h-9 w-9 flex-none place-items-center rounded-full border border-white/10 text-steel-300 hover:border-electric/40 hover:text-white"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Link>
+            </div>
+            <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
               {week.map((d) => {
                 const on = d.key === dateKey;
                 return (
@@ -354,7 +428,11 @@ export default async function BarbeiroPanel({
                           {st.label}
                         </span>
                         {podeAgir && (
-                          <AppointmentActions id={a.id} status={a.status} />
+                          <AppointmentActions
+                            id={a.id}
+                            status={a.status}
+                            depoisDoInicio={a.startsAt.getTime() <= Date.now()}
+                          />
                         )}
                       </div>
                     </li>
@@ -369,11 +447,20 @@ export default async function BarbeiroPanel({
         <Reveal delay={0.16}>
           <div className="mt-5">
             <h3 className="label text-steel-400">Ações rápidas</h3>
-            <div className="mt-3 grid grid-cols-3 gap-3">
-              <QuickAction icon={CalendarPlus} label="Encaixe" href="/agendar" />
-              <QuickAction icon={Lock} label="Bloquear" href="/admin#agenda" />
-              <QuickAction icon={Receipt} label="Extrato" href="/admin#equipe" />
-            </div>
+            {/* Cada papel vê só o que consegue abrir: o barbeiro tocava em
+                "Bloquear" e caía na tela de login com "sem permissão". */}
+            {session.role === "ADMIN" ? (
+              <div className="mt-3 grid grid-cols-3 gap-3">
+                <QuickAction icon={CalendarPlus} label="Encaixe" href="/agendar" />
+                <QuickAction icon={Lock} label="Bloquear" href="/admin/ajustes#bloqueios" />
+                <QuickAction icon={Receipt} label="Extrato" href="/admin/relatorios" />
+              </div>
+            ) : (
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <QuickAction icon={CalendarPlus} label="Encaixe" href="/agendar" />
+                <QuickAction icon={UserRound} label="Minha conta" href="/conta" />
+              </div>
+            )}
           </div>
         </Reveal>
       </main>

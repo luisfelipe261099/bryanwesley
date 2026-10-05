@@ -1,10 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gte, lt } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appointments } from "@/db/schema";
-import { activeSubscription } from "@/lib/queries";
+import { activeSubscription, dayBounds } from "@/lib/queries";
 import { requireRole } from "@/lib/auth";
 import { isNextControlFlow } from "@/lib/errors";
 import { transitionAppointment, BookingError } from "@/lib/appointments";
@@ -129,10 +129,15 @@ async function fazerCheckIn(input: {
   // registra a chegada e ele inicia quando terminar o atual.
   let started = false;
   if (appt.status === "CONFIRMADO" || appt.status === "PENDENTE") {
+    // Só conta quem está na cadeira HOJE: um atendimento esquecido aberto
+    // no sábado travava o início automático de todos os check-ins.
+    const { start: inicioHoje, end: fimHoje } = dayBounds(shopToday());
     const busy = await db.query.appointments.findFirst({
       where: and(
         eq(appointments.barberId, appt.barberId),
-        eq(appointments.status, "EM_ANDAMENTO")
+        eq(appointments.status, "EM_ANDAMENTO"),
+        gte(appointments.startsAt, inicioHoje),
+        lt(appointments.startsAt, fimHoje)
       ),
     });
     if (!busy) {

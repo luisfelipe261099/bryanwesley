@@ -38,11 +38,17 @@ export function BookingForm({
   prefill,
   minAdvanceHours,
   avisaPorWhatsapp = false,
+  usoPorMes = {},
+  barberPadrao = null,
 }: {
   services: Service[];
   team: TeamMember[];
   days: DayOption[];
-  plan: (Plan & { covers: { id: number }[] }) | null;
+  plan: (Plan & { covers: { id: number; quota: number | null }[] }) | null;
+  /** Cota do plano já usada em cada mês ("AAAA-MM" → serviço → vezes). */
+  usoPorMes?: Record<string, Record<number, number>>;
+  /** Encaixe do barbeiro: começa com ele mesmo escolhido, não "mais rápido". */
+  barberPadrao?: number | null;
   viewer: { name: string; phone: string } | null;
   /** O que veio no link mandado pelo WhatsApp. */
   prefill?: {
@@ -60,7 +66,12 @@ export function BookingForm({
   const [selected, setSelected] = useState<number[]>(
     prefill?.servicoId ? [prefill.servicoId] : []
   );
-  const [barberId, setBarberId] = useState<number | null>(null);
+  // O barbeiro que lança o encaixe começa com ele mesmo escolhido: no
+  // "mais rápido" o atendimento ia para a agenda de outro (o primeiro da
+  // lista), e o check-in dele recusava "é de outro barbeiro".
+  const [barberId, setBarberId] = useState<number | null>(
+    barberPadrao && team.some((b) => b.id === barberPadrao) ? barberPadrao : null
+  );
   const [dateKey, setDateKey] = useState<string | null>(
     prefill?.dia ?? days[0]?.dateKey ?? null
   );
@@ -82,7 +93,22 @@ export function BookingForm({
   const router = useRouter();
 
   const chosen = services.filter((s) => selected.includes(s.id));
-  const totalCents = chosen.reduce((acc, s) => acc + s.priceCents, 0);
+  // O plano cobre o serviço — e ainda tem cota no mês do dia escolhido?
+  const cobre = (id: number) => {
+    const c = plan?.covers.find((x) => x.id === id);
+    if (!c) return false;
+    if (c.quota === null) return true;
+    const usados = usoPorMes[(dateKey ?? "").slice(0, 7)]?.[id] ?? 0;
+    return usados < c.quota;
+  };
+  // Total do que será cobrado: o que o plano cobre não entra. Antes o
+  // resumo dizia "Incluso" na linha e somava o preço cheio no total.
+  const totalCents = chosen.reduce((acc, s) => acc + (cobre(s.id) ? 0 : s.priceCents), 0);
+  const tudoIncluso = isSub && chosen.length > 0 && chosen.every((s) => cobre(s.id));
+  // Serviços do plano cuja cota do mês já acabou: saem cobrados.
+  const foraDaCota = chosen.filter(
+    (s) => plan?.covers.some((c) => c.id === s.id) && !cobre(s.id)
+  );
   const totalMin = chosen.reduce((acc, s) => acc + s.durationMin, 0);
   const selectedDay = days.find((d) => d.dateKey === dateKey);
   const barber = team.find((b) => b.id === barberId);
@@ -191,7 +217,7 @@ export function BookingForm({
             {services.map((s) => {
               const Icon = serviceIcons[s.slug] ?? serviceIcons.corte;
               const active = selected.includes(s.id);
-              const covered = plan?.covers.some((c) => c.id === s.id);
+              const covered = cobre(s.id);
               return (
                 <button
                   key={s.id}
@@ -442,7 +468,7 @@ export function BookingForm({
               </p>
             ) : (
               chosen.map((s) => {
-                const covered = plan?.covers.some((c) => c.id === s.id);
+                const covered = cobre(s.id);
                 return (
                   <div
                     key={s.id}
@@ -493,9 +519,14 @@ export function BookingForm({
             <div className="flex items-end justify-between">
               <span className="label text-steel-400">Total</span>
               <span className="font-display text-3xl text-white">
-                {formatBRL(totalCents)}
+                {tudoIncluso ? "Incluso no plano" : formatBRL(totalCents)}
               </span>
             </div>
+            {foraDaCota.length > 0 && (
+              <p className="mt-2 text-xs text-amber-200">
+                {foraDaCota.map((s) => s.name).join(", ")}: a cota do seu plano neste mês já foi usada — sai como avulso.
+              </p>
+            )}
           </div>
 
           {error && (

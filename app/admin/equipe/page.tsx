@@ -2,16 +2,19 @@ import { asc } from "drizzle-orm";
 import { db } from "@/db/client";
 import { barberHours, commissionTiers } from "@/db/schema";
 import { teamPerformance } from "@/lib/queries";
+import { getSettings } from "@/lib/schedule";
+import { formatPhone } from "@/lib/phone";
 import { EquipeManager } from "./EquipeManager";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminEquipe() {
-  const [perf, hours, tiers] = await Promise.all([
+  const [perf, hours, tiers, settings] = await Promise.all([
     // Inclui desativados: é aqui que o dono reativa alguém.
     teamPerformance({ todos: true }),
     db.select().from(barberHours),
     db.select().from(commissionTiers).orderBy(asc(commissionTiers.minRevenueCents)),
+    getSettings(),
   ]);
 
   return (
@@ -21,6 +24,9 @@ export default async function AdminEquipe() {
         // Conta de login do barbeiro: a senha é do usuário, não do cartão.
         userId: p.barber.userId,
         name: p.barber.user.name,
+        phone: formatPhone(p.barber.user.phone),
+        email: p.barber.user.email ?? "",
+        isAdmin: p.barber.user.role === "ADMIN",
         shortName: p.barber.shortName,
         title: p.barber.title,
         commissionPct: p.barber.commissionPct,
@@ -38,6 +44,7 @@ export default async function AdminEquipe() {
           })),
       }))}
       tiers={tiers}
+      comissaoPadrao={settings.defaultBarberPct}
     />
   );
 }

@@ -51,6 +51,8 @@ async function main() {
         await createBooking({
           serviceIds: [corte.id], dateKey: dia, time,
           barberId: null, clientName: "Spam da Silva", clientPhone: telefone,
+          // O teto vale para a agenda pública; o balcão não passa por ele.
+          publicRequest: true,
         });
         criados++;
       } catch (e) {

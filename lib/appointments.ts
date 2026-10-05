@@ -3,7 +3,7 @@
 // A prevenção de horário duplicado é da constraint de exclusão
 // no banco; aqui traduzimos a violação para uma mensagem humana.
 // ───────────────────────────────────────────────────────────
-import { and, eq, gt, inArray, isNull, lt, ne, or } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, isNull, lt, ne, notInArray, or } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointments,
@@ -39,6 +39,7 @@ import {
   addDays as addDaysKey,
   utcToShopParts,
   minutesToHHMM,
+  labelFullDate,
 } from "./time";
 import { normalizePhone } from "./phone";
 import { dbErrorCode, dbErrorMessage } from "./errors";
@@ -101,11 +102,60 @@ export type CreateBookingInput = {
    */
   ignoreAppointmentId?: number;
   /**
+   * Troca de horário fixo: as semanas do fixo antigo do mesmo membro não
+   * contam como conflito — elas são canceladas logo depois. Sem isto,
+   * passar o fixo de 10:00 para 10:30 com o mesmo barbeiro esbarrava no
+   * próprio fixo antigo e respondia "horário ocupado".
+   */
+  ignoreAppointmentIds?: number[];
+  /**
    * Quem está fazendo (id da conta logada), para não receber aviso no
    * celular da própria ação. Sem sessão, fica em branco.
    */
   autorUserId?: number | null;
 };
+
+/** Primeiro e último instante do mês (fuso da loja) de um dia "AAAA-MM-DD". */
+function limitesDoMes(dateKey: string) {
+  const [y, m] = dateKey.split("-").map(Number);
+  const inicio = shopTimeToUtc(y, m, 1, 0);
+  const proximo = m === 12 ? shopTimeToUtc(y + 1, 1, 1, 0) : shopTimeToUtc(y, m + 1, 1, 0);
+  return { inicio, fim: proximo };
+}
+
+/**
+ * Quantas vezes, no mês de `dateKey`, o plano já cobriu cada serviço para
+ * esta pessoa: itens com preço zero de atendimentos que não foram
+ * cancelados. A falta conta — a cadeira ficou reservada.
+ */
+export async function usoDoPlanoNoMes(
+  userId: number,
+  dateKey: string,
+  serviceIds: number[],
+  ignorar: number[] = []
+) {
+  const out = new Map<number, number>();
+  if (serviceIds.length === 0) return out;
+  const { inicio, fim } = limitesDoMes(dateKey);
+  const rows = await db
+    .select({ serviceId: appointmentServices.serviceId, n: rawSql<number>`count(*)` })
+    .from(appointmentServices)
+    .innerJoin(appointments, eq(appointments.id, appointmentServices.appointmentId))
+    .where(
+      and(
+        eq(appointments.clientUserId, userId),
+        inArray(appointmentServices.serviceId, serviceIds),
+        eq(appointmentServices.priceCents, 0),
+        ne(appointments.status, "CANCELADO"),
+        gte(appointments.startsAt, inicio),
+        lt(appointments.startsAt, fim),
+        ignorar.length ? notInArray(appointments.id, ignorar) : undefined
+      )
+    )
+    .groupBy(appointmentServices.serviceId);
+  for (const r of rows) if (r.serviceId !== null) out.set(r.serviceId, Number(r.n));
+  return out;
+}
 
 export async function createBooking(input: CreateBookingInput) {
   const settings = await getSettings();
@@ -159,8 +209,12 @@ export async function createBooking(input: CreateBookingInput) {
   const congelado = new Map(
     (input.frozenItems ?? []).map((i) => [i.serviceId, i])
   );
-  const preco = (s: { id: number; priceCents: number }) =>
-    congelado.get(s.id)?.priceCents ?? s.priceCents;
+  // Preço congelado zero é o do item que o plano cobria: se agora ele não
+  // é mais coberto (plano acabou, cota do mês estourou), vale a tabela.
+  const preco = (s: { id: number; priceCents: number }) => {
+    const c = congelado.get(s.id)?.priceCents;
+    return c !== undefined && c > 0 ? c : s.priceCents;
+  };
   const duracao = (s: { id: number; durationMin: number }) =>
     congelado.get(s.id)?.durationMin ?? s.durationMin;
 
@@ -172,11 +226,27 @@ export async function createBooking(input: CreateBookingInput) {
   // assinante deslogado saíam como avulso, com o preço cheio no WhatsApp e
   // no faturamento. O telefone é a chave do cadastro: dá para saber sem
   // sessão nenhuma.
-  let ownerId = input.userId ?? null;
+  //
+  // A conta da sessão só vale quando o telefone digitado é o dela: o membro
+  // logado que troca nome e WhatsApp no formulário para marcar para o
+  // amigo (ou o pai, para o filho) não pode estender o plano a outra
+  // pessoa — o plano é individual. Aí o dono é quem tem aquele telefone.
+  let ownerId: number | null = null;
+  if (input.userId) {
+    const conta = await db.query.users.findFirst({
+      columns: { id: true, phone: true },
+      where: eq(users.id, input.userId),
+    });
+    if (conta && normalizePhone(conta.phone) === phone) ownerId = conta.id;
+  }
   if (!ownerId) {
     const dono = await db.query.users.findFirst({ where: eq(users.phone, phone) });
     if (dono) ownerId = dono.id;
   }
+  const ignorados = [
+    ...(input.ignoreAppointmentId ? [input.ignoreAppointmentId] : []),
+    ...(input.ignoreAppointmentIds ?? []),
+  ];
 
   // Assinatura ativa cobre os serviços do plano — nesse caso não há cobrança.
   const subscription = ownerId
@@ -193,14 +263,26 @@ export async function createBooking(input: CreateBookingInput) {
     const covers = await db.query.planServices.findMany({
       where: eq(planServices.planId, subscription.planId),
     });
-    coveredIds = new Set(covers.map((c) => c.serviceId));
+    // Cota do mês (ex.: Silver, 2 cortes): o que já foi usado no mês do
+    // atendimento conta, e o que passa da cota sai cobrado como avulso.
+    const comCota = covers.filter((c) => c.monthlyQuota !== null && c.monthlyQuota !== undefined);
+    const usados = comCota.length
+      ? await usoDoPlanoNoMes(ownerId!, input.dateKey, comCota.map((c) => c.serviceId), ignorados)
+      : new Map<number, number>();
+    coveredIds = new Set(
+      covers
+        .filter((c) => c.monthlyQuota == null || (usados.get(c.serviceId) ?? 0) < c.monthlyQuota)
+        .map((c) => c.serviceId)
+    );
   }
   const allCovered =
     !!subscription && chosen.every((s) => coveredIds.has(s.id));
 
-  // Horário fixo é materializado pelo próprio sistema (5 semanas de uma
-  // vez): ele não passa pelo teto, senão o benefício se auto-bloqueia.
-  if (!input.fromRecurring) {
+  // O teto existe para conter abuso da agenda pública. O balcão (admin e
+  // barbeiro) não passa por ele — o cliente que pede para deixar marcado
+  // o corte de cada semana do mês é atendimento, não abuso — e o horário
+  // fixo, materializado pelo próprio sistema, também não.
+  if (input.publicRequest && !input.fromRecurring) {
     const teto = subscription ? MAX_ABERTOS_ASSINANTE : MAX_ABERTOS_AVULSO;
     const abertos = await db
       .select({ total: rawSql<number>`count(*)` })
@@ -210,9 +292,7 @@ export async function createBooking(input: CreateBookingInput) {
           eq(appointments.clientPhone, phone),
           inArray(appointments.status, ["PENDENTE", "CONFIRMADO"]),
           gt(appointments.startsAt, new Date()),
-          input.ignoreAppointmentId
-            ? ne(appointments.id, input.ignoreAppointmentId)
-            : undefined
+          ignorados.length ? notInArray(appointments.id, ignorados) : undefined
         )
       );
     if (Number(abertos[0]?.total ?? 0) >= teto) {
@@ -232,7 +312,7 @@ export async function createBooking(input: CreateBookingInput) {
     durationMin,
     barberId: input.barberId ?? null,
     settings,
-    ignorarAppointmentId: input.ignoreAppointmentId,
+    ignorarAppointmentId: ignorados.length ? ignorados : undefined,
     // Encaixe do balcão vale aqui também. Sem isto a tela da equipe
     // oferecia o horário (ela consulta ignorando a antecedência) e a
     // gravação recusava logo depois, dizendo que faltava antecedência.
@@ -345,9 +425,7 @@ export async function createBooking(input: CreateBookingInput) {
             gt(appointments.endsAt, startsAt),
             // O horário que está sendo remarcado não conflita consigo
             // mesmo: é ele que vai sair do lugar.
-            input.ignoreAppointmentId
-              ? ne(appointments.id, input.ignoreAppointmentId)
-              : undefined
+            ignorados.length ? notInArray(appointments.id, ignorados) : undefined
           )
         )
         .limit(1)
@@ -725,7 +803,9 @@ const ALLOWED: Record<ApptStatusName, ApptStatusName[]> = {
   EM_ANDAMENTO: ["CONCLUIDO", "CANCELADO"],
   CONCLUIDO: [],
   CANCELADO: [],
-  NO_SHOW: [],
+  // Falta marcada por engano (o dedo pegou o botão vizinho) tem volta: o
+  // cliente apareceu, o horário volta a valer.
+  NO_SHOW: ["CONFIRMADO"],
 };
 
 export type { ApptStatusName };
@@ -751,6 +831,24 @@ export async function transitionAppointment(
     throw new BookingError(
       `Não é possível mudar de ${current.status.toLowerCase()} para ${next.toLowerCase()}.`
     );
+  }
+  // Iniciar, concluir e marcar falta são coisas do dia. Pela visão de
+  // semana do painel dava para "iniciar" o corte da terça que vem — que
+  // virava um "em andamento" fantasma e travava o check-in de hoje — ou
+  // "concluir" um serviço que não aconteceu, com comissão lançada.
+  const diaDoHorario = utcToShopParts(current.startsAt).dateKey;
+  if (
+    (next === "EM_ANDAMENTO" || next === "CONCLUIDO" || next === "NO_SHOW") &&
+    diaDoHorario > shopToday()
+  ) {
+    throw new BookingError(
+      `Esse atendimento é de ${labelFullDate(diaDoHorario)}. Iniciar, concluir e marcar falta só no dia.`
+    );
+  }
+  // Falta só depois do horário: às 9h, um toque errado no horário das 17h
+  // liberava a vaga e o cliente chegava para um horário que não existia.
+  if (next === "NO_SHOW" && current.startsAt.getTime() > Date.now()) {
+    throw new BookingError("Só dá para marcar falta depois do horário marcado.");
   }
 
   const patch: Partial<typeof appointments.$inferInsert> = { status: next };

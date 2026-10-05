@@ -395,3 +395,35 @@ export async function alertarWahaDesconectado(agora = new Date()): Promise<Resul
     return { ...ZERO };
   }
 }
+
+/**
+ * A varredura não conseguiu reservar uma semana do horário fixo de um
+ * membro (alguém marcou antes, ou o barbeiro folga/bloqueou o dia). O
+ * relatório só existia no JSON da varredura — ninguém via, e o membro
+ * chegava para um horário que não estava na agenda. Avisa os admins uma
+ * vez por fixo e data.
+ */
+export async function avisarFixoEmConflito(
+  conflitos: { dateKey: string; motivo: string; slotId?: number; userId?: number }[]
+): Promise<ResultadoPush> {
+  let total = { ...ZERO };
+  try {
+    const admins = await idsDosAdmins();
+    for (const c of conflitos.slice(0, 10)) {
+      if (!c.slotId || !c.userId) continue;
+      const vez = await hitRateLimit(`push:fixo:${c.slotId}:${c.dateKey}`, 1, 40 * 86400_000);
+      if (!vez.ok) continue;
+      const membro = await db.query.users.findFirst({ columns: { name: true }, where: eq(users.id, c.userId) });
+      const r = await enviarPush(admins, {
+        titulo: "Horário fixo não reservado",
+        corpo: `${membro?.name ?? "Um membro"} · ${labelDayMonth(c.dateKey)}: ${c.motivo}`,
+        url: `/admin/agenda?dia=${c.dateKey}`,
+        tag: `fixo-${c.slotId}-${c.dateKey}`,
+      });
+      total = soma(total, r);
+    }
+  } catch (e) {
+    console.error("Aviso de fixo em conflito falhou:", e);
+  }
+  return total;
+}

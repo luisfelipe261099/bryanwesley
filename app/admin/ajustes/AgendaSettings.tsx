@@ -154,7 +154,8 @@ export function AgendaSettings({ settings }: { settings: Settings }) {
             onChange={(e) => patch({ maxAdvanceDays: Number(e.target.value) })}
           />
           <TextInput
-            label="Comissão padrão (%)"
+            label="Comissão sugerida p/ novo barbeiro (%)"
+            title="Valor que já vem preenchido ao cadastrar um barbeiro. A comissão de cada um é ajustada em Equipe."
             type="number"
             min={0}
             max={100}
@@ -223,6 +224,7 @@ export function BlocksManager({
   }
 
   return (
+    <div id="bloqueios" className="scroll-mt-24">
     <Card
       title="Bloqueios"
       desc="Folga, feriado, almoço ou manutenção. O horário some da agenda do cliente."
@@ -318,6 +320,7 @@ export function BlocksManager({
         )}
       </div>
     </Card>
+    </div>
   );
 }
 

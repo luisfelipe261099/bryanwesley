@@ -141,7 +141,7 @@ export default async function FichaDoCliente({
                   <span className="text-sm text-steel-300">
                     {a.kind === "ASSINANTE" ? "Plano" : formatBRL(a.totalCents)}
                   </span>
-                  <ApptControls id={a.id} status={a.status} />
+                  <ApptControls id={a.id} status={a.status} dia={dateKey} inicio={a.startsAt.toISOString()} />
                 </li>
               );
             })}

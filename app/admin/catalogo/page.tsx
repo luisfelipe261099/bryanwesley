@@ -28,6 +28,7 @@ export default async function AdminCatalogo() {
         badge: p.badge,
         active: p.active,
         serviceIds: p.covers.map((c) => c.id),
+        quotas: Object.fromEntries(p.covers.map((c) => [c.id, c.quota])),
       }))}
     />
   );

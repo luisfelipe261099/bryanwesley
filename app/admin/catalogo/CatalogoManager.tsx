@@ -37,6 +37,7 @@ type PlanRow = {
   badge: string | null;
   active: boolean;
   serviceIds: number[];
+  quotas: Record<number, number | null>;
 };
 
 const reais = (cents: number) => (cents / 100).toFixed(2).replace(".", ",");

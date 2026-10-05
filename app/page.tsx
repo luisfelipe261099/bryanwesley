@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   CalendarCheck,
   Sparkles,
-  Quote,
   Check,
 } from "lucide-react";
 import { Background } from "@/components/Background";
@@ -41,23 +40,6 @@ const steps = [
   },
 ];
 
-const testimonials = [
-  {
-    name: "Ricardo M.",
-    plan: "Diamond Royalty",
-    text: "Melhor decisão. Corte e barba sempre em dia e nunca mais fiquei na fila.",
-  },
-  {
-    name: "Thiago C.",
-    plan: "Cliente avulso",
-    text: "Agendei pelo celular em 30 segundos. O degradê ficou absurdo.",
-  },
-  {
-    name: "Fernando S.",
-    plan: "Gold Black",
-    text: "Atendimento de outro nível. A prioridade na agenda é genial.",
-  },
-];
 
 // Mostra o próximo horário livre de verdade, então não pode ser estática.
 export const dynamic = "force-dynamic";
@@ -161,11 +143,13 @@ export default async function Home() {
 
               <Reveal delay={0.24}>
                 <div className="mt-10 flex items-center gap-7">
-                  <Stat value="12k+" label="Cortes feitos" />
+                  {/* Só números de verdade, tirados do cadastro: os antigos
+                      ("12k+ cortes", "4.9", "168 membros") eram inventados. */}
+                  <Stat value={String(barbers.length)} label={barbers.length === 1 ? "Barbeiro" : "Barbeiros"} />
                   <div className="h-9 w-px bg-white/10" />
-                  <Stat value="4.9" label="Avaliação" star />
+                  <Stat value={String(services.length)} label="Serviços" />
                   <div className="h-9 w-px bg-white/10" />
-                  <Stat value="168" label="Membros VIP" />
+                  <Stat value="24h" label="Agenda online" />
                 </div>
               </Reveal>
             </div>
@@ -299,39 +283,6 @@ export default async function Home() {
           </div>
         </section>
 
-        {/* ───────── DEPOIMENTOS ───────── */}
-        <section className="mx-auto max-w-7xl px-5 py-20 lg:px-8">
-          <Reveal>
-            <SectionHeading
-              kicker="Quem corta com a gente"
-              title="A régua é alta"
-              subtitle="O que os clientes falam por aí."
-            />
-          </Reveal>
-          <div className="mt-12 grid gap-6 md:grid-cols-3">
-            {testimonials.map((t, i) => (
-              <Reveal key={t.name} delay={i * 0.08}>
-                <div className="glass h-full rounded-2xl p-7">
-                  <Quote className="h-7 w-7 text-electric/60" />
-                  <p className="mt-4 text-[15px] leading-relaxed text-steel-200">
-                    “{t.text}”
-                  </p>
-                  <div className="mt-6 flex items-center gap-3">
-                    <div className="grid h-10 w-10 place-items-center rounded-full bg-royal-grad font-display text-base text-white">
-                      {t.name.charAt(0)}
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-white">
-                        {t.name}
-                      </p>
-                      <p className="text-xs text-electric">{t.plan}</p>
-                    </div>
-                  </div>
-                </div>
-              </Reveal>
-            ))}
-          </div>
-        </section>
 
         {/* ───────── CTA FINAL ───────── */}
         <section className="mx-auto max-w-7xl px-5 py-16 lg:px-8">
@@ -494,11 +445,11 @@ function HeroVisual({
           borda, ele saía cortado pela lateral da tela. */}
       <div className="glass absolute right-2 -top-2 flex items-center gap-2 rounded-2xl px-3.5 py-2.5 shadow-card min-[380px]:-right-3 sm:-right-5">
         <Star className="h-4 w-4 fill-gold text-gold" />
-        <span className="text-xs font-semibold text-white">+12.000 cortes</span>
+        <span className="text-xs font-semibold text-white">Agenda online 24h</span>
       </div>
       <div className="glass absolute -bottom-1 -left-3 flex items-center gap-2 rounded-2xl px-3.5 py-2.5 shadow-card sm:-left-5">
         <Check className="h-4 w-4 text-neon" strokeWidth={3} />
-        <span className="text-xs font-semibold text-white">Gold Black ativo</span>
+        <span className="text-xs font-semibold text-white">Confirmação na hora</span>
       </div>
     </div>
   );

@@ -47,14 +47,17 @@ export function PagarPlano({ rotulo = "Pagar agora" }: { rotulo?: string }) {
   );
 }
 
-export function CancelarPlano() {
+export function CancelarPlano({ vencido = false }: { vencido?: boolean }) {
   return (
     <Acao
       className="border border-white/12 text-steel-300 hover:border-red-400/50 hover:text-red-200"
       onRun={async () => {
-        // Um toque sem querer não pode encerrar o plano (e, se estiver
-        // vencido, soltar o horário fixo na hora).
-        if (!confirm("Cancelar seu plano do Clube? Os benefícios valem até o fim do ciclo já pago.")) return;
+        // Um toque sem querer não pode encerrar o plano. Vencido, o
+        // encerramento é imediato — o texto não pode prometer o contrário.
+        const pergunta = vencido
+          ? "Encerrar seu plano agora? Seu horário fixo, se houver, é liberado."
+          : "Cancelar seu plano do Clube? Os benefícios valem até o fim do ciclo já pago.";
+        if (!confirm(pergunta)) return;
         const r = await cancelMyPlan();
         toast(r.ok ? (r.warning ?? "Plano cancelado.") : r.error, r.ok ? "ok" : "erro");
       }}

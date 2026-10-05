@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useContext, useEffect, useState, useTransition } from "react";
 import {
   CalendarClock,
   CalendarPlus,
@@ -27,6 +27,7 @@ import { formatBRL, formatDuration } from "@/lib/money";
 import type { DayOption } from "@/lib/schedule";
 import type { Slot } from "@/lib/schedule";
 import { fetchAvailability } from "@/app/agendar/actions";
+import { AvisoPorWhatsapp } from "@/app/admin/AgendaHoje";
 import { toast } from "@/lib/toast";
 import {
   bookForClient,
@@ -345,6 +346,8 @@ function Agendar({
   const [slots, setSlots] = useState<Slot[]>([]);
   const [carregando, setCarregando] = useState(false);
   const [fechado, setFechado] = useState(false);
+  const [motivoFechado, setMotivoFechado] = useState<string | null>(null);
+  const avisaWhatsapp = useContext(AvisoPorWhatsapp);
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, start] = useTransition();
 
@@ -368,6 +371,7 @@ function Agendar({
         if (cancelado) return;
         setSlots(res.slots);
         setFechado(res.closed);
+        setMotivoFechado(res.motivo ?? null);
         setTime((atual) =>
           atual && res.slots.some((s) => s.time === atual && s.available)
             ? atual
@@ -407,7 +411,9 @@ function Agendar({
       desc={
         cliente.phonePending
           ? "Complete o WhatsApp antes: sem número não dá para confirmar nem lembrar."
-          : "O nome e o WhatsApp saem do cadastro — o cliente recebe a confirmação como se tivesse agendado sozinho."
+          : avisaWhatsapp
+            ? "O nome e o WhatsApp saem do cadastro — o cliente recebe a confirmação como se tivesse agendado sozinho."
+            : "O nome e o WhatsApp saem do cadastro. O WhatsApp ainda não está conectado: passe o código do horário ao cliente."
       }
       icon={<CalendarPlus className="h-5 w-5" />}
     >
@@ -497,7 +503,13 @@ function Agendar({
                 Procurando horários livres…
               </p>
             ) : fechado ? (
-              <p className="text-sm text-amber-200">A loja não abre nesse dia.</p>
+              <p className="text-sm text-amber-200">
+                {motivoFechado === "folga"
+                  ? "Folga desse profissional nesse dia — escolha outro barbeiro ou \u201cquem estiver livre\u201d."
+                  : motivoFechado === "sem-equipe"
+                    ? "Nenhum barbeiro ativo atende nesse dia."
+                    : "A loja não abre nesse dia."}
+              </p>
             ) : livres.length === 0 ? (
               <p className="text-sm text-amber-200">
                 Nenhum horário livre nesse dia para essa combinação.
@@ -658,7 +670,9 @@ function Plano({
               Gerar cobrança
             </button>
           ) : null}
-          {assinatura.status === "ATIVA" && (
+          {/* Vencida também se cancela: o cliente avisa no balcão que não
+              quer mais, e sem o botão ela ficava para sempre em "vencidos". */}
+          {(assinatura.status === "ATIVA" || assinatura.status === "INADIMPLENTE") && (
             <button
               type="button"
               onClick={cancelar}

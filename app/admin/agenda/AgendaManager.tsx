@@ -39,6 +39,8 @@ export type VisaoAgenda = "dia" | "semana" | "proximos";
 export type LinhaAgenda = {
   id: number;
   dateKey: string;
+  /** Início em ISO: a falta só aparece depois do horário. */
+  inicioIso: string;
   hora: string;
   minutos: number;
   fim: string;
@@ -657,7 +659,7 @@ function Item({
             <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
             {st.label}
           </span>
-          <ApptControls id={a.id} status={a.status}>
+          <ApptControls id={a.id} status={a.status} dia={a.dateKey} inicio={a.inicioIso}>
             <EditarServicos
               variante="menu"
               appointmentId={a.id}

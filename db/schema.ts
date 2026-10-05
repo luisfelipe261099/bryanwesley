@@ -163,6 +163,12 @@ export const planServices = mysqlTable(
     serviceId: int("service_id")
       .notNull()
       .references(() => services.id, { onDelete: "cascade" }),
+    /**
+     * Quantas vezes por mês o plano cobre este serviço. Vazio = ilimitado.
+     * Passou da cota, o serviço sai cobrado como avulso naquele mês — o
+     * Silver promete "2 cortes por mês", e sem cota cobria todos.
+     */
+    monthlyQuota: int("monthly_quota"),
   },
   (t) => ({ pk: primaryKey({ columns: [t.planId, t.serviceId] }) })
 );

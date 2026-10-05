@@ -41,6 +41,9 @@ const securityHeaders = [
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // O site não usa next/image: desligar o otimizador fecha a rota
+  // /_next/image, que concentra boa parte das falhas conhecidas do Next 14.
+  images: { unoptimized: true },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

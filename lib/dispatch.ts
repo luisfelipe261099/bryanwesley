@@ -21,11 +21,12 @@ import { sendWhatsapp, isWhatsappConfigured, provedorAtivo } from "./providers/w
 import { wahaStatus } from "./providers/waha";
 import { pontePareada } from "./ponte";
 import { materializeRecurring, type MaterializeReport } from "./recurring";
+import { recordCommission } from "./commissions";
 import { expireOverdueSubscriptions } from "./subscriptions";
 import { purgeRateLimits } from "./rate-limit";
 import { limparSessoesVelhas } from "./whatsapp-bot";
 import { enviarPush } from "./push";
-import { alertarWhatsappCaido, alertarWahaDesconectado } from "./avisos";
+import { alertarWhatsappCaido, alertarWahaDesconectado, avisarFixoEmConflito } from "./avisos";
 import { TITULO_PUSH } from "./notifications";
 
 /** Intervalo mínimo entre varreduras disparadas pelo painel. */
@@ -238,6 +239,9 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
   // Horários fixos das próximas semanas entram antes da entrega, para que
   // os lembretes deles também saiam nesta rodada.
   const horariosFixos = await materializeRecurring();
+  // Semana do fixo que não coube: o admin fica sabendo no celular.
+  const semVaga = horariosFixos.conflitos.filter((c) => !c.lojaFechada);
+  if (semVaga.length) await avisarFixoEmConflito(semVaga);
 
   // Janelas de freio já vencidas não servem para nada e a tabela cresceria
   // para sempre.
@@ -246,6 +250,11 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
   // Conversas do WhatsApp abandonadas no meio também não servem: quem
   // volta amanhã começa do menu, não de um "qual seu nome?" perdido.
   await limparSessoesVelhas();
+
+  // Atendimento concluído sem comissão (o lançamento falhou depois de o
+  // status já ter mudado — uma oscilação do banco basta): lança agora.
+  // Idempotente; o índice único impede lançar duas vezes.
+  await lancarComissoesPendentes();
 
   // Avisos no celular primeiro: não dependem de provedor e são rápidos.
   // Metade do tempo da varredura, no máximo — o WhatsApp vem depois.
@@ -335,6 +344,29 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
     assinaturasExpiradas,
     push,
   };
+}
+
+/** Concluídos dos últimos 60 dias que ficaram sem linha de comissão. */
+export async function lancarComissoesPendentes(limite = 50) {
+  const faltando = await db.execute(sql`
+    SELECT a.id FROM appointments a
+    LEFT JOIN appointment_commissions c ON c.appointment_id = a.id
+    WHERE a.status = 'CONCLUIDO'
+      AND c.id IS NULL
+      AND a.starts_at > ${sqlDate(new Date(Date.now() - 60 * 86400_000))}
+    LIMIT ${limite}
+  `);
+  const linhas = (faltando[0] as unknown as { id: number }[]) ?? [];
+  let lancadas = 0;
+  for (const { id } of linhas) {
+    try {
+      await recordCommission(Number(id));
+      lancadas++;
+    } catch (e) {
+      console.error("Comissão pendente não lançada:", id, e);
+    }
+  }
+  return lancadas;
 }
 
 /** Quando foi a última varredura, para o painel. */

@@ -232,7 +232,7 @@ export default async function AdminDashboard() {
                           <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
                           {st.label}
                         </span>
-                        <ApptControls id={a.id} status={a.status} />
+                        <ApptControls id={a.id} status={a.status} dia={dateKey} inicio={a.startsAt.toISOString()} />
                       </div>
                     </li>
                   );

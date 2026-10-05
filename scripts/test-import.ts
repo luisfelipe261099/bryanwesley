@@ -62,7 +62,7 @@ function main() {
   console.log("\n3. Telefone");
   {
     ok("+55 na frente é cortado", normalizePhone("(55) 4199287-0977") === "41992870977");
-    ok("+55 com 12 dígitos também", normalizePhone("(55) 419990-1036") === "4199901036");
+    ok("+55 com 12 dígitos também (e celular sem o 9 ganha o 9)", normalizePhone("(55) 419990-1036") === "41999901036");
     ok("DDD 55 de 11 dígitos NÃO é cortado", normalizePhone("(55) 99999-8888") === "55999998888");
     ok("DDD 55 de 10 dígitos NÃO é cortado", normalizePhone("(55) 3999-8888") === "5539998888");
     ok("13 dígitos com 55 passa a valer", isValidPhone("(55) 4199287-0977"));

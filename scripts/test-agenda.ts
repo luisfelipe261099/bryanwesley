@@ -30,6 +30,16 @@ function check(label: string, cond: boolean, extra = "") {
   }
 }
 
+/** Regra de produção: iniciar e concluir só no dia. O teste traz o horário para hoje antes. */
+async function paraHoje(id: number) {
+  const a = (await db.query.appointments.findFirst({ where: eq(appointments.id, id) }))!;
+  const inicio = new Date(Date.now() - 60 * 60_000);
+  await db
+    .update(appointments)
+    .set({ startsAt: inicio, endsAt: new Date(inicio.getTime() + a.durationMin * 60_000) })
+    .where(eq(appointments.id, id));
+}
+
 async function main() {
   const settings = await getSettings();
   const team = await getActiveBarbers();
@@ -172,6 +182,7 @@ async function main() {
   }
 
   console.log("\n9. Ciclo de vida e comissão");
+  await paraHoje(b1.id);
   await transitionAppointment(b1.id, "EM_ANDAMENTO");
   const done = await transitionAppointment(b1.id, "CONCLUIDO");
   check("conclui o atendimento", done.status === "CONCLUIDO");
@@ -238,14 +249,22 @@ async function main() {
   // 17:30 + 30min = 18:00 ainda cabe; 18:00 + 30min já não.
   check("não passa do fim da jornada",
     !avJornada.slots.find((s) => s.time === "18:00")!.available);
-  // Outro dia da semana sem linha → folga
+  // Outro dia da semana sem linha → segue o horário da loja (é o que a
+  // tela de Equipe promete). Folga é uma linha explícita 0–0.
   let outroDia = addDays(dateKey, 1);
   while (settings.closedWeekdays.includes(weekdayOf(outroDia)) || weekdayOf(outroDia) === wd)
     outroDia = addDays(outroDia, 1);
+  const avLoja = await getAvailability({
+    dateKey: outroDia, durationMin: 30, barberId: team[1].id,
+  });
+  check("dia sem jornada cadastrada segue o horário da loja", !avLoja.closed);
+  await db.insert(barberHours).values({
+    barberId: team[1].id, weekday: weekdayOf(outroDia), openMinute: 0, closeMinute: 0,
+  });
   const avFolga = await getAvailability({
     dateKey: outroDia, durationMin: 30, barberId: team[1].id,
   });
-  check("dia sem jornada cadastrada = folga", avFolga.closed);
+  check("folga marcada (0–0) fecha o dia para ele", avFolga.closed && avFolga.motivo === "folga");
   const avTodos = await getAvailability({ dateKey: outroDia, durationMin: 30 });
   check("'mais rápido' não escala quem está de folga",
     avTodos.slots.every((s) => !s.barberIds.includes(team[1].id)));
