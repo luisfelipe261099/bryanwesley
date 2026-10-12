@@ -39,9 +39,16 @@ export default async function CheckinPage({
         <h1 className="mt-6 font-display text-2xl text-white">
           {res.ok ? "Check-in confirmado" : "Não foi possível validar"}
         </h1>
-        <p className="mt-3 text-steel-300">
-          {res.ok ? res.message : res.error}
-        </p>
+        {res.ok && res.semPlano ? (
+          <p className="mt-4 flex items-start gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-left text-sm text-amber-200">
+            <AlertCircle className="mt-0.5 h-4 w-4 flex-none" />
+            {res.message}
+          </p>
+        ) : (
+          <p className="mt-3 text-steel-300">
+            {res.ok ? res.message : res.error}
+          </p>
+        )}
 
         <Link
           href="/barbeiro"

@@ -66,7 +66,7 @@ export async function markNoShow(id: number): Promise<ActionResult> {
 export async function checkIn(input: {
   token?: string;
   code?: string;
-}): Promise<ActionResult & { appointmentId?: number }> {
+}): Promise<ActionResult & { appointmentId?: number; semPlano?: boolean }> {
   try {
     return await fazerCheckIn(input);
   } catch (e) {
@@ -77,7 +77,7 @@ export async function checkIn(input: {
 async function fazerCheckIn(input: {
   token?: string;
   code?: string;
-}): Promise<ActionResult & { appointmentId?: number }> {
+}): Promise<ActionResult & { appointmentId?: number; semPlano?: boolean }> {
   const session = await requireRole(["BARBER", "ADMIN"]);
 
   const where = input.token
@@ -116,10 +116,12 @@ async function fazerCheckIn(input: {
 
   // Assinante: confere se o plano ainda vale — é o ponto anti-fraude.
   let planoInfo = "";
+  let semPlano = false;
   if (appt.kind === "ASSINANTE") {
     const sub = appt.clientUserId
       ? await activeSubscription(appt.clientUserId)
       : undefined;
+    semPlano = !sub;
     planoInfo = sub
       ? ` Plano ${sub.plan.name.replace("Plano ", "")} ativo.`
       : " ATENÇÃO: sem plano ativo — cobrar avulso.";
@@ -160,6 +162,7 @@ async function fazerCheckIn(input: {
     ok: true,
     message: `Check-in de ${appt.clientName} confirmado.${planoInfo}${situacao}`,
     appointmentId: appt.id,
+    semPlano,
   };
 }
 

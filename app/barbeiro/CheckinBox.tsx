@@ -23,7 +23,11 @@ export function CheckinBox() {
       if (res.ok) {
         // Aviso flutuante: a revalidação da agenda remontaria este card
         // e apagaria a confirmação bem na hora em que o barbeiro lê.
-        toast(res.message ?? "Check-in confirmado.", "ok");
+        // Assinante sem plano ativo é o aviso que mais importa (cobrar
+        // avulso): fica em âmbar até o barbeiro fechar, em vez de sumir
+        // em 4,5 s no meio do atendimento.
+        if (res.semPlano) toast(res.message ?? "Check-in confirmado.", "erro", 0);
+        else toast(res.message ?? "Check-in confirmado.", "ok");
         setCode("");
         setMsg(null);
       } else {

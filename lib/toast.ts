@@ -17,11 +17,12 @@ function emit() {
   listeners.forEach((l) => l());
 }
 
-export function toast(text: string, tone: "ok" | "erro" = "ok") {
+/** `duracaoMs` 0 = fica na tela até a pessoa fechar no X. */
+export function toast(text: string, tone: "ok" | "erro" = "ok", duracaoMs = 4500) {
   const id = ++seq;
   toasts.push({ id, text, tone });
   emit();
-  setTimeout(() => dismiss(id), 4500);
+  if (duracaoMs > 0) setTimeout(() => dismiss(id), duracaoMs);
   return id;
 }
 
