@@ -371,7 +371,7 @@ export default async function BarbeiroPanel({
                   return (
                     <li
                       key={a.id}
-                      className={`flex items-center gap-3 rounded-2xl border p-3.5 transition-colors ${
+                      className={`flex flex-wrap items-center gap-x-3 gap-y-2.5 rounded-2xl border p-3.5 transition-colors ${
                         atual
                           ? "border-electric/50 bg-electric/[0.06]"
                           : "border-white/6 bg-white/[0.02]"
@@ -408,7 +408,7 @@ export default async function BarbeiroPanel({
                             href={`https://wa.me/55${a.clientPhone}`}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-xs text-steel-400 transition-colors hover:text-electric"
+                            className="inline-flex items-center gap-1 whitespace-nowrap text-xs text-steel-400 transition-colors hover:text-electric"
                           >
                             <MessageCircle className="h-3 w-3" />
                             {formatPhone(a.clientPhone)}
@@ -418,7 +418,10 @@ export default async function BarbeiroPanel({
                           )}
                         </p>
                       </div>
-                      <div className="flex flex-none flex-col items-end gap-1.5">
+                      {/* No celular, preço, status e ações descem para uma linha
+                          própria (alinhada com o nome): na coluna da direita eles
+                          espremiam o nome do cliente em "Ricard…". */}
+                      <div className="flex w-full flex-wrap items-center gap-2 pl-[4.25rem] sm:w-auto sm:flex-none sm:flex-col sm:items-end sm:gap-1.5 sm:pl-0">
                         <span className="text-sm font-semibold tabular-nums text-white">
                           {a.kind === "ASSINANTE"
                             ? "Plano"
@@ -427,12 +430,15 @@ export default async function BarbeiroPanel({
                         <span className={`label rounded-full px-2.5 py-1.5 ${st.cls}`}>
                           {st.label}
                         </span>
-                        {podeAgir && (
-                          <AppointmentActions
-                            id={a.id}
-                            status={a.status}
-                            depoisDoInicio={a.startsAt.getTime() <= Date.now()}
-                          />
+                        {podeAgir &&
+                          (a.status === "CONFIRMADO" || a.status === "PENDENTE" || a.status === "EM_ANDAMENTO") && (
+                          <div className="ml-auto sm:ml-0">
+                            <AppointmentActions
+                              id={a.id}
+                              status={a.status}
+                              depoisDoInicio={a.startsAt.getTime() <= Date.now()}
+                            />
+                          </div>
                         )}
                       </div>
                     </li>
