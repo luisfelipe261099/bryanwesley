@@ -40,6 +40,7 @@ export function BookingForm({
   avisaPorWhatsapp = false,
   usoPorMes = {},
   barberPadrao = null,
+  daCasa = false,
 }: {
   services: Service[];
   team: TeamMember[];
@@ -49,6 +50,8 @@ export function BookingForm({
   usoPorMes?: Record<string, Record<number, number>>;
   /** Encaixe do barbeiro: começa com ele mesmo escolhido, não "mais rápido". */
   barberPadrao?: number | null;
+  /** Equipe lançando encaixe: a antecedência mínima não vale para ela. */
+  daCasa?: boolean;
   viewer: { name: string; phone: string } | null;
   /** O que veio no link mandado pelo WhatsApp. */
   prefill?: {
@@ -372,7 +375,9 @@ export function BookingForm({
                             disabled={!slot.available}
                             title={
                               slot.reason === "antecedencia"
-                                ? `Exige ${minAdvanceHours}h de antecedência`
+                                ? daCasa
+                                  ? "Horário já passou"
+                                  : `Exige ${minAdvanceHours}h de antecedência`
                                 : slot.reason === "ocupado"
                                   ? "Horário ocupado"
                                   : undefined

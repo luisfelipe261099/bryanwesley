@@ -136,6 +136,7 @@ export default async function Agendar({
             plan={plan}
             usoPorMes={usoPorMes}
             barberPadrao={daCasa ? session?.barberId ?? null : null}
+            daCasa={daCasa}
             viewer={viewer}
             prefill={prefill}
             minAdvanceHours={settings.minAdvanceHours}

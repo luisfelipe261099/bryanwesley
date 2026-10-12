@@ -234,7 +234,7 @@ export default async function BarbeiroPanel({
           <div className="mt-5 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
             <p className="font-semibold">Atendimento de outro dia ainda em andamento</p>
             <p className="mt-1 text-xs text-amber-100/80">
-              Finalize para lançar a comissão e liberar o início automático do check-in.
+              Finalize para lançar a comissão no dia certo e fechar o atendimento.
             </p>
             <ul className="mt-3 space-y-2">
               {esquecidos.map((a) => (
