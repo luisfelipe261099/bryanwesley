@@ -334,7 +334,9 @@ export function AvisosPush({
         className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl border border-electric/25 bg-electric/[0.07] px-4 py-3.5 text-sm text-steel-200"
       >
         <Bell className="h-5 w-5 flex-none text-electric" />
-        <span className="min-w-0 flex-1">
+        {/* Largura mínima: no celular o botão desce para a linha de baixo
+            em vez de espremer o texto numa coluna de uma palavra. */}
+        <span className="min-w-[12rem] flex-1">
           {estado === "ios-sem-app" ? (
             <>
               <strong className="text-white">Avisos no iPhone:</strong> toque em Compartilhar →{" "}

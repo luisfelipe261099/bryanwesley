@@ -146,12 +146,19 @@ async function fazerCheckIn(input: {
     }
   }
 
+  // Ler o QR de novo com o atendimento já rodando não é "chegada": antes
+  // dizia "inicie quando liberar a cadeira" para quem já estava sentado.
+  const situacao =
+    appt.status === "EM_ANDAMENTO"
+      ? " Atendimento já em andamento."
+      : started
+        ? ""
+        : " Chegada registrada — inicie quando liberar a cadeira.";
+
   revalidateAll();
   return {
     ok: true,
-    message: `Check-in de ${appt.clientName} confirmado.${planoInfo}${
-      started ? "" : " Chegada registrada — inicie quando liberar a cadeira."
-    }`,
+    message: `Check-in de ${appt.clientName} confirmado.${planoInfo}${situacao}`,
     appointmentId: appt.id,
   };
 }
