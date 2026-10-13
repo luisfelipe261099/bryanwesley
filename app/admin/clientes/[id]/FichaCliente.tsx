@@ -139,11 +139,15 @@ function Cabecalho({
         <span className="grid h-14 w-14 flex-none place-items-center rounded-full bg-royal-grad font-display text-2xl text-white">
           {cliente.name.charAt(0)}
         </span>
-        <div className="min-w-0 flex-1">
+        {/* Largura mínima: sem ela, no celular o bloco do nome encolhia
+            para caber na mesma linha dos botões, e o nome passava por cima
+            do "Editar" com o telefone quebrado em três linhas. Assim os
+            botões descem para a linha de baixo. */}
+        <div className="min-w-[12rem] flex-1">
           <h1 className="font-display text-2xl text-white">{cliente.name}</h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
             <span
-              className={`inline-flex items-center gap-1.5 ${
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap ${
                 cliente.phonePending ? "text-amber-300" : "text-steel-300"
               }`}
             >
@@ -153,8 +157,8 @@ function Cabecalho({
                 : formatPhone(cliente.phone)}
             </span>
             {cliente.email && (
-              <span className="inline-flex items-center gap-1.5 text-steel-400">
-                <Mail className="h-3.5 w-3.5" />
+              <span className="inline-flex min-w-0 items-center gap-1.5 break-all text-steel-400">
+                <Mail className="h-3.5 w-3.5 flex-none" />
                 {cliente.email}
               </span>
             )}
