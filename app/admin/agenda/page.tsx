@@ -33,6 +33,7 @@ import {
   type LinhaAgenda,
   type LinhaBloqueio,
 } from "./AgendaManager";
+import { AtualizaSozinho } from "@/components/AtualizaSozinho";
 
 export const dynamic = "force-dynamic";
 
@@ -180,33 +181,36 @@ export default async function AdminAgenda({
   });
 
   return (
-    <AgendaManager
-      visao={visao}
-      dia={dia}
-      hoje={hoje}
-      barbeiro={barbeiro}
-      recorte={recorte}
-      busca={busca}
-      pagina={atual}
-      porPagina={POR_PAGINA}
-      total={total}
-      ultimaPagina={ultimaPagina}
-      dias={dias}
-      diaFechado={settings.closedWeekdays.includes(weekdayOf(dia))}
-      rotuloDoDia={labelFullDate(dia)}
-      rotuloDaSemana={`${labelFullDate(dia)} — ${labelFullDate(addDays(dia, 6))}`}
-      expediente={`${minutesToHHMM(settings.openMinute)}—${minutesToHHMM(settings.closeMinute)}`}
-      resumo={{ ...resumo, capacidadeMin: capacidade }}
-      equipe={equipe.map((b) => ({ id: b.id, shortName: b.shortName }))}
-      servicos={catalogo.map((s) => ({
-        id: s.id,
-        name: s.name,
-        priceCents: s.priceCents,
-        durationMin: s.durationMin,
-      }))}
-      linhas={linhas.map(paraLinha)}
-      bloqueios={bloqueios}
-    />
+    <>
+      <AtualizaSozinho />
+      <AgendaManager
+        visao={visao}
+        dia={dia}
+        hoje={hoje}
+        barbeiro={barbeiro}
+        recorte={recorte}
+        busca={busca}
+        pagina={atual}
+        porPagina={POR_PAGINA}
+        total={total}
+        ultimaPagina={ultimaPagina}
+        dias={dias}
+        diaFechado={settings.closedWeekdays.includes(weekdayOf(dia))}
+        rotuloDoDia={labelFullDate(dia)}
+        rotuloDaSemana={`${labelFullDate(dia)} — ${labelFullDate(addDays(dia, 6))}`}
+        expediente={`${minutesToHHMM(settings.openMinute)}—${minutesToHHMM(settings.closeMinute)}`}
+        resumo={{ ...resumo, capacidadeMin: capacidade }}
+        equipe={equipe.map((b) => ({ id: b.id, shortName: b.shortName }))}
+        servicos={catalogo.map((s) => ({
+          id: s.id,
+          name: s.name,
+          priceCents: s.priceCents,
+          durationMin: s.durationMin,
+        }))}
+        linhas={linhas.map(paraLinha)}
+        bloqueios={bloqueios}
+      />
+    </>
   );
 }
 

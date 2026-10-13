@@ -409,11 +409,11 @@ export function BookingForm({
           )}
         </section>
 
-        {/* ── 3. Seus dados ── */}
+        {/* ── 3. Seus dados (ou os do cliente, quando é a equipe que marca) ── */}
         <section>
           <div className="flex items-center justify-between">
-            <StepTitle n={3} title="Seus dados" />
-            {!viewer && <span className="label text-steel-400">Sem senha</span>}
+            <StepTitle n={3} title={daCasa ? "Dados do cliente" : "Seus dados"} />
+            {!viewer && !daCasa && <span className="label text-steel-400">Sem senha</span>}
           </div>
           <div className="mt-4 space-y-4">
             <Field
@@ -445,9 +445,13 @@ export function BookingForm({
               />
             </label>
             <p className="text-xs text-steel-400">
-              {avisaPorWhatsapp
-                ? "Você recebe a confirmação e um lembrete no WhatsApp."
-                : "A confirmação e o código aparecem na hora, na próxima tela."}
+              {daCasa
+                ? avisaPorWhatsapp
+                  ? "O cliente recebe a confirmação no WhatsApp."
+                  : "O WhatsApp ainda não está conectado: passe ao cliente o código que aparece na próxima tela."
+                : avisaPorWhatsapp
+                  ? "Você recebe a confirmação e um lembrete no WhatsApp."
+                  : "A confirmação e o código aparecem na hora, na próxima tela."}
             </p>
           </div>
         </section>

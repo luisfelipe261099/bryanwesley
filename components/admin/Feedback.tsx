@@ -15,7 +15,12 @@ export function notify(
   fallback = "Feito."
 ): Msg {
   if (res.ok) {
-    toast(res.message ?? fallback, "ok");
+    const texto = res.message ?? fallback;
+    // Feito, mas com recado (atendimentos no horário do bloqueio, clientes
+    // ou membros a avisar): em verde e sumindo em 4,5 s, o aviso passava
+    // por "tudo certo". Fica âmbar e só sai quando a pessoa fecha.
+    const recado = /(^|[\s:.—-])(atenção|avise)(?=[\s:])/i.test(texto);
+    toast(texto, recado ? "erro" : "ok", recado ? 0 : undefined);
     return null;
   }
   return { ok: false, text: res.error ?? "Não foi possível concluir." };
@@ -72,8 +77,13 @@ export function Card({
 
 export function TextInput({
   label,
+  ajuda,
   ...props
-}: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+}: {
+  label: string;
+  /** Explicação curta sob o campo (o title= de antes não aparece no celular). */
+  ajuda?: string;
+} & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
       <span className="label mb-2 block text-steel-400">{label}</span>
@@ -81,6 +91,7 @@ export function TextInput({
         {...props}
         className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none transition-colors placeholder:text-steel-400/60 focus:border-electric/60 focus:ring-2 focus:ring-electric/20"
       />
+      {ajuda && <span className="mt-1.5 block text-xs text-steel-400">{ajuda}</span>}
     </label>
   );
 }
@@ -108,11 +119,14 @@ export function Toggle({
   onChange,
   label,
   hint,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label: string;
   hint?: string;
+  /** Travado: mostra o estado, mas não deixa mudar (o hint diz por quê). */
+  disabled?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/8 bg-white/[0.02] p-4">
@@ -125,8 +139,9 @@ export function Toggle({
         role="switch"
         aria-checked={checked}
         aria-label={label}
+        disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative h-8 w-14 flex-none rounded-full transition-colors ${
+        className={`relative h-8 w-14 flex-none rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
           checked ? "bg-royal-grad" : "bg-white/15"
         }`}
       >

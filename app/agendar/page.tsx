@@ -91,17 +91,21 @@ export default async function Agendar({
   return (
     <>
       <Background />
-      <TopBar planName={plan?.name} backHref={homeFor(session?.role ?? null)} />
+      <TopBar planName={plan?.name} daCasa={daCasa} backHref={homeFor(session?.role ?? null)} />
 
       <main className="mx-auto max-w-5xl px-5 pb-28 pt-24 lg:px-8">
         <div className="mb-8">
+          {/* A equipe lança o horário PARA o cliente: o texto de quem marca
+              para si ("Sem cadastro, sem senha") não servia no balcão. */}
           <h1 className="font-display text-3xl text-white sm:text-4xl">
-            {plan ? "Agendamento VIP" : "Agendamento Rápido"}
+            {daCasa ? "Novo agendamento" : plan ? "Agendamento VIP" : "Agendamento Rápido"}
           </h1>
           <p className="mt-2 text-sm text-steel-400">
-            {plan
-              ? `Seu ${plan.name} cobre os serviços marcados como inclusos.`
-              : "Apenas nome e WhatsApp para confirmar. Sem cadastro, sem senha."}
+            {daCasa
+              ? "Encaixe ou pedido pelo telefone: escolha o serviço, o barbeiro e o horário, e digite o nome e o WhatsApp do cliente."
+              : plan
+                ? `Seu ${plan.name} cobre os serviços marcados como inclusos.`
+                : "Apenas nome e WhatsApp para confirmar. Sem cadastro, sem senha."}
           </p>
         </div>
 
@@ -161,9 +165,11 @@ function homeFor(role: "ADMIN" | "BARBER" | "CLIENT" | null) {
 
 function TopBar({
   planName,
+  daCasa = false,
   backHref,
 }: {
   planName?: string;
+  daCasa?: boolean;
   backHref: string;
 }) {
   return (
@@ -188,7 +194,7 @@ function TopBar({
               : "border border-electric/30 bg-electric/10 text-electric"
           }`}
         >
-          {planName ? planName.replace("Plano ", "") : "Sem cadastro"}
+          {planName ? planName.replace("Plano ", "") : daCasa ? "Equipe" : "Sem cadastro"}
         </span>
       </div>
     </header>

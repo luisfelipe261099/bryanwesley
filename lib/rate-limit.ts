@@ -10,7 +10,7 @@
 // O contador vive no banco porque em serverless não há memória
 // compartilhada entre instâncias.
 // ───────────────────────────────────────────────────────────
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, like, lt, notLike, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { rateLimits } from "@/db/schema";
 
@@ -52,8 +52,34 @@ export async function hitRateLimit(
   };
 }
 
+/**
+ * Freios com janela maior que a limpeza diária. O "avisa uma vez só" do
+ * horário fixo em conflito vale 40 dias; apagado com 24 h, o mesmo aviso
+ * voltava ao celular do dono todo dia enquanto o conflito durasse.
+ */
+const JANELAS_LONGAS = [{ prefixo: "push:fixo:", ms: 41 * 86400_000 }];
+
 /** Limpa janelas antigas para a tabela não crescer sem fim. */
 export async function purgeRateLimits(antesDe: Date) {
-  const [res] = await db.delete(rateLimits).where(lt(rateLimits.windowStart, antesDe));
-  return res.affectedRows;
+  const [res] = await db
+    .delete(rateLimits)
+    .where(
+      and(
+        lt(rateLimits.windowStart, antesDe),
+        ...JANELAS_LONGAS.map((j) => notLike(rateLimits.chave, `${j.prefixo}%`))
+      )
+    );
+  let apagadas = res.affectedRows;
+  for (const j of JANELAS_LONGAS) {
+    const [longa] = await db
+      .delete(rateLimits)
+      .where(
+        and(
+          like(rateLimits.chave, `${j.prefixo}%`),
+          lt(rateLimits.windowStart, new Date(Date.now() - j.ms))
+        )
+      );
+    apagadas += longa.affectedRows;
+  }
+  return apagadas;
 }

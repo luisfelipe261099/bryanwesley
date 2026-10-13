@@ -52,6 +52,13 @@ export function CatalogoManager({
 }) {
   return (
     <div className="space-y-5">
+      <div>
+        <h1 className="font-display text-3xl text-white sm:text-4xl">Catálogo</h1>
+        <p className="mt-1.5 text-sm text-steel-400">
+          Os serviços que o cliente escolhe ao agendar, com preço e duração.
+          Quem já está marcado mantém o preço do dia em que marcou.
+        </p>
+      </div>
       <Card
         title="Serviços"
         desc="Preço e duração aparecem no agendamento na hora que você salvar."
@@ -181,7 +188,8 @@ function ToggleActive({
           const r = await toggleService(id, next);
           if (r.ok) {
             onChange(next);
-            toast(r.message ?? (next ? "Serviço ativado." : "Serviço desativado."));
+            // notify(): o recado "Avise os membros" fica âmbar e não some.
+            notify(r, next ? "Serviço ativado." : "Serviço desativado.");
           } else {
             toast(r.error ?? "Não foi possível alterar.", "erro");
           }

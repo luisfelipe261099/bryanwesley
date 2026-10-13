@@ -38,11 +38,22 @@ function confirmacao(acao: string, avisaWhatsapp: boolean) {
         ? "Cancelar este horário? O cliente recebe um aviso de cancelamento no WhatsApp."
         : "Cancelar este horário? O WhatsApp ainda não está conectado: avise o cliente você mesmo.",
       botao: "Cancelar horário",
+      perigo: true,
+    };
+  }
+  if (acao === "CONCLUIDO") {
+    // Concluir lança a comissão e não tem volta — e o item mora no menu,
+    // logo acima de "Marcar falta". Um toque errado ficava no mês.
+    return {
+      pergunta: "Concluir sem ter iniciado? A comissão é lançada e isso não pode ser desfeito.",
+      botao: "Concluir",
+      perigo: false,
     };
   }
   return {
     pergunta: "Marcar que o cliente não apareceu? O horário é encerrado sem cobrança.",
     botao: "Marcar falta",
+    perigo: true,
   };
 }
 
@@ -108,8 +119,8 @@ export function ApptControls({
   const emAndamento = status === "EM_ANDAMENTO";
 
   if (terminal) {
-    // Falta marcada por engano tem volta: o cliente apareceu.
-    if (status === "NO_SHOW") {
+    // Falta marcada por engano tem volta: o cliente apareceu (só no dia).
+    if (status === "NO_SHOW" && !(dia && dia < hojeNaLoja())) {
       return (
         <div className="flex flex-col items-end gap-1">
           <button
@@ -133,7 +144,7 @@ export function ApptControls({
   if (confirmando) {
     const c = confirmacao(confirmando, avisaWhatsapp);
     return (
-      <div className="flex flex-col items-end gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 p-2.5">
+      <div data-ocupado className="flex flex-col items-end gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 p-2.5">
         <p className="max-w-[230px] text-right text-xs text-amber-100">{c.pergunta}</p>
         <div className="flex items-center gap-1.5">
           <button
@@ -147,7 +158,9 @@ export function ApptControls({
             type="button"
             disabled={pending}
             onClick={() => go(confirmando as Parameters<typeof adminTransition>[1])}
-            className="label rounded-full bg-red-500/90 px-3 py-2 text-white disabled:opacity-50"
+            className={`label rounded-full px-3 py-2 text-white disabled:opacity-50 ${
+              c.perigo ? "bg-red-500/90" : "btn-royal"
+            }`}
           >
             {spinner ?? c.botao}
           </button>
@@ -202,13 +215,20 @@ export function ApptControls({
         {/* Montado sempre (só escondido): as ações da tela abrem modais, e
             desmontar o menu ao fechá-lo levava o modal aberto junto. */}
         <div
+          // Menu aberto segura a atualização automática da tela (AtualizaSozinho).
+          data-ocupado={menu || undefined}
           className={`absolute right-0 z-50 w-56 overflow-hidden rounded-2xl border border-white/12 bg-ink-800 p-1.5 shadow-card ${
             paraCima ? "bottom-full mb-2" : "top-full mt-2"
           } ${menu ? "" : "hidden"}`}
         >
           {children}
           {!emAndamento && !futuro && (
-            <ItemMenu onClick={() => go("CONCLUIDO")}>
+            <ItemMenu
+              onClick={() => {
+                setMenu(false);
+                setConfirmando("CONCLUIDO");
+              }}
+            >
               <Check className="h-3.5 w-3.5" strokeWidth={3} />
               Concluir direto
             </ItemMenu>

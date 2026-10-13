@@ -115,12 +115,18 @@ type Estado = {
   pagina: number;
 };
 
+/** O recorte de cada visão quando a URL não diz nenhum (o mesmo da página). */
+const recortePadrao = (v: VisaoAgenda): RecorteAgenda => (v === "proximos" ? "ativos" : "tudo");
+
 function urlDaAgenda(e: Estado) {
   const p = new URLSearchParams();
   if (e.visao !== "dia") p.set("v", e.visao);
   if (e.dia) p.set("dia", e.dia);
   if (e.barbeiro) p.set("barbeiro", String(e.barbeiro));
-  if (e.recorte !== "tudo") p.set("situacao", e.recorte);
+  // Grava o recorte sempre que ele foge do padrão DESTA visão: em
+  // "Próximos" o padrão é "Por atender", e omitir "Tudo" fazia a página
+  // voltar para "Por atender" — o chip "Tudo" não pegava.
+  if (e.recorte !== recortePadrao(e.visao)) p.set("situacao", e.recorte);
   if (e.busca) p.set("q", e.busca);
   if (e.pagina > 1) p.set("pagina", String(e.pagina));
   const qs = p.toString();
@@ -186,7 +192,13 @@ export function AgendaManager({
   useEffect(() => setTermo(busca), [busca]);
 
   function aplicar(mudanca: Partial<Estado>) {
-    start(() => router.push(urlDaAgenda({ ...estado, pagina: 1, ...mudanca })));
+    const novo = { ...estado, pagina: 1, ...mudanca };
+    // Trocar de visão volta ao recorte padrão dela: o "Por atender" de
+    // "Próximos" vinha junto para o "Dia" e escondia concluídos e cancelados.
+    if (mudanca.visao && mudanca.visao !== estado.visao && mudanca.recorte === undefined) {
+      novo.recorte = recortePadrao(mudanca.visao);
+    }
+    start(() => router.push(urlDaAgenda(novo)));
   }
 
   const ocupacao =
@@ -289,7 +301,7 @@ export function AgendaManager({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  aria-label="Dia anterior"
+                  aria-label={visao === "semana" ? "Semana anterior" : "Dia anterior"}
                   onClick={() => aplicar({ dia: somaDias(dia, visao === "semana" ? -7 : -1) })}
                   className="grid h-10 w-10 place-items-center rounded-full border border-white/10 text-steel-300 transition-colors hover:border-electric/40 hover:text-white"
                 >
@@ -297,7 +309,7 @@ export function AgendaManager({
                 </button>
                 <button
                   type="button"
-                  aria-label="Próximo dia"
+                  aria-label={visao === "semana" ? "Próxima semana" : "Próximo dia"}
                   onClick={() => aplicar({ dia: somaDias(dia, visao === "semana" ? 7 : 1) })}
                   className="grid h-10 w-10 place-items-center rounded-full border border-white/10 text-steel-300 transition-colors hover:border-electric/40 hover:text-white"
                 >
@@ -574,7 +586,7 @@ function Bloqueio({ b }: { b: LinhaBloqueio }) {
         </span>
       </div>
       <Link
-        href="/admin/ajustes"
+        href="/admin/ajustes#bloqueios"
         className="label rounded-full border border-amber-400/30 px-3 py-2 text-amber-200 transition-colors hover:bg-amber-400/10"
       >
         Gerenciar
@@ -667,15 +679,19 @@ function Item({
               atuais={a.servicoIds}
               resumo={`${a.clientName} · ${a.hora}`}
             />
-            <RemarcarAdmin
-              variante="menu"
-              appointmentId={a.id}
-              dateKey={a.dateKey}
-              durationMin={a.durationMin}
-              barberId={a.barberId}
-              equipe={equipe}
-              resumo={`${a.clientName} · ${a.hora}`}
-            />
+            {/* Com o cliente já na cadeira não há o que remarcar: o recado
+                "seu horário foi remarcado" chegava a quem estava sentado. */}
+            {a.status !== "EM_ANDAMENTO" && (
+              <RemarcarAdmin
+                variante="menu"
+                appointmentId={a.id}
+                dateKey={a.dateKey}
+                durationMin={a.durationMin}
+                barberId={a.barberId}
+                equipe={equipe}
+                resumo={`${a.clientName} · ${a.hora}`}
+              />
+            )}
           </ApptControls>
         </div>
       </div>

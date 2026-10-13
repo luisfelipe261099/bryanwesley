@@ -2,10 +2,11 @@
 // Relatórios de fechamento. Tudo sai da razão de comissões, que é
 // gravada atendimento a atendimento — o número bate com a agenda.
 // ───────────────────────────────────────────────────────────
-import { and, asc, eq, gte, lt } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointmentCommissions,
+  appointmentServices,
   appointments,
   barbers,
   users,
@@ -65,6 +66,20 @@ export async function commissionReport(
     )
     .orderBy(asc(appointments.startsAt));
 
+  // O que foi feito em cada atendimento: sem isso a linha "Base" não tinha
+  // como ser conferida com a agenda.
+  const ids = rows.map((r) => r.a.id);
+  const itens = ids.length
+    ? await db
+        .select({ appointmentId: appointmentServices.appointmentId, name: appointmentServices.name })
+        .from(appointmentServices)
+        .where(inArray(appointmentServices.appointmentId, ids))
+    : [];
+  const servicosDe = new Map<number, string[]>();
+  for (const i of itens) {
+    servicosDe.set(i.appointmentId, [...(servicosDe.get(i.appointmentId) ?? []), i.name]);
+  }
+
   return rows.map(({ c, a, b, u }) => {
     const p = utcToShopParts(a.startsAt);
     return {
@@ -72,7 +87,7 @@ export async function commissionReport(
       data: `${String(p.day).padStart(2, "0")}/${String(p.month).padStart(2, "0")}/${p.year}`,
       hora: formatShopTime(a.startsAt),
       cliente: a.clientName,
-      servicos: "",
+      servicos: (servicosDe.get(a.id) ?? []).join(" + "),
       barbeiro: u.name,
       barberId: b.id,
       baseCents: c.baseCents,
@@ -114,10 +129,14 @@ export function byBarber(lines: CommissionLine[]) {
   return Array.from(map.entries()).map(([barberId, v]) => ({ barberId, ...v }));
 }
 
-/** CSV com ponto e vírgula e vírgula decimal — abre direto no Excel pt-BR. */
-export function toCsv(rows: Record<string, string | number>[]) {
-  if (rows.length === 0) return "";
-  const headers = Object.keys(rows[0]);
+/**
+ * CSV com ponto e vírgula e vírgula decimal — abre direto no Excel pt-BR.
+ * `cabecalho` garante as colunas mesmo num mês vazio (antes saía um
+ * arquivo em branco, que parecia erro).
+ */
+export function toCsv(rows: Record<string, string | number>[], cabecalho?: string[]) {
+  const headers = rows.length ? Object.keys(rows[0]) : cabecalho ?? [];
+  if (headers.length === 0) return "";
   const esc = (v: string | number) => {
     let s = String(v);
     // Nome de cliente é texto que o próprio cliente digitou. Começando com

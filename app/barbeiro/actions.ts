@@ -93,7 +93,24 @@ async function fazerCheckIn(input: {
   if (session.role === "BARBER" && appt.barberId !== session.barberId) {
     return { ok: false, error: "Esse atendimento é de outro barbeiro." };
   }
-  if (appt.status === "CANCELADO" || appt.status === "NO_SHOW") {
+  const dia = utcToShopParts(appt.startsAt).dateKey;
+  if (appt.status === "NO_SHOW" && dia !== shopToday()) {
+    return {
+      ok: false,
+      error: `Esse horário era de ${labelFullDate(dia)} e ficou como falta. Marque um novo horário para o cliente.`,
+    };
+  }
+  if (appt.status === "NO_SHOW") {
+    // Falta marcada e o cliente apareceu: tem volta, mas pelo painel.
+    return {
+      ok: false,
+      error:
+        session.role === "ADMIN"
+          ? "Esse horário está marcado como falta. Se o cliente chegou, use “Desfazer falta” na Agenda."
+          : "Esse horário está marcado como falta. Se o cliente chegou, peça ao administrador para desfazer a falta.",
+    };
+  }
+  if (appt.status === "CANCELADO") {
     return { ok: false, error: "Esse agendamento foi cancelado." };
   }
   if (appt.status === "CONCLUIDO") {
@@ -101,7 +118,6 @@ async function fazerCheckIn(input: {
   }
   // Check-in é de hoje. O código de um horário da semana que vem iniciava
   // aquele atendimento agora — e bagunçava a agenda dos dois dias.
-  const dia = utcToShopParts(appt.startsAt).dateKey;
   if (dia !== shopToday()) {
     return {
       ok: false,

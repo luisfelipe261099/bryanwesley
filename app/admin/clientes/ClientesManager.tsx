@@ -125,7 +125,13 @@ export function ClientesManager({
 
   return (
     <div className="space-y-5">
-      <ImportBox exportar={exportar} filtrando={!!busca || situacao !== "todos"} />
+      <div>
+        <h1 className="font-display text-3xl text-white sm:text-4xl">Clientes</h1>
+        <p className="mt-1.5 text-sm text-steel-400">
+          Busque pelo nome ou telefone e abra a ficha: histórico, plano,
+          horário fixo e o WhatsApp do cliente.
+        </p>
+      </div>
 
       <Card
         title="Clientes"
@@ -217,6 +223,10 @@ export function ClientesManager({
           </nav>
         )}
       </Card>
+
+      {/* Importar é coisa de uma vez só: no topo, empurrava a busca do dia a
+          dia para baixo da dobra no celular. */}
+      <ImportBox exportar={exportar} filtrando={!!busca || situacao !== "todos"} />
     </div>
   );
 }

@@ -43,6 +43,7 @@ import {
 } from "./time";
 import { normalizePhone } from "./phone";
 import { dbErrorCode, dbErrorMessage } from "./errors";
+import { appointmentStatus } from "./status";
 
 /** MySQL: chave duplicada (unicidade). */
 const DUP_ENTRY = "ER_DUP_ENTRY";
@@ -539,6 +540,11 @@ export async function rescheduleBooking(input: {
   if (["CONCLUIDO", "CANCELADO", "NO_SHOW"].includes(appt.status)) {
     throw new BookingError("Esse atendimento já foi encerrado.");
   }
+  // Já começou: o cliente está na cadeira. Remarcar mandaria "seu horário
+  // foi remarcado" a quem está sendo atendido.
+  if (appt.status === "EM_ANDAMENTO") {
+    throw new BookingError("Esse atendimento já começou — não dá para remarcar. Para trocar o serviço, use Mudar serviços.");
+  }
 
   const items = await db
     .select()
@@ -828,8 +834,10 @@ export async function transitionAppointment(
   });
   if (!current) throw new BookingError("Agendamento não encontrado.");
   if (!ALLOWED[current.status]?.includes(next)) {
+    // Com os nomes da tela ("Em andamento", "Faltou"), não os da tabela.
+    const nome = (st: string) => (appointmentStatus[st]?.label ?? st).toLowerCase();
     throw new BookingError(
-      `Não é possível mudar de ${current.status.toLowerCase()} para ${next.toLowerCase()}.`
+      `Esse horário está "${nome(current.status)}" e não pode passar para "${nome(next)}". Recarregue a página.`
     );
   }
   // Iniciar, concluir e marcar falta são coisas do dia. Pela visão de
@@ -849,6 +857,33 @@ export async function transitionAppointment(
   // liberava a vaga e o cliente chegava para um horário que não existia.
   if (next === "NO_SHOW" && current.startsAt.getTime() > Date.now()) {
     throw new BookingError("Só dá para marcar falta depois do horário marcado.");
+  }
+
+  // Desfazer falta devolve a cadeira ao cliente — mas a falta liberou o
+  // horário, e um encaixe pode ter entrado no lugar. Sem esta conferência
+  // ficavam dois atendimentos confirmados no mesmo horário do barbeiro.
+  if (current.status === "NO_SHOW" && next === "CONFIRMADO") {
+    // Falta de outro dia não volta: viraria um "confirmado" esquecido.
+    if (diaDoHorario < shopToday()) {
+      throw new BookingError(
+        `Essa falta é de ${labelFullDate(diaDoHorario)}. Marque um novo horário para o cliente.`
+      );
+    }
+    const ocupante = await db.query.appointments.findFirst({
+      where: and(
+        eq(appointments.barberId, current.barberId),
+        ne(appointments.id, current.id),
+        inArray(appointments.status, ["PENDENTE", "CONFIRMADO", "EM_ANDAMENTO"]),
+        lt(appointments.startsAt, current.endsAt),
+        gt(appointments.endsAt, current.startsAt)
+      ),
+    });
+    if (ocupante) {
+      const p = utcToShopParts(ocupante.startsAt);
+      throw new BookingError(
+        `Esse horário já foi dado a ${ocupante.clientName} (${minutesToHHMM(p.minutesOfDay)}). Marque um novo horário para o cliente.`
+      );
+    }
   }
 
   const patch: Partial<typeof appointments.$inferInsert> = { status: next };

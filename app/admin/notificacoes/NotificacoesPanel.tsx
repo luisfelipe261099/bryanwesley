@@ -96,7 +96,7 @@ export function NotificacoesPanel({
 
       <Card
         title="Fila de mensagens"
-        desc="Confirmações e lembretes de cada agendamento."
+        desc="As mensagens para os clientes: confirmações, lembretes, cancelamentos e remarcações."
         icon={<MessageCircle className="h-5 w-5" />}
       >
         <button
@@ -211,15 +211,17 @@ function Discard({ id }: { id: number }) {
       type="button"
       disabled={pending}
       title="Tirar da fila: esta mensagem não será enviada"
-      onClick={() =>
+      onClick={() => {
+        // Descartada não tem "Reenviar": confirma antes.
+        if (!window.confirm("Descartar esta mensagem? Ela sai da fila e não será enviada — não dá para desfazer.")) return;
         start(async () => {
           const r = await discardNotification(id);
           toast(
             r.ok ? r.message ?? "Descartada." : r.error ?? "Não foi possível.",
             r.ok ? "ok" : "erro"
           );
-        })
-      }
+        });
+      }}
       className="label inline-flex items-center gap-1.5 rounded-full border border-white/12 px-3 py-2 text-steel-300 hover:border-red-400/50 hover:text-red-200 disabled:opacity-50"
     >
       {pending ? (

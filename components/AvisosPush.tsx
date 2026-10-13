@@ -22,7 +22,7 @@ type Estado =
 
 const TEXTO: Record<Papel, string> = {
   ADMIN:
-    "Agendamento novo, cancelamento, pedido de plano e WhatsApp fora do ar chegam no seu celular — com o site fechado.",
+    "Horário novo, cancelado ou remarcado, pedido de plano, pagamento e WhatsApp fora do ar chegam no seu celular — com o site fechado.",
   BARBER:
     "Cada horário novo, cancelado ou remarcado na sua agenda chega no seu celular — com o site fechado.",
   CLIENT: "Confirmação e lembretes do seu horário chegam no seu celular — com o site fechado.",

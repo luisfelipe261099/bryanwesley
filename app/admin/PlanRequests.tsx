@@ -43,7 +43,16 @@ export function PlanRequests({ requests }: { requests: RequestRow[] }) {
             <div className="min-w-0">
               <p className="font-medium text-white">{r.clientName}</p>
               <p className="text-xs text-steel-400">
-                {formatPhone(r.clientPhone)} · {r.planName} ·{" "}
+                {/* Combinar o pagamento é pelo WhatsApp: o número já abre a conversa. */}
+                <a
+                  href={`https://wa.me/55${r.clientPhone}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-steel-300 underline decoration-white/20 underline-offset-2 hover:text-electric"
+                >
+                  {formatPhone(r.clientPhone)}
+                </a>{" "}
+                · {r.planName} ·{" "}
                 {r.cycle.toLowerCase()} · {formatBRL(r.priceCents)}/mês
               </p>
             </div>
@@ -64,7 +73,11 @@ export function PlanRequests({ requests }: { requests: RequestRow[] }) {
               <button
                 type="button"
                 disabled={pending}
-                onClick={() => run(rejectPlanRequest, r.id)}
+                onClick={() => {
+                  // Arquivar não avisa o cliente: confirma antes de sumir com o pedido.
+                  if (!confirm(`Arquivar o pedido de ${r.clientName}? O cliente não recebe aviso — combine com ele pelo WhatsApp.`)) return;
+                  run(rejectPlanRequest, r.id);
+                }}
                 aria-label="Arquivar"
                 title="Arquivar"
                 className="grid h-9 w-9 place-items-center rounded-full border border-white/12 text-steel-400 hover:border-red-400/50 hover:text-red-200 disabled:opacity-50"

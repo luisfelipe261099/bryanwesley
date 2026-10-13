@@ -73,6 +73,9 @@ export default async function FichaDoCliente({
                 renewsAt: labelDayMonth(
                   utcToShopParts(ficha.assinatura.sub.renewsAt).dateKey
                 ),
+                saindo:
+                  ficha.assinatura.sub.status === "ATIVA" &&
+                  Boolean(ficha.assinatura.sub.canceledAt),
               }
             : null
         }

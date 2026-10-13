@@ -42,6 +42,8 @@ type Assinante = {
   startedAt: string;
   renewsAt: string;
   vencida: boolean;
+  /** Cancelou pelo app: usa até o fim do ciclo e não renova. */
+  saindo: boolean;
 };
 
 type Resumo = {
@@ -122,6 +124,13 @@ export function ClubeManager({
 
   return (
     <div className="space-y-5">
+      <div>
+        <h1 className="font-display text-3xl text-white sm:text-4xl">Clube VIP</h1>
+        <p className="mt-1.5 text-sm text-steel-400">
+          As assinaturas: pedidos que chegam pelo site, membros, renovações e
+          os planos que aparecem na vitrine.
+        </p>
+      </div>
       {/* ── Resumo ── */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Numero
@@ -388,6 +397,12 @@ function LinhaAssinante({
   }
 
   function renovar() {
+    // Cada toque soma um ciclo: dois toques davam dois meses de graça.
+    const periodo = assinante.cycle === "ANUAL" ? "um ano" : "um mês";
+    const aviso = assinante.saindo
+      ? `${assinante.name} pediu para cancelar no fim do ciclo. Registrar o pagamento desfaz o pedido e soma mais ${periodo}. Continuar?`
+      : `Registrar o pagamento de ${assinante.name}? O plano ganha mais ${periodo}.`;
+    if (!confirm(aviso)) return;
     setMsg(null);
     start(async () => {
       setMsg(notify(await renewSubscription(assinante.userId), "Renovação registrada."));
@@ -426,14 +441,22 @@ function LinhaAssinante({
           >
             {assinante.name}
           </Link>
-          <span
-            className={`mt-0.5 flex items-center gap-1 text-xs ${
-              assinante.phonePending ? "text-amber-300" : "text-steel-400"
-            }`}
-          >
-            <Phone className="h-3 w-3 flex-none" />
-            {assinante.phonePending ? "Sem telefone" : formatPhone(assinante.phone)}
-          </span>
+          {assinante.phonePending ? (
+            <span className="mt-0.5 flex items-center gap-1 text-xs text-amber-300">
+              <Phone className="h-3 w-3 flex-none" />
+              Sem telefone
+            </span>
+          ) : (
+            <a
+              href={`https://wa.me/55${assinante.phone}`}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-0.5 flex w-fit items-center gap-1 text-xs text-steel-400 transition-colors hover:text-electric"
+            >
+              <Phone className="h-3 w-3 flex-none" />
+              {formatPhone(assinante.phone)}
+            </a>
+          )}
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <span className="label inline-flex items-center gap-1 rounded-full bg-electric/10 px-2.5 py-1.5 text-electric">
               <Crown className="h-3 w-3" />
@@ -446,8 +469,8 @@ function LinhaAssinante({
               {assinante.cycle === "ANUAL" ? "Anual" : "Mensal"} ·{" "}
               {formatBRL(assinante.monthlyCents)}/mês ·{" "}
               {assinante.status === "CANCELADA"
-                ? `desde ${assinante.startedAt}`
-                : `${assinante.vencida ? "venceu" : "renova"} ${assinante.renewsAt}`}
+                ? `assinou em ${assinante.startedAt}`
+                : `${assinante.vencida ? "venceu" : assinante.saindo ? "cancela em" : "renova"} ${assinante.renewsAt}`}
             </span>
           </div>
         </div>
@@ -528,11 +551,15 @@ function LinhaAssinante({
               aria-label="Novo plano"
               className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none [color-scheme:dark] focus:border-electric/60"
             >
-              {planos.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
+              {/* Plano desligado não se vende mais: só aparece se for o atual. */}
+              {planos
+                .filter((p) => p.active || p.id === assinante.planId)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.active ? "" : " (desativado)"}
+                  </option>
+                ))}
             </select>
           </label>
           <label className="block">

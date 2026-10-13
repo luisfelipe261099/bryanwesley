@@ -231,7 +231,16 @@ export async function adminTransition(
   try {
     const session = await admin();
     await transitionAppointment(id, next, { autorUserId: session.id });
-    return done("Agendamento atualizado.");
+    // O mesmo recado da tela do barbeiro: "Agendamento atualizado." para
+    // tudo não dizia se a comissão tinha sido lançada ou a falta desfeita.
+    const RECADO: Record<typeof next, string> = {
+      EM_ANDAMENTO: "Atendimento iniciado.",
+      CONCLUIDO: "Atendimento concluído e comissão lançada.",
+      NO_SHOW: "Marcado como falta.",
+      CONFIRMADO: "Falta desfeita: o horário voltou a valer.",
+      CANCELADO: "Horário cancelado.",
+    };
+    return done(RECADO[next]);
   } catch (e) {
     return fail(e);
   }
@@ -425,12 +434,6 @@ export async function updateBarber(input: {
         mudouAcesso = true;
       }
     }
-    if (Object.keys(contaPatch).length > 0) {
-      await db
-        .update(users)
-        .set(mudouAcesso ? { ...contaPatch, tokenVersion: rawSql`${users.tokenVersion} + 1` } : contaPatch)
-        .where(eq(users.id, conta.id));
-    }
 
     // Desativar um barbeiro desativa a conta dele. Sem esta guarda o admin
     // desativa o próprio cartão e fica trancado para fora do sistema — não
@@ -463,6 +466,27 @@ export async function updateBarber(input: {
             };
           }
         }
+      }
+    }
+
+    // As guardas acima recusam ANTES de gravar qualquer coisa: gravar a
+    // conta e depois recusar a desativação deixava nome/e-mail salvos com
+    // a tela mostrando só o erro.
+    if (Object.keys(contaPatch).length > 0) {
+      await db
+        .update(users)
+        .set(mudouAcesso ? { ...contaPatch, tokenVersion: rawSql`${users.tokenVersion} + 1` } : contaPatch)
+        .where(eq(users.id, conta.id));
+      // Mexendo no próprio cartão: renova o cookie com a versão nova (e o
+      // nome novo), senão trocar o próprio e-mail ou WhatsApp deslogava
+      // no mesmo clique.
+      if (conta.id === session.id) {
+        const eu = await db.query.users.findFirst({ where: eq(users.id, session.id) });
+        cookies().set(
+          SESSION_COOKIE,
+          await signSession({ ...session, name: eu?.name ?? session.name, v: eu?.tokenVersion ?? session.v }),
+          sessionCookieOptions
+        );
       }
     }
 
@@ -536,7 +560,9 @@ export async function updateBarber(input: {
       .where(inArray(recurringSlots.id, ids));
     const liberados = await cancelFutureOccurrences(ids);
     return done(
-      `Barbeiro desativado e acesso encerrado.${aviso} ${ids.length} horário(s) fixo(s) desligado(s) e ${liberados} agendamento(s) liberado(s) — avise os membros.`
+      `Barbeiro desativado e acesso encerrado.${aviso} ${ids.length} horário(s) fixo(s) desligado(s)${
+        liberados > 0 ? ` e ${liberados} agendamento(s) liberado(s)` : ""
+      } — avise os membros que tinham horário fixo com ele.`
     );
   } catch (e) {
     return fail(e);
@@ -1002,6 +1028,9 @@ export async function subscribeClient(input: {
   try {
     await admin();
     const renewsAt = nextRenewal(new Date(), input.cycle);
+    const tinhaPlano = await db.query.subscriptions.findFirst({
+      where: and(eq(subscriptions.userId, input.userId), eq(subscriptions.status, "ATIVA")),
+    });
 
     // Encerra o que estiver em aberto — ativa OU vencida. Só a ativa era
     // encerrada, então trocar o plano de quem estava devendo deixava duas
@@ -1023,9 +1052,16 @@ export async function subscribeClient(input: {
       cycle: input.cycle,
       renewsAt,
     });
+    // O pedido que a pessoa fez pelo site fica resolvido junto. Ativar pela
+    // ficha (ou trocar pelo Clube) deixava o pedido em "Pedidos de
+    // assinatura", e um "Ativar" depois recomeçava o ciclo.
+    await db
+      .update(planRequests)
+      .set({ status: "ATENDIDA" })
+      .where(and(eq(planRequests.userId, input.userId), eq(planRequests.status, "ABERTA")));
     // O cliente que ligou os avisos fica sabendo na hora.
     await avisarPlanoAtivado({ userId: input.userId, planId: input.planId });
-    return done("Assinatura ativada.");
+    return done(tinhaPlano ? "Plano trocado." : "Assinatura ativada.");
   } catch (e) {
     return fail(e);
   }
@@ -1464,17 +1500,25 @@ export async function acceptPlanRequest(requestId: number): Promise<Result> {
     });
     if (!req) return { ok: false, error: "Solicitação não encontrada." };
 
+    // Reserva o pedido antes de ativar: dois toques (ou uma aba antiga em
+    // outro aparelho) recomeçavam o ciclo de quem já estava ativo.
+    const [reserva] = await db
+      .update(planRequests)
+      .set({ status: "ATENDIDA" })
+      .where(and(eq(planRequests.id, requestId), eq(planRequests.status, "ABERTA")));
+    if (reserva.affectedRows === 0) {
+      return { ok: false, error: "Esse pedido já foi resolvido. Recarregue a página." };
+    }
+
     const r = await subscribeClient({
       userId: req.userId,
       planId: req.planId,
       cycle: req.cycle,
     });
-    if (!r.ok) return r;
-
-    await db
-      .update(planRequests)
-      .set({ status: "ATENDIDA" })
-      .where(eq(planRequests.id, requestId));
+    if (!r.ok) {
+      await db.update(planRequests).set({ status: "ABERTA" }).where(eq(planRequests.id, requestId));
+      return r;
+    }
     return done("Assinatura ativada.");
   } catch (e) {
     return fail(e);

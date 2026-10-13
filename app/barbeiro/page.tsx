@@ -51,13 +51,10 @@ export default async function BarbeiroPanel({
 }) {
   const session = await requireRole(["BARBER", "ADMIN"]);
 
-  // Barbeiro vê só a própria agenda. Admin sem cadastro de barbeiro cai
-  // no primeiro da equipe — só ele, para nunca expor agenda alheia.
-  const barber = session.barberId
-    ? await getBarberWithUser(session.barberId)
-    : session.role === "ADMIN"
-      ? await getBarberWithUser(null)
-      : null;
+  // Cada um vê só a própria agenda. Admin sem cartão de barbeiro caía no
+  // primeiro da equipe (até num desativado) e lia a agenda de outro como
+  // se fosse a dele; agora recebe o recado e o caminho da Agenda geral.
+  const barber = session.barberId ? await getBarberWithUser(session.barberId) : null;
 
   if (!barber) {
     return (
@@ -65,10 +62,28 @@ export default async function BarbeiroPanel({
         <Background />
         <AppHeader badge="Barbeiro" user={{ name: session.name, initial: session.name.charAt(0) }} />
         <main className="mx-auto max-w-3xl px-5 pb-28 pt-28 lg:px-8">
-          <p className="glass rounded-2xl p-6 text-sm text-steel-300">
-            Sua conta ainda não está vinculada a um barbeiro. Peça ao
-            administrador para fazer o vínculo em Admin → Equipe.
-          </p>
+          {session.role === "ADMIN" ? (
+            <>
+              <p className="glass rounded-2xl p-6 text-sm text-steel-300">
+                Sua conta de administrador não tem cartão de barbeiro, então
+                não há agenda própria aqui. A agenda de toda a equipe fica em{" "}
+                <Link href="/admin/agenda" className="text-electric underline underline-offset-2">
+                  Admin → Agenda
+                </Link>
+                .
+              </p>
+              {/* O check-in pelo código vale para qualquer barbeiro: o balcão
+                  precisa dele mesmo sem agenda própria. */}
+              <div className="mt-5">
+                <CheckinBox />
+              </div>
+            </>
+          ) : (
+            <p className="glass rounded-2xl p-6 text-sm text-steel-300">
+              Sua conta ainda não está vinculada a um barbeiro. Peça ao
+              administrador para fazer o vínculo em Admin → Equipe.
+            </p>
+          )}
         </main>
         <BottomNav active="barbeiro" role={session.role} />
       </>
@@ -198,7 +213,9 @@ export default async function BarbeiroPanel({
                 </p>
               )}
               <p className="mt-1.5 text-xs text-steel-400">
-                Gerou {formatBRL(mes.baseCents)} para a casa em{" "}
+                {/* baseCents é o total dos serviços, comissão incluída — não
+                    o que fica para a casa. */}
+                Gerou {formatBRL(mes.baseCents)} em serviços em{" "}
                 {mes.atendimentos} atendimento(s).
               </p>
             </div>
@@ -459,7 +476,7 @@ export default async function BarbeiroPanel({
               <div className="mt-3 grid grid-cols-3 gap-3">
                 <QuickAction icon={CalendarPlus} label="Encaixe" href="/agendar" />
                 <QuickAction icon={Lock} label="Bloquear" href="/admin/ajustes#bloqueios" />
-                <QuickAction icon={Receipt} label="Extrato" href="/admin/relatorios" />
+                <QuickAction icon={Receipt} label="Relatórios" href="/admin/relatorios" />
               </div>
             ) : (
               <div className="mt-3 grid grid-cols-2 gap-3">

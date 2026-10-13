@@ -179,6 +179,13 @@ function Instalar({ meta, waha }: Pick<ConexaoProps, "meta" | "waha">) {
           <li>Crie o servidor grátis (passo a passo logo abaixo).</li>
           <li>Gere o comando e cole na janela do servidor.</li>
           <li>O QR code aparece aqui — escaneie com o celular da barbearia.</li>
+          {/* Estava só no LEIAME do repositório: sem isto o atendente se
+              cala 4 h logo na primeira mensagem de cada cliente. */}
+          <li>
+            No WhatsApp Business do celular, desligue a <strong>mensagem de saudação</strong> e a{" "}
+            <strong>mensagem de ausência</strong>: o atendente entende a resposta automática como
+            alguém da barbearia assumindo a conversa e fica quieto por 4 horas.
+          </li>
         </ol>
         <ComandoDeInstalacao />
         <GuiaGoogleCloud />
@@ -344,7 +351,8 @@ function PelaPonte({
             {ponte.numero ? formatPhone(ponte.numero) : "—"}
           </strong>
           {ponte.nome ? ` (${ponte.nome})` : ""}. Os menus saem numerados — o cliente responde
-          &quot;1&quot;, &quot;2&quot;… ou escreve.
+          &quot;1&quot;, &quot;2&quot;… ou escreve. Deixe desligadas a saudação e a mensagem de
+          ausência do WhatsApp Business.
         </Linha>
       ) : (
         <Linha ok={false} titulo={`Servidor instalado · ${STATUS[s ?? ""] ?? s ?? "esperando o primeiro sinal"}`}>

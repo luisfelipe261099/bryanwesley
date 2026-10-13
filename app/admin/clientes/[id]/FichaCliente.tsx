@@ -54,6 +54,8 @@ type Assinatura = {
   planName: string;
   cycle: string;
   renewsAt: string;
+  /** Cancelou pelo app: usa até o fim do ciclo e não renova. */
+  saindo: boolean;
 } | null;
 
 export function FichaCliente({
@@ -146,16 +148,24 @@ function Cabecalho({
         <div className="min-w-[12rem] flex-1">
           <h1 className="font-display text-2xl text-white">{cliente.name}</h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-            <span
-              className={`inline-flex items-center gap-1.5 whitespace-nowrap ${
-                cliente.phonePending ? "text-amber-300" : "text-steel-300"
-              }`}
-            >
-              <Phone className="h-3.5 w-3.5" />
-              {cliente.phonePending
-                ? "Sem telefone — completar"
-                : formatPhone(cliente.phone)}
-            </span>
+            {cliente.phonePending ? (
+              <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-amber-300">
+                <Phone className="h-3.5 w-3.5" />
+                Sem telefone — completar
+              </span>
+            ) : (
+              // Toque abre a conversa no WhatsApp, como na Agenda: o
+              // número em texto puro obrigava a copiar à mão.
+              <a
+                href={`https://wa.me/55${cliente.phone}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 whitespace-nowrap text-steel-300 transition-colors hover:text-electric"
+              >
+                <Phone className="h-3.5 w-3.5" />
+                {formatPhone(cliente.phone)}
+              </a>
+            )}
             {cliente.email && (
               <span className="inline-flex min-w-0 items-center gap-1.5 break-all text-steel-400">
                 <Mail className="h-3.5 w-3.5 flex-none" />
@@ -599,6 +609,12 @@ function Plano({
   }
 
   function renovar() {
+    // Cada toque soma um ciclo: dois toques davam dois meses de graça.
+    const periodo = assinatura?.cycle === "ANUAL" ? "um ano" : "um mês";
+    const aviso = assinatura?.saindo
+      ? `${cliente.name} pediu para cancelar no fim do ciclo. Registrar o pagamento desfaz o pedido e soma mais ${periodo}. Continuar?`
+      : `Registrar o pagamento de ${cliente.name}? O plano ganha mais ${periodo}.`;
+    if (!confirm(aviso)) return;
     setMsg(null);
     start(async () => {
       setMsg(notify(await renewSubscription(cliente.id), "Renovação registrada."));
@@ -632,9 +648,11 @@ function Plano({
           ? `${assinatura.planName} · ${
               assinatura.cycle === "ANUAL" ? "anual" : "mensal"
             } · ${
-              assinatura.status === "ATIVA"
-                ? `renova em ${assinatura.renewsAt}`
-                : `venceu em ${assinatura.renewsAt}`
+              assinatura.status !== "ATIVA"
+                ? `venceu em ${assinatura.renewsAt}`
+                : assinatura.saindo
+                  ? `pediu para sair · cancela em ${assinatura.renewsAt}`
+                  : `renova em ${assinatura.renewsAt}`
             }`
           : "Este cliente é avulso."
       }

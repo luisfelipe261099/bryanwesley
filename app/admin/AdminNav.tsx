@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
@@ -28,12 +29,26 @@ const links = [
 
 export function AdminNav() {
   const path = usePathname();
+  const trilho = useRef<HTMLElement>(null);
+
+  // No celular só cabem três chips: em Relatórios ou Ajustes, o chip da
+  // tela aberta ficava fora da vista. Centraliza o ativo — só na
+  // horizontal, sem mexer na rolagem da página.
+  useEffect(() => {
+    const nav = trilho.current;
+    const ativo = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!nav || !ativo) return;
+    const dx = ativo.getBoundingClientRect().left - nav.getBoundingClientRect().left;
+    nav.scrollLeft = Math.max(0, nav.scrollLeft + dx - (nav.clientWidth - ativo.offsetWidth) / 2);
+  }, [path]);
+
   return (
     // Vaza até a borda da tela no celular: o chip cortado na lateral é o
     // que mostra que a lista continua para o lado.
-    <nav className="rail mb-6 -mx-5 px-5 lg:mx-0 lg:px-0">
+    <nav ref={trilho} className="rail mb-6 -mx-5 px-5 lg:mx-0 lg:px-0">
       {links.map((l) => {
-        const on = path === l.href;
+        // A ficha de um cliente (/admin/clientes/12) fica sob "Clientes".
+        const on = path === l.href || (l.href !== "/admin" && path.startsWith(l.href + "/"));
         return (
           <Link
             key={l.href}

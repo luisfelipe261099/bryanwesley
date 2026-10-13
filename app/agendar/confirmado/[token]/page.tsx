@@ -71,6 +71,8 @@ export default async function Confirmado({
   const servicos = appt.items.map((i) => i.name).join(" + ");
   const cancelado = appt.status === "CANCELADO" || appt.status === "NO_SHOW";
 
+  // Encaixe lançado pela equipe: quem lê esta tela é o barbeiro, não o cliente.
+  const daCasa = session?.role === "ADMIN" || session?.role === "BARBER";
   const voltar =
     session?.role === "ADMIN"
       ? { href: `/admin/agenda?dia=${p.dateKey}`, label: "Voltar à agenda" }
@@ -110,9 +112,13 @@ export default async function Confirmado({
         <p className="mt-3 text-steel-300">
           {cancelado
             ? "Esse horário foi cancelado. Quando quiser, é só marcar outro."
-            : avisaPorWhatsapp
-              ? "Seu horário está reservado. Enviamos a confirmação no WhatsApp."
-              : "Seu horário está reservado. Guarde esta página ou o código abaixo."}
+            : daCasa
+              ? avisaPorWhatsapp
+                ? "Horário reservado na agenda. O cliente recebe a confirmação no WhatsApp."
+                : "Horário reservado na agenda. O WhatsApp ainda não está conectado: passe ao cliente o código abaixo."
+              : avisaPorWhatsapp
+                ? "Seu horário está reservado. Enviamos a confirmação no WhatsApp."
+                : "Seu horário está reservado. Guarde esta página ou o código abaixo."}
         </p>
 
         <div className="glass mt-8 rounded-2xl p-6 text-left">
@@ -155,9 +161,11 @@ export default async function Confirmado({
           )}
         </div>
 
-        <p className="mt-4 text-xs leading-relaxed text-steel-400">
-          Guarde este link: ele abre a confirmação quando você quiser.
-        </p>
+        {!daCasa && (
+          <p className="mt-4 text-xs leading-relaxed text-steel-400">
+            Guarde este link: ele abre a confirmação quando você quiser.
+          </p>
+        )}
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
           {/* Cada um volta para a própria casa: o barbeiro que lançou o

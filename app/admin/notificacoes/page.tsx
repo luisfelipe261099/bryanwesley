@@ -67,6 +67,13 @@ export default async function AdminNotificacoes() {
 
   return (
     <div className="space-y-5">
+      <div>
+        <h1 className="font-display text-3xl text-white sm:text-4xl">Mensagens</h1>
+        <p className="mt-1.5 text-sm text-steel-400">
+          Os avisos no celular da equipe e o WhatsApp da barbearia, que
+          confirma e lembra os horários dos clientes.
+        </p>
+      </div>
       <AvisosEquipe chavePublica={chavePush} usuarioId={session.id} equipe={equipe} />
       <ConexaoWhatsapp
         provedor={pelaPonte ? "ponte" : provedorAtivo()}

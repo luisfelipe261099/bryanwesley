@@ -21,14 +21,22 @@ export default async function AdminRelatorios({
   const hoje = utcToShopParts(new Date());
   const year = Number(searchParams.ano ?? hoje.year);
   const month = Number(searchParams.mes ?? hoje.month);
-  const barberId = searchParams.barbeiro ? Number(searchParams.barbeiro) : null;
+  const pedido = Number(searchParams.barbeiro);
+  const barberId = Number.isInteger(pedido) && pedido > 0 ? pedido : null;
 
-  const [team, lines] = await Promise.all([
-    listTeam(),
-    commissionReport(year, month, barberId),
+  // O mês inteiro vem de uma vez e o filtro do barbeiro é aplicado aqui: os
+  // chips precisam saber quem tem lançamento independente do filtro.
+  const [equipe, doMes] = await Promise.all([
+    listTeam({ todos: true }),
+    commissionReport(year, month, null),
   ]);
+  const lines = barberId ? doMes.filter((l) => l.barberId === barberId) : doMes;
   const total = summarize(lines);
   const porBarbeiro = byBarber(lines);
+  // Quem saiu no meio do mês ainda tem fechamento a pagar: o chip dele
+  // fica enquanto houver lançamento no período (ou se for o filtrado).
+  const comLancamento = new Set(doMes.map((l) => l.barberId));
+  const team = equipe.filter((b) => b.active || b.id === barberId || comLancamento.has(b.id));
 
   // Últimos 6 meses para o seletor.
   const meses: { ano: number; mes: number }[] = [];
@@ -45,6 +53,13 @@ export default async function AdminRelatorios({
 
   return (
     <div className="space-y-5">
+      <div>
+        <h1 className="font-display text-3xl text-white sm:text-4xl">Relatórios</h1>
+        <p className="mt-1.5 text-sm text-steel-400">
+          O fechamento de cada mês: quanto cada barbeiro gerou, a comissão
+          dele e o que fica com a casa.
+        </p>
+      </div>
       <Card
         title="Fechamento do mês"
         desc="Sai da razão de comissões: cada atendimento concluído gera um lançamento."
@@ -101,6 +116,13 @@ export default async function AdminRelatorios({
           <Total label="Comissões" value={formatBRL(total.barberCents)} accent />
           <Total label="Fica com a casa" value={formatBRL(total.shopCents)} />
         </div>
+        {/* Não é o caixa: atendimento de plano entra pelo preço de tabela
+            (é a base da comissão), e a mensalidade já está no Clube VIP. */}
+        <p className="mt-3 text-xs text-steel-400">
+          Atendimento de plano entra pelo preço de tabela do serviço (é a
+          base da comissão). Por isso estes totais não são o dinheiro que
+          entrou no caixa.
+        </p>
 
         <a
           href={`/api/relatorios/comissoes${qs({ ano: year, mes: month, barbeiro: barberId })}`}
@@ -159,7 +181,7 @@ export default async function AdminRelatorios({
                   <th className="pb-3 font-semibold">Origem</th>
                   <th className="pb-3 text-right font-semibold">Base</th>
                   <th className="pb-3 text-right font-semibold">%</th>
-                  <th className="pb-3 text-right font-semibold">Barbeiro</th>
+                  <th className="pb-3 text-right font-semibold">Comissão</th>
                   <th className="pb-3 text-right font-semibold">Casa</th>
                 </tr>
               </thead>
@@ -169,7 +191,12 @@ export default async function AdminRelatorios({
                     <td className="py-3 text-steel-300">
                       {l.data} {l.hora}
                     </td>
-                    <td className="py-3 text-white">{l.cliente}</td>
+                    <td className="py-3 text-white">
+                      {l.cliente}
+                      {l.servicos && (
+                        <span className="block text-xs text-steel-400">{l.servicos}</span>
+                      )}
+                    </td>
                     <td className="py-3 text-steel-300">{l.barbeiro}</td>
                     <td className="py-3">
                       <span
@@ -202,7 +229,11 @@ export default async function AdminRelatorios({
         )}
       </Card>
 
-      <Card title="Base de clientes" desc="Backup ou campanha de WhatsApp." icon={<Users className="h-5 w-5" />}>
+      <Card
+        title="Base de clientes"
+        desc="Cópia de segurança da sua lista de clientes. Mensagem pelo WhatsApp da barbearia é uma a uma: disparo em massa pode bloquear o número."
+        icon={<Users className="h-5 w-5" />}
+      >
         <a
           href="/api/relatorios/clientes"
           className="btn-outline label inline-flex items-center gap-2 rounded-full px-5 py-3.5 text-electric"

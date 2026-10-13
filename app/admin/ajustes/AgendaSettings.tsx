@@ -155,7 +155,7 @@ export function AgendaSettings({ settings }: { settings: Settings }) {
           />
           <TextInput
             label="Comissão sugerida p/ novo barbeiro (%)"
-            title="Valor que já vem preenchido ao cadastrar um barbeiro. A comissão de cada um é ajustada em Equipe."
+            ajuda="Já vem preenchida ao cadastrar um barbeiro. A de cada um muda em Equipe."
             type="number"
             min={0}
             max={100}
@@ -216,10 +216,12 @@ export function BlocksManager({
     });
   }
 
-  function drop(id: number) {
+  function drop(id: number, rotulo: string) {
+    // O horário volta a aparecer para os clientes na hora: um toque sem
+    // querer no X abria a agenda de um feriado.
+    if (!window.confirm(`Remover o bloqueio de ${rotulo}? O horário volta a ficar livre para agendar.`)) return;
     start(async () => {
-      const res = await removeBlock(id);
-      if (!res.ok) setMsg({ ok: false, text: res.error });
+      setMsg(notify(await removeBlock(id), "Bloqueio removido."));
     });
   }
 
@@ -296,19 +298,19 @@ export function BlocksManager({
                 className="flex items-center justify-between gap-3 rounded-xl border border-amber-400/25 bg-amber-400/[0.07] px-4 py-3"
               >
                 <div className="min-w-0">
-                  <p className="text-sm font-medium capitalize text-amber-100">
+                  <p className="text-sm font-medium text-amber-100 first-letter:uppercase">
                     {b.label}
                   </p>
                   <p className="text-xs text-amber-200/70">
                     {b.barberId
-                      ? team.find((t) => t.id === b.barberId)?.shortName
+                      ? team.find((t) => t.id === b.barberId)?.shortName ?? "Barbeiro desativado"
                       : "Barbearia toda"}
                     {b.reason ? ` · ${b.reason}` : ""}
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => drop(b.id)}
+                  onClick={() => drop(b.id, b.label)}
                   aria-label="Remover bloqueio"
                   className="grid h-10 w-10 flex-none place-items-center rounded-full text-amber-200/70 transition-colors hover:bg-white/5 hover:text-white"
                 >

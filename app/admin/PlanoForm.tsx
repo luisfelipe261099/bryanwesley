@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Loader2, Plus, Save } from "lucide-react";
 import {
   notify,
@@ -74,6 +74,13 @@ export function PlanoForm({
   });
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, start] = useTransition();
+
+  // O destaque é um só: salvar o plano A como destaque desliga o B no
+  // banco. Sem acompanhar a página, o formulário do B guardava a chave
+  // ligada e o próximo "Salvar" dele roubava o destaque de volta.
+  useEffect(() => {
+    setF((v) => (v.highlight === plan.highlight ? v : { ...v, highlight: plan.highlight }));
+  }, [plan.highlight]);
 
   function save() {
     setMsg(null);

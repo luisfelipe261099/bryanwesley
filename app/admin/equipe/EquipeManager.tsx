@@ -52,10 +52,13 @@ function toMin(v: string) {
 }
 
 export function EquipeManager({
+  euUserId,
   team,
   tiers,
   comissaoPadrao,
 }: {
+  /** A conta de quem está no painel: o próprio cartão não se desativa. */
+  euUserId: number;
   team: BarberRow[];
   /** "Comissão padrão" de Ajustes: o valor inicial de quem é cadastrado. */
   comissaoPadrao: number;
@@ -70,7 +73,7 @@ export function EquipeManager({
   return (
     <div className="space-y-5">
       {team.map((b) => (
-        <BarberCard key={b.id} barber={b} />
+        <BarberCard key={b.id} barber={b} meu={b.userId === euUserId} />
       ))}
       <NewBarber comissaoPadrao={comissaoPadrao} />
       <Tiers tiers={tiers} team={team} />
@@ -78,7 +81,7 @@ export function EquipeManager({
   );
 }
 
-function BarberCard({ barber }: { barber: BarberRow }) {
+function BarberCard({ barber, meu }: { barber: BarberRow; meu: boolean }) {
   const [form, setForm] = useState(barber);
   const [goal, setGoal] = useState(
     (barber.monthlyGoalCents / 100).toFixed(2).replace(".", ",")
@@ -171,21 +174,28 @@ function BarberCard({ barber }: { barber: BarberRow }) {
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {/* No próprio cartão as duas chaves ficam travadas: o servidor
+            recusa (o dono ficaria trancado para fora), mas só depois de
+            um aviso de "não dá para desfazer" que assustava à toa. */}
         <Toggle
           checked={form.active}
           onChange={(v) => setForm({ ...form, active: v })}
+          disabled={meu}
           label="Ativo na agenda"
           hint={
-            form.active
-              ? "Aparece para os clientes e tem acesso ao sistema"
-              : "Ao salvar: perde o acesso e os horários futuros são cancelados"
+            meu
+              ? "É a sua conta: só outro administrador pode desativá-la"
+              : form.active
+                ? "Aparece para os clientes e tem acesso ao sistema"
+                : "Ao salvar: perde o acesso e os horários futuros são cancelados"
           }
         />
         <Toggle
           checked={form.isAdmin}
           onChange={(v) => setForm({ ...form, isAdmin: v })}
+          disabled={meu}
           label="Também é administrador"
-          hint="Dá acesso ao painel de gestão"
+          hint={meu ? "É a sua conta: você continua administrador" : "Dá acesso ao painel de gestão"}
         />
       </div>
 
@@ -259,8 +269,8 @@ function ResetSenha({ userId, nome }: { userId: number; nome: string }) {
     <div className="mt-4 rounded-2xl border border-white/8 bg-white/[0.02] p-4">
       <p className="text-sm font-semibold text-white">Nova senha de {nome}</p>
       <p className="mt-1 text-xs text-steel-400">
-        Ao salvar, as sessões abertas dessa conta caem e a pessoa entra de novo
-        com a senha nova.
+        Pelo menos 6 caracteres. Ao salvar, as sessões abertas dessa conta
+        caem e a pessoa entra de novo com a senha nova.
       </p>
       <div className="mt-3 flex flex-wrap items-end gap-2">
         <div className="min-w-[12rem] flex-1">
@@ -475,7 +485,7 @@ function NewBarber({ comissaoPadrao }: { comissaoPadrao: number }) {
         <TextInput
           label="Nome curto"
           value={f.shortName}
-          placeholder="Ex.: Lucas S."
+          placeholder="Ex.: Rafael M."
           onChange={(e) => setF({ ...f, shortName: e.target.value })}
         />
         <TextInput
@@ -486,7 +496,7 @@ function NewBarber({ comissaoPadrao }: { comissaoPadrao: number }) {
         <TextInput
           label="WhatsApp"
           value={f.phone}
-          placeholder="(11) 9 0000-0000"
+          placeholder="(41) 9 0000-0000"
           onChange={(e) => setF({ ...f, phone: e.target.value })}
         />
         <TextInput

@@ -31,7 +31,7 @@ export function AvisosEquipe({
   return (
     <Card
       title="Avisos no celular"
-      desc="Agendamento novo, cancelamento e pedido de plano chegam como notificação — sem precisar do WhatsApp e com o site fechado."
+      desc="Cada barbeiro recebe no próprio celular o horário novo, cancelado ou remarcado da agenda dele — sem precisar do WhatsApp e com o site fechado."
       icon={<Bell className="h-5 w-5" />}
     >
       <AvisosPush chavePublica={chavePublica} usuarioId={usuarioId} papel="ADMIN" />

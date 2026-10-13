@@ -29,9 +29,11 @@ export function Toaster() {
           key={t.id}
           role="status"
           className={`pointer-events-auto flex w-full max-w-sm items-start gap-2.5 rounded-2xl border px-4 py-3.5 text-sm shadow-card backdrop-blur-xl ${
+            // Fundo quase opaco: o aviso fica por cima da página, e com o
+            // fundo transparente o texto de baixo atravessava a mensagem.
             t.tone === "ok"
-              ? "border-neon/30 bg-neon/10 text-neon"
-              : "border-amber-400/30 bg-amber-400/10 text-amber-200"
+              ? "border-neon/40 bg-[#0b1a17]/95 text-neon"
+              : "border-amber-400/45 bg-[#1d180c]/95 text-amber-200"
           }`}
         >
           {t.tone === "ok" ? (

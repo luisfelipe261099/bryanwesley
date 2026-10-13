@@ -32,6 +32,7 @@ import { appointmentStatus as statusStyles } from "@/lib/status";
 import { ApptControls } from "./AgendaHoje";
 import { PlanRequests } from "./PlanRequests";
 import { AvisosPush } from "@/components/AvisosPush";
+import { AtualizaSozinho } from "@/components/AtualizaSozinho";
 import { requireRole } from "@/lib/auth";
 import { chavePublicaPush } from "@/lib/push";
 
@@ -84,6 +85,7 @@ export default async function AdminDashboard() {
   return (
     <>
       <AvisosPush chavePublica={chavePush} usuarioId={session.id} papel="ADMIN" variante="banner" />
+      <AtualizaSozinho />
       <Reveal>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -126,7 +128,7 @@ export default async function AdminDashboard() {
         <Reveal delay={0.08} className="h-full">
           <Kpi
             icon={Repeat}
-            label="MRR (assinaturas)"
+            label="Clube VIP por mês"
             value={formatCompactBRL(kpi.mrrCents)}
             hint={`${kpi.assinantesAtivos} membro(s) ativo(s)`}
           />

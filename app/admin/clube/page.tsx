@@ -74,6 +74,8 @@ export default async function AdminClube({
         startedAt: labelDayMonth(utcToShopParts(a.startedAt).dateKey),
         renewsAt: labelDayMonth(utcToShopParts(a.renewsAt).dateKey),
         vencida: a.status === "ATIVA" && a.renewsAt.getTime() < Date.now(),
+        // Pediu para sair pelo app: segue membro até o fim do ciclo pago.
+        saindo: a.status === "ATIVA" && Boolean(a.canceledAt),
       }))}
       situacao={situacao}
       planId={planId}
