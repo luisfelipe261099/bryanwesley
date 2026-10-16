@@ -21,6 +21,7 @@ import { appointmentStatus, paymentStatus, subscriptionStatus } from "@/lib/stat
 import { Card } from "@/components/admin/Feedback";
 import { ApptControls } from "../../AgendaHoje";
 import { FichaCliente } from "./FichaCliente";
+import { requireRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,9 @@ export default async function FichaDoCliente({
 }: {
   params: { id: string };
 }) {
+  // Confere a sessão aqui também: o Next não roda o layout de novo na
+  // navegação pelo app nem na volta de uma Server Action.
+  await requireRole(["ADMIN"]);
   const id = Number(params.id);
   if (!Number.isInteger(id) || id <= 0) notFound();
 

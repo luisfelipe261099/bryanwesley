@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { and, eq, gte, lt } from "drizzle-orm";
 import { db } from "@/db/client";
-import { appointments } from "@/db/schema";
+import { appointments, appointmentServices } from "@/db/schema";
 import { activeSubscription, dayBounds } from "@/lib/queries";
 import { requireRole } from "@/lib/auth";
 import { isNextControlFlow } from "@/lib/errors";
@@ -131,9 +131,18 @@ async function fazerCheckIn(input: {
     .where(eq(appointments.id, appt.id));
 
   // Assinante: confere se o plano ainda vale — é o ponto anti-fraude.
+  // Vale também para o horário coberto só em parte (corte no plano +
+  // sobrancelha avulsa): ele fica como avulso, mas o item do plano sai
+  // de graça do mesmo jeito.
   let planoInfo = "";
   let semPlano = false;
-  if (appt.kind === "ASSINANTE") {
+  const itemDoPlano =
+    appt.kind === "ASSINANTE" ||
+    !!(await db.query.appointmentServices.findFirst({
+      columns: { id: true },
+      where: and(eq(appointmentServices.appointmentId, appt.id), eq(appointmentServices.priceCents, 0)),
+    }));
+  if (itemDoPlano) {
     const sub = appt.clientUserId
       ? await activeSubscription(appt.clientUserId)
       : undefined;

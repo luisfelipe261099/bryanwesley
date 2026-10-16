@@ -95,7 +95,9 @@ export default async function ClienteDashboard({
         .orderBy(desc(subscriptions.startedAt))
         .limit(1),
       memberStats(session.id),
-      upcomingForUser(session.id),
+      // Todas as semanas do fixo mais os extras: com o teto de 10, as
+      // últimas sumiam da lista e não dava para remarcá-las daqui.
+      upcomingForUser(session.id, 40),
       historyForUser(session.id),
       countForUser(session.id),
       db.query.recurringSlots.findFirst({
@@ -130,8 +132,13 @@ export default async function ClienteDashboard({
   let cicloPct = 0;
   let diasParaRenovar = 0;
   if (subscription) {
-    const total = subscription.renewsAt.getTime() - subscription.startedAt.getTime();
-    const feito = Date.now() - subscription.startedAt.getTime();
+    // Começo do ciclo atual, contado do vencimento: o startedAt é o da
+    // primeira assinatura e nunca anda, então quem renovou via a barra
+    // pela metade logo depois de pagar.
+    const inicioCiclo = new Date(subscription.renewsAt);
+    inicioCiclo.setMonth(inicioCiclo.getMonth() - (subscription.cycle === "ANUAL" ? 12 : 1));
+    const total = Math.max(1, subscription.renewsAt.getTime() - inicioCiclo.getTime());
+    const feito = Date.now() - inicioCiclo.getTime();
     cicloPct = Math.max(0, Math.min(100, Math.round((feito / total) * 100)));
     diasParaRenovar = Math.max(
       0,
@@ -400,7 +407,7 @@ export default async function ClienteDashboard({
                     Você ainda não é membro
                   </h2>
                   <p className="mt-2 max-w-md text-sm leading-relaxed text-steel-400">
-                    Assine um plano e tenha cortes ilimitados, prioridade na
+                    Assine um plano e tenha cortes inclusos, prioridade na
                     agenda e benefícios exclusivos todo mês.
                   </p>
                   <div className="mt-6 grid grid-cols-3 gap-4 border-t border-white/8 pt-6">

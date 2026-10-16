@@ -52,7 +52,14 @@ export async function createPaymentLink(input: {
         handle,
         order_nsu: input.orderNsu,
         items: input.items,
-        customer: input.customer,
+        // A API chama o telefone de phone_number, com o +55 na frente.
+        customer: input.customer
+          ? {
+              name: input.customer.name,
+              email: input.customer.email,
+              phone_number: input.customer.phone ? `+55${input.customer.phone.replace(/\D/g, "")}` : undefined,
+            }
+          : undefined,
         redirect_url: input.redirectUrl,
         webhook_url: input.webhookUrl,
       }),
@@ -99,7 +106,9 @@ export async function checkPayment(input: {
     });
     if (!res.ok) return { paid: false, error: `HTTP ${res.status}` };
     const json = (await res.json()) as { success?: boolean; paid?: boolean };
-    return { paid: Boolean(json.success ?? json.paid) };
+    // "success" diz só que a consulta funcionou; quem diz se pagou é
+    // "paid". Lido nessa ordem, um boleto em aberto contava como pago.
+    return { paid: json.paid !== undefined ? json.paid === true : json.success === true };
   } catch (e) {
     return {
       paid: false,

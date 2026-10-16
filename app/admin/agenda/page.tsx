@@ -34,6 +34,7 @@ import {
   type LinhaBloqueio,
 } from "./AgendaManager";
 import { AtualizaSozinho } from "@/components/AtualizaSozinho";
+import { requireRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,9 @@ export default async function AdminAgenda({
     pagina?: string;
   };
 }) {
+  // Confere a sessão aqui também: o Next não roda o layout de novo na
+  // navegação pelo app nem na volta de uma Server Action.
+  await requireRole(["ADMIN"]);
   const hoje = shopToday();
   const visao = VISOES.includes(searchParams.v as VisaoAgenda)
     ? (searchParams.v as VisaoAgenda)

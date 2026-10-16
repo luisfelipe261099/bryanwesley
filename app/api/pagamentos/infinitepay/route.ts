@@ -25,7 +25,8 @@ export async function POST(req: Request) {
   const res = await settlePayment({
     orderNsu,
     transactionNsu: body.transaction_nsu ? String(body.transaction_nsu) : undefined,
-    slug: body.slug ? String(body.slug) : undefined,
+    // O corpo documentado traz "invoice_slug"; "slug" fica para o legado.
+    slug: body.invoice_slug ? String(body.invoice_slug) : body.slug ? String(body.slug) : undefined,
     receiptUrl: body.receipt_url ? String(body.receipt_url) : undefined,
   });
 

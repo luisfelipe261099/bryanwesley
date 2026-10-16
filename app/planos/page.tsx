@@ -17,8 +17,8 @@ const faq = [
     a: "Sim. Sem fidelidade e sem multa. Você cancela direto pela sua conta.",
   },
   {
-    q: "Como funcionam os cortes ilimitados?",
-    a: "Você agenda quantas vezes precisar no mês, respeitando a disponibilidade da agenda.",
+    q: "Como funcionam os serviços inclusos?",
+    a: "O que o seu plano inclui sai sem cobrança. Nos planos com cota (por exemplo, 2 cortes por mês), vale até essa quantidade no mês; nos demais, quantas vezes precisar — sempre respeitando a disponibilidade da agenda.",
   },
   {
     q: "Posso trocar de plano depois?",
@@ -92,7 +92,7 @@ export default async function Planos() {
               <span className="text-gradient">{info.name}</span>
             </h1>
             <p className="mt-4 text-lg text-steel-300">
-              Cortes ilimitados, prioridade de agenda e experiências exclusivas
+              Cortes inclusos, prioridade de agenda e experiências exclusivas
               sob medida.
             </p>
           </div>

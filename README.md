@@ -227,7 +227,7 @@ Para testar sem TiDB, um MariaDB/MySQL local serve
 (`DATABASE_URL=mysql://user:pass@127.0.0.1:3306/bryanwesley` e
 `DATABASE_SSL=false`). O `mysql2` fala com os três.
 
-Contas criadas pelo seed (senha em `SEED_PASSWORD`, padrão `bryan2026`):
+Contas criadas pelo seed (senha em `SEED_PASSWORD`; sem ela, a senha de desenvolvimento do `db/seed.ts`, que o build de produção recusa):
 
 | E-mail | Papel |
 |--------|-------|
@@ -495,7 +495,7 @@ Variáveis do projeto na Vercel:
 | `DATABASE_SSL` | não | `false` desliga TLS (só para MySQL local de teste) |
 | `AUTH_SECRET` | sim | Assina o cookie de sessão (≥ 24 caracteres) |
 | `CRON_SECRET` | sim em produção | Protege o endpoint de despacho |
-| `SEED_PASSWORD` | não | Senha inicial da equipe (padrão `bryan2026`) |
+| `SEED_PASSWORD` | sim, em produção | Senha inicial da equipe (o primeiro deploy para sem ela) |
 | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` | não | Entrega das mensagens |
 | `INFINITEPAY_HANDLE` | não | Cobrança avulsa online |
 | `NEXT_PUBLIC_SITE_URL` | recomendada | Base dos links do QR e do webhook |

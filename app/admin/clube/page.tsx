@@ -12,6 +12,7 @@ import { db } from "@/db/client";
 import { services as servicesTable } from "@/db/schema";
 import { utcToShopParts, labelDayMonth } from "@/lib/time";
 import { ClubeManager } from "./ClubeManager";
+import { requireRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,9 @@ export default async function AdminClube({
 }: {
   searchParams: { situacao?: string; plano?: string; q?: string; pagina?: string };
 }) {
+  // Confere a sessão aqui também: o Next não roda o layout de novo na
+  // navegação pelo app nem na volta de uma Server Action.
+  await requireRole(["ADMIN"]);
   const situacao = SITUACOES.includes(searchParams.situacao as SituacaoAssinante)
     ? (searchParams.situacao as SituacaoAssinante)
     : "ativos";

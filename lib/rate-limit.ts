@@ -53,6 +53,31 @@ export async function hitRateLimit(
 }
 
 /**
+ * Só confere, sem contar: o teto da janela já foi atingido? Para freios
+ * que contam apenas as falhas (o login conta senha errada, não acerto).
+ */
+export async function rateLimitEsgotado(
+  chave: string,
+  teto: number,
+  janelaMs: number,
+  agora = new Date()
+): Promise<boolean> {
+  try {
+    const [row] = await db
+      .select()
+      .from(rateLimits)
+      .where(eq(rateLimits.chave, chave.slice(0, 80)))
+      .limit(1);
+    if (!row) return false;
+    if (row.windowStart.getTime() < agora.getTime() - janelaMs) return false;
+    return row.hits >= teto;
+  } catch (e) {
+    console.error("Freio: não deu para conferir:", e);
+    return false;
+  }
+}
+
+/**
  * Freios com janela maior que a limpeza diária. O "avisa uma vez só" do
  * horário fixo em conflito vale 40 dias; apagado com 24 h, o mesmo aviso
  * voltava ao celular do dono todo dia enquanto o conflito durasse.

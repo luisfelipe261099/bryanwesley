@@ -2,9 +2,9 @@
 
 import { removerInscricao } from "@/lib/push";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { and, eq, or, sql as rawSql } from "drizzle-orm";
+import { and, eq, isNotNull, lte, or, sql as rawSql } from "drizzle-orm";
 import { z } from "@/lib/zod-pt";
 import { db } from "@/db/client";
 import { users, barbers, appointments, subscriptions } from "@/db/schema";
@@ -17,6 +17,7 @@ import {
 } from "@/lib/auth/session";
 import { normalizePhone, isValidPhone } from "@/lib/phone";
 import { safeNext } from "@/lib/url";
+import { hitRateLimit, rateLimitEsgotado } from "@/lib/rate-limit";
 
 export type AuthState = { error?: string } | undefined;
 
@@ -40,6 +41,31 @@ function homeFor(role: "ADMIN" | "BARBER" | "CLIENT") {
   return "/cliente";
 }
 
+/**
+ * O "voltar para onde estava" só vale se o papel entra lá. O barbeiro que
+ * abria um link do /admin entrava certo e caía de novo no login com "sem
+ * permissão", parecendo que a senha não tinha funcionado.
+ */
+function destinoDepoisDeEntrar(proximo: FormDataEntryValue | null, role: "ADMIN" | "BARBER" | "CLIENT") {
+  const alvo = safeNext(proximo);
+  if (!alvo) return homeFor(role);
+  const area = (p: string) => alvo === p || alvo.startsWith(`${p}/`) || alvo.startsWith(`${p}?`);
+  if (area("/admin") && role !== "ADMIN") return homeFor(role);
+  if (area("/barbeiro") && role === "CLIENT") return homeFor(role);
+  if (area("/cliente") && role === "BARBER") return homeFor(role);
+  return alvo;
+}
+
+function ipDaRequisicao() {
+  const h = headers();
+  return (h.get("x-forwarded-for")?.split(",")[0] ?? h.get("x-real-ip") ?? "desconhecido").trim();
+}
+
+// Erros de senha por origem: a trava da conta só atrasa cada tentativa,
+// e pedidos em paralelo passavam por cima do atraso.
+const ERROS_LOGIN_POR_IP = 20;
+const JANELA_LOGIN_MS = 15 * 60_000;
+
 export async function login(
   _prev: AuthState,
   formData: FormData
@@ -53,6 +79,10 @@ export async function login(
   }
 
   const { identifier, password } = parsed.data;
+  const ip = ipDaRequisicao();
+  if (await rateLimitEsgotado(`login:ip:${ip}`, ERROS_LOGIN_POR_IP, JANELA_LOGIN_MS)) {
+    return { error: "Muitas tentativas erradas. Aguarde alguns minutos e tente de novo." };
+  }
   const asPhone = normalizePhone(identifier);
   const asEmail = identifier.toLowerCase();
 
@@ -86,8 +116,19 @@ export async function login(
   if (travada) await new Promise((r) => setTimeout(r, 1500));
 
   const hash = user?.passwordHash ?? DUMMY_HASH;
-  const ok = await verifyPassword(password, hash);
+  let ok = await verifyPassword(password, hash);
+  // Trocar a senha guardava o texto sem os espaços das pontas; o
+  // gerenciador de senhas guardava com. Aceita os dois jeitos.
+  if (!ok && user?.passwordHash && password.trim() !== password) {
+    ok = await verifyPassword(password.trim(), hash);
+  }
+  // Senha certa numa conta desativada: quem sabe a senha merece saber o
+  // motivo (e não somar erro, que acabava travando a conta).
+  if (user && user.passwordHash && ok && !user.active) {
+    return { error: "Sua conta está desativada. Fale com a barbearia." };
+  }
   if (!user || !user.passwordHash || !user.active || !ok) {
+    await hitRateLimit(`login:ip:${ip}`, ERROS_LOGIN_POR_IP, JANELA_LOGIN_MS).catch(() => {});
     if (user) {
       // Trava que já expirou não conta mais: senão o primeiro erro depois
       // dos 15 minutos travaria de novo na hora (5 + 1 ≥ 5).
@@ -132,7 +173,7 @@ export async function login(
   });
   cookies().set(SESSION_COOKIE, token, sessionCookieOptions);
 
-  redirect(safeNext(formData.get("proximo")) ?? homeFor(user.role));
+  redirect(destinoDepoisDeEntrar(formData.get("proximo"), user.role));
 }
 
 const signupSchema = z.object({
@@ -173,7 +214,10 @@ export async function signup(
     // Cliente que já agendou sem cadastro: aqui ele "assume" a conta,
     // definindo uma senha pela primeira vez.
     if (existing.passwordHash) {
-      return { error: "Já existe uma conta com esse WhatsApp. Faça login." };
+      return {
+        error:
+          "Já existe uma conta com esse WhatsApp. Faça login — se esqueceu a senha, peça na barbearia para redefinir.",
+      };
     }
 
     // Só conta de cliente se assume por aqui. Um registro de barbeiro ou
@@ -217,10 +261,27 @@ export async function signup(
 
     if (temHistorico) {
       if (!code) return { needsCode: true };
+      // Freio contra quem fica chutando códigos num mesmo telefone.
+      const freio = await hitRateLimit(`cadastro:codigo:${phone}`, 10, 60 * 60_000);
+      if (!freio.ok) {
+        return {
+          needsCode: true,
+          error: "Muitas tentativas com esse WhatsApp. Aguarde um pouco ou peça ajuda na barbearia.",
+        };
+      }
+      // O código só prova posse quando quem tenta não pode tê-lo fabricado:
+      // qualquer um marca um horário com o WhatsApp de outra pessoa e lê o
+      // código na tela. Vale o código de um atendimento em que a pessoa
+      // esteve na barbearia, ou o do agendamento que criou este cadastro.
       const confere = await db.query.appointments.findFirst({
         where: and(
           eq(appointments.clientPhone, phone),
-          eq(appointments.code, code.trim().toUpperCase())
+          eq(appointments.code, code.trim().toUpperCase()),
+          or(
+            isNotNull(appointments.checkedInAt),
+            eq(appointments.status, "CONCLUIDO"),
+            lte(appointments.createdAt, new Date(existing.createdAt.getTime() + 60_000))
+          )
         ),
         columns: { id: true },
       });
@@ -229,7 +290,7 @@ export async function signup(
         return {
           needsCode: true,
           error:
-            "Código não confere. Ele está na confirmação do seu agendamento.",
+            "Código não confere. Use o código do seu primeiro agendamento ou de um atendimento em que você esteve na barbearia — ou peça no balcão para liberar o seu acesso.",
         };
       }
     } else {
@@ -240,7 +301,7 @@ export async function signup(
       // tentar ouve "já existe uma conta com esse WhatsApp".
       return {
         error:
-          "Esse WhatsApp já está cadastrado na barbearia. Peça no balcão para liberarem o seu acesso, ou marque um horário e use o código da confirmação para criar a senha.",
+          "Esse WhatsApp já está cadastrado na barbearia. Peça no balcão para liberarem o seu acesso.",
       };
     }
     await db

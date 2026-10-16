@@ -38,6 +38,11 @@ const TEAM = [
 ];
 
 export async function runSeed() {
+  // A senha padrão está no repositório, que é público: em produção a
+  // equipe nunca nasce com ela. Sem SEED_PASSWORD, o build para aqui.
+  if (!process.env.SEED_PASSWORD && process.env.VERCEL_ENV === "production") {
+    throw new Error("Defina SEED_PASSWORD na Vercel antes do primeiro deploy (senha inicial da equipe).");
+  }
   const defaultPassword = process.env.SEED_PASSWORD || "bryan2026";
   const hash = await bcrypt.hash(defaultPassword, 10);
 

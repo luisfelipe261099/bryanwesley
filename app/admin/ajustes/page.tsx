@@ -10,10 +10,14 @@ import { getSettings } from "@/lib/schedule";
 import { listTeam } from "@/lib/queries";
 import { shopToday, labelFullDate, formatShopTime, utcToShopParts } from "@/lib/time";
 import { AgendaSettings, BlocksManager, ShopInfo } from "./AgendaSettings";
+import { requireRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminAjustes() {
+  // Confere a sessão aqui também: o Next não roda o layout de novo na
+  // navegação pelo app nem na volta de uma Server Action.
+  await requireRole(["ADMIN"]);
   const [settings, team, blocks] = await Promise.all([
     getSettings(),
     listTeam(),

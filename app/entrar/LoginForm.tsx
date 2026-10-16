@@ -86,6 +86,12 @@ function SignInForm({ proximo }: { proximo: string }) {
       />
       <ErrorLine state={state} />
       <SubmitButton>Entrar</SubmitButton>
+      {/* Não há troca de senha por conta própria: a barbearia redefine na
+          ficha do cliente. Sem esta linha, quem esquecia a senha tentava
+          criar conta de novo e ouvia "já existe uma conta". */}
+      <p className="text-center text-xs text-steel-400">
+        Esqueceu a senha? Peça na barbearia para redefinir.
+      </p>
     </form>
   );
 }

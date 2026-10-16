@@ -6,12 +6,16 @@ import { getAvailability, getSettings } from "@/lib/schedule";
 import { createBooking, BookingError } from "@/lib/appointments";
 import { getSession } from "@/lib/auth";
 import { isValidPhone } from "@/lib/phone";
+import { addDays } from "@/lib/time";
 import { hitRateLimit } from "@/lib/rate-limit";
 import { headers } from "next/headers";
 import type { Slot } from "@/lib/schedule";
 import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appointments } from "@/db/schema";
+
+/** "2026-10-47" passa na máscara e virava outro dia lá na frente. */
+const diaDeVerdade = (k: string) => /^\d{4}-\d{2}-\d{2}$/.test(k) && addDays(k, 0) === k;
 
 /** Quem está pedindo, do ponto de vista da rede. */
 function ipDaRequisicao() {
@@ -41,6 +45,7 @@ export async function fetchAvailability(params: {
 }): Promise<AvailabilityPayload> {
   // Equipe logada está fazendo encaixe: enxerga também os horários que a
   // antecedência mínima esconde do cliente.
+  if (!diaDeVerdade(params.dateKey)) return { slots: [], closed: true };
   const session = await getSession();
   const daCasa = session?.role === "ADMIN" || session?.role === "BARBER";
 
@@ -65,10 +70,14 @@ export async function fetchAvailability(params: {
 
 const bookingSchema = z.object({
   serviceIds: z.array(z.number().int().positive()).min(1, "Escolha ao menos um serviço."),
-  dateKey: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Escolha um dia."),
+  dateKey: z.string().refine(diaDeVerdade, "Escolha um dia."),
   time: z.string().regex(/^\d{2}:\d{2}$/, "Escolha um horário."),
   barberId: z.number().int().positive().nullable(),
-  clientName: z.string().trim().min(3, "Informe seu nome completo."),
+  clientName: z
+    .string()
+    .trim()
+    .min(3, "Informe seu nome completo.")
+    .max(120, "Nome muito longo (máximo de 120 letras)."),
   clientPhone: z.string().refine(isValidPhone, "Informe um WhatsApp válido com DDD."),
   notes: z.string().trim().max(500).optional(),
 });
@@ -99,6 +108,18 @@ export async function submitBooking(
       return {
         ok: false,
         error: `Muitos agendamentos seguidos deste aparelho. Tente de novo em ${min} minuto(s) ou fale com a barbearia pelo WhatsApp.`,
+      };
+    }
+  }
+  // Cliente logado também tem teto: o telefone do formulário é texto
+  // livre, então o teto por telefone não segura quem troca de número a
+  // cada pedido. Por conta, não por rede (o Wi-Fi da barbearia é de todos).
+  if (session?.role === "CLIENT") {
+    const veredito = await hitRateLimit(`agendar:u:${session.id}`, 10, 60 * 60_000);
+    if (!veredito.ok) {
+      return {
+        ok: false,
+        error: "Muitos agendamentos seguidos. Tente de novo mais tarde ou fale com a barbearia pelo WhatsApp.",
       };
     }
   }

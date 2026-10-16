@@ -5,6 +5,7 @@ import { listTeam } from "@/lib/queries";
 import { commissionReport, summarize, byBarber } from "@/lib/reports";
 import { formatBRL } from "@/lib/money";
 import { utcToShopParts } from "@/lib/time";
+import { requireRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,9 @@ export default async function AdminRelatorios({
 }: {
   searchParams: { ano?: string; mes?: string; barbeiro?: string };
 }) {
+  // Confere a sessão aqui também: o Next não roda o layout de novo na
+  // navegação pelo app nem na volta de uma Server Action.
+  await requireRole(["ADMIN"]);
   const hoje = utcToShopParts(new Date());
   const year = Number(searchParams.ano ?? hoje.year);
   const month = Number(searchParams.mes ?? hoje.month);

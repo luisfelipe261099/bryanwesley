@@ -164,6 +164,13 @@ export default async function Home() {
                 serviceName={combo?.name ?? "Combo Completo"}
                 duration={combo ? formatDuration(combo.durationMin) : "1h15"}
                 priceCents={combo?.priceCents ?? 15000}
+                // Abre a agenda já no serviço e no dia do cartão: sem isso
+                // caía em hoje, sem serviço, e o horário mostrado sumia.
+                href={
+                  next && combo
+                    ? `/agendar?servico=${encodeURIComponent(combo.slug)}&dia=${next.day.dateKey}`
+                    : "/agendar"
+                }
               />
             </Reveal>
           </div>
@@ -271,7 +278,7 @@ export default async function Home() {
             <SectionHeading
               kicker="Membros privados"
               title="Clube de Assinatura"
-              subtitle="Cortes ilimitados, prioridade de agenda e experiências exclusivas sob medida."
+              subtitle="Cortes inclusos, prioridade de agenda e experiências exclusivas sob medida."
             />
           </Reveal>
           <div className="mt-16 grid gap-6 md:grid-cols-3">
@@ -375,6 +382,7 @@ function HeroVisual({
   serviceName,
   duration,
   priceCents,
+  href,
 }: {
   agendaAberta: boolean;
   time: string | null;
@@ -383,6 +391,7 @@ function HeroVisual({
   serviceName: string;
   duration: string;
   priceCents: number;
+  href: string;
 }) {
   return (
     <div className="relative mx-auto w-full max-w-sm py-6">
@@ -432,7 +441,7 @@ function HeroVisual({
         </div>
 
         <Link
-          href="/agendar"
+          href={href}
           className="btn-royal label mt-5 flex items-center justify-center gap-2 rounded-xl py-4 text-white"
         >
           {agendaAberta ? "Reservar este horário" : "Ver a agenda"}

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointments,
@@ -19,6 +19,7 @@ import { SESSION_COOKIE, signSession, sessionCookieOptions } from "@/lib/auth/se
 import {
   transitionAppointment,
   rescheduleBooking,
+  updateAppointmentServices,
   BookingError,
 } from "@/lib/appointments";
 import { avisarPedidoDePlano } from "@/lib/avisos";
@@ -26,7 +27,7 @@ import { hitRateLimit } from "@/lib/rate-limit";
 import { chargeSubscription, isInfinitePayConfigured } from "@/lib/payments";
 import { materializeRecurring, cancelFutureOccurrences, ocorrenciasFuturas } from "@/lib/recurring";
 import { getSettings } from "@/lib/schedule";
-import { shopToday, minutesToHHMM } from "@/lib/time";
+import { shopToday, minutesToHHMM, utcToShopParts } from "@/lib/time";
 
 export type ActionResult =
   | { ok: true; warning?: string }
@@ -174,7 +175,37 @@ export async function saveRecurringSlot(input: {
       .update(recurringSlots)
       .set({ serviceIds: input.serviceIds })
       .where(eq(recurringSlots.id, mesmoHorario.id));
+    // As semanas já reservadas mudam junto: só o fixo mudava, e as próximas
+    // oito semanas seguiam com o serviço antigo (e o tempo dele) na agenda.
+    const mesmos =
+      [...mesmoHorario.serviceIds].sort().join(",") === [...input.serviceIds].sort().join(",");
+    const naoCouberam: string[] = [];
+    if (!mesmos) {
+      for (const id of await ocorrenciasFuturas([mesmoHorario.id])) {
+        try {
+          await updateAppointmentServices({ appointmentId: id, serviceIds: input.serviceIds });
+        } catch (e) {
+          if (!(e instanceof BookingError)) throw e;
+          const a = await db.query.appointments.findFirst({
+            columns: { startsAt: true },
+            where: eq(appointments.id, id),
+          });
+          if (a) {
+            const k = utcToShopParts(a.startsAt).dateKey;
+            naoCouberam.push(`${k.slice(8, 10)}/${k.slice(5, 7)}`);
+          }
+        }
+      }
+    }
     revalidatePath("/cliente");
+    revalidatePath("/barbeiro");
+    revalidatePath("/admin");
+    if (naoCouberam.length > 0) {
+      return {
+        ok: true,
+        warning: `Fixo salvo, mas ${naoCouberam.length === 1 ? "no dia" : "nos dias"} ${naoCouberam.join(", ")} os novos serviços não cabem no horário — ${naoCouberam.length === 1 ? "ele continua" : "eles continuam"} com os serviços de antes. Fale com a barbearia se quiser ajustar.`,
+      };
+    }
     return { ok: true };
   }
 
@@ -264,6 +295,26 @@ export async function saveRecurringSlot(input: {
     const dias = fechados.map((c) => dataCurta(c.dateKey));
     avisos.push(
       `${dias.length === 1 ? "o dia" : "os dias"} ${dias.join(", ")} ${dias.length === 1 ? "cai" : "caem"} quando a barbearia não abre — nos outros meses ele entra normalmente`
+    );
+  }
+  // Plano com cota (Silver: 2 cortes no mês) num fixo semanal: as semanas
+  // além da cota saem cobradas. O membro descobria só no balcão.
+  const cobradas = await db
+    .select({ startsAt: appointments.startsAt })
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.recurringSlotId, novoId),
+        gt(appointments.startsAt, new Date()),
+        gt(appointments.totalCents, 0),
+        inArray(appointments.status, ["PENDENTE", "CONFIRMADO"])
+      )
+    )
+    .orderBy(asc(appointments.startsAt));
+  if (cobradas.length > 0) {
+    const dias = cobradas.map((c) => dataCurta(utcToShopParts(c.startsAt).dateKey));
+    avisos.push(
+      `${dias.length === 1 ? "o dia" : "os dias"} ${dias.join(", ")} ${dias.length === 1 ? "passa" : "passam"} da cota do seu plano no mês e ${dias.length === 1 ? "será cobrado" : "serão cobrados"} como avulso`
     );
   }
   if (avisos.length > 0) {

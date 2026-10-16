@@ -165,6 +165,9 @@ export async function createBooking(input: CreateBookingInput) {
       "A agenda está temporariamente fechada para novos agendamentos."
     );
   }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.dateKey) || addDaysKey(input.dateKey, 0) !== input.dateKey) {
+    throw new BookingError("Escolha um dia.");
+  }
   if (input.publicRequest) {
     // O limite de dias à frente só valia para os chips da tela: pela ação
     // dava para reservar 2030.
@@ -250,11 +253,14 @@ export async function createBooking(input: CreateBookingInput) {
   ];
 
   // Assinatura ativa cobre os serviços do plano — nesse caso não há cobrança.
+  // Vencida conta como vencida mesmo antes da rotina diária virar o status:
+  // quem marcava no dia do vencimento, antes dela rodar, saía coberto.
   const subscription = ownerId
     ? await db.query.subscriptions.findFirst({
         where: and(
           eq(subscriptions.userId, ownerId),
-          eq(subscriptions.status, "ATIVA")
+          eq(subscriptions.status, "ATIVA"),
+          gt(subscriptions.renewsAt, new Date())
         ),
       })
     : undefined;
@@ -293,6 +299,9 @@ export async function createBooking(input: CreateBookingInput) {
           eq(appointments.clientPhone, phone),
           inArray(appointments.status, ["PENDENTE", "CONFIRMADO"]),
           gt(appointments.startsAt, new Date()),
+          // As semanas do horário fixo não são abuso: contadas, o membro
+          // com fixo semanal mal conseguia marcar um extra ou remarcar.
+          isNull(appointments.recurringSlotId),
           ignorados.length ? notInArray(appointments.id, ignorados) : undefined
         )
       );
@@ -565,7 +574,7 @@ export async function rescheduleBooking(input: {
   // ninguém para avisar. Agora o pior caso é o oposto e reversível: dois
   // horários marcados, que o painel mostra e a barbearia resolve. O
   // próprio agendamento não conflita consigo mesmo (ignoreAppointmentId).
-  const novo = await createBooking({
+  let novo = await createBooking({
     serviceIds,
     dateKey: input.dateKey,
     time: input.time,
@@ -611,6 +620,22 @@ export async function rescheduleBooking(input: {
   }
 
   await cancelPendingNotifications(appt.id);
+
+  // O link e o QR que o cliente guardou passam a abrir o horário novo:
+  // apontando para o antigo, diziam "Agendamento cancelado" a quem só
+  // tinha mudado de horário — e o cliente não vinha ou marcava de novo.
+  // O token do horário novo ainda não foi mostrado a ninguém.
+  if (appt.checkinToken) {
+    try {
+      await db.update(appointments).set({ checkinToken: null }).where(eq(appointments.id, appt.id));
+      await db.update(appointments).set({ checkinToken: appt.checkinToken }).where(eq(appointments.id, novo.id));
+      const relido = await db.query.appointments.findFirst({ where: eq(appointments.id, novo.id) });
+      if (relido) novo = relido;
+    } catch (e) {
+      console.error("Remarcação: não deu para manter o link do cliente:", e);
+    }
+  }
+
   try {
     // Com o nome do barbeiro: a remarcação pode ter trocado de
     // profissional, e a mensagem sem nome deixava o cliente achando que
@@ -753,7 +778,8 @@ export async function updateAppointmentServices(input: {
     ? await db.query.subscriptions.findFirst({
         where: and(
           eq(subscriptions.userId, dono),
-          eq(subscriptions.status, "ATIVA")
+          eq(subscriptions.status, "ATIVA"),
+          gt(subscriptions.renewsAt, new Date())
         ),
       })
     : undefined;
@@ -762,12 +788,31 @@ export async function updateAppointmentServices(input: {
     const cobre = await db.query.planServices.findMany({
       where: eq(planServices.planId, assinatura.planId),
     });
-    cobertos = new Set(cobre.map((c) => c.serviceId));
+    // A mesma cota do mês de quem agenda: sem ela, mudar os serviços no
+    // balcão zerava o terceiro corte de um Silver (cota de 2).
+    const comCota = cobre.filter((c) => c.monthlyQuota != null);
+    const usados = comCota.length
+      ? await usoDoPlanoNoMes(dono!, partes.dateKey, comCota.map((c) => c.serviceId), [appt.id])
+      : new Map<number, number>();
+    cobertos = new Set(
+      cobre
+        .filter((c) => c.monthlyQuota == null || (usados.get(c.serviceId) ?? 0) < c.monthlyQuota)
+        .map((c) => c.serviceId)
+    );
   }
+  // O que já estava no horário mantém o preço combinado; só o que entra
+  // agora vai pela tabela de hoje.
+  const atuais = await db
+    .select({ serviceId: appointmentServices.serviceId, priceCents: appointmentServices.priceCents })
+    .from(appointmentServices)
+    .where(eq(appointmentServices.appointmentId, appt.id));
+  const combinado = new Map(
+    atuais.filter((i) => i.serviceId !== null && i.priceCents > 0).map((i) => [i.serviceId as number, i.priceCents])
+  );
+  const precoDe = (s: { id: number; priceCents: number }) =>
+    cobertos.has(s.id) ? 0 : combinado.get(s.id) ?? s.priceCents;
   const tudoCoberto = !!assinatura && chosen.every((s) => cobertos.has(s.id));
-  const totalCents = tudoCoberto
-    ? 0
-    : chosen.reduce((acc, s) => acc + (cobertos.has(s.id) ? 0 : s.priceCents), 0);
+  const totalCents = tudoCoberto ? 0 : chosen.reduce((acc, s) => acc + precoDe(s), 0);
 
   await db
     .update(appointments)
@@ -790,7 +835,7 @@ export async function updateAppointmentServices(input: {
       appointmentId: appt.id,
       serviceId: s.id,
       name: s.name,
-      priceCents: cobertos.has(s.id) ? 0 : s.priceCents,
+      priceCents: precoDe(s),
       durationMin: s.durationMin,
     }))
   );

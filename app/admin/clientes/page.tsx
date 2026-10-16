@@ -6,6 +6,7 @@ import {
 } from "@/lib/queries";
 import { utcToShopParts, labelDayMonth } from "@/lib/time";
 import { ClientesManager } from "./ClientesManager";
+import { requireRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,9 @@ export default async function AdminClientes({
 }: {
   searchParams: { q?: string; situacao?: string; ordem?: string; pagina?: string };
 }) {
+  // Confere a sessão aqui também: o Next não roda o layout de novo na
+  // navegação pelo app nem na volta de uma Server Action.
+  await requireRole(["ADMIN"]);
   const q = (searchParams.q ?? "").trim();
   // Valor que não existe vira o padrão, em vez de derrubar a consulta.
   const situacao = SITUACOES.includes(searchParams.situacao as SituacaoCliente)

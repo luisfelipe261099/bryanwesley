@@ -281,13 +281,15 @@ function CancelFixo() {
     <button
       type="button"
       disabled={pending}
-      onClick={() =>
+      onClick={() => {
+        // Um toque solta todas as semanas reservadas para outros clientes.
+        if (!confirm("Abrir mão do horário fixo? As próximas semanas reservadas serão liberadas para outros clientes.")) return;
         start(async () => {
           const r = await cancelRecurringSlot();
           if (r.ok) toast(r.warning ?? "Você abriu mão do horário fixo.", "ok");
           else toast(r.error, "erro");
-        })
-      }
+        });
+      }}
       className="label inline-flex items-center gap-2 rounded-full border border-white/12 px-5 py-3 text-steel-300 transition-colors hover:border-red-400/50 hover:text-red-200 disabled:opacity-50"
     >
       {pending ? (

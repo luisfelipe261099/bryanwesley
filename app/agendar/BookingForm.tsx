@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { serviceIcons } from "@/components/serviceIcons";
 import { formatBRL, formatDuration } from "@/lib/money";
+import { normalizePhone } from "@/lib/phone";
 import type { Service, Plan } from "@/db/schema";
 import type { Slot } from "@/lib/schedule";
 import type { DayOption } from "@/lib/schedule";
@@ -96,8 +97,13 @@ export function BookingForm({
   const router = useRouter();
 
   const chosen = services.filter((s) => selected.includes(s.id));
+  // O plano é de quem o tem: marcando com outro WhatsApp (para o amigo, o
+  // filho), o servidor cobra avulso — e a tela dizia "Incluso no plano".
+  const outroFone =
+    isSub && !!viewer?.phone && normalizePhone(phone).length >= 10 && normalizePhone(phone) !== normalizePhone(viewer.phone);
   // O plano cobre o serviço — e ainda tem cota no mês do dia escolhido?
   const cobre = (id: number) => {
+    if (outroFone) return false;
     const c = plan?.covers.find((x) => x.id === id);
     if (!c) return false;
     if (c.quota === null) return true;
@@ -109,9 +115,9 @@ export function BookingForm({
   const totalCents = chosen.reduce((acc, s) => acc + (cobre(s.id) ? 0 : s.priceCents), 0);
   const tudoIncluso = isSub && chosen.length > 0 && chosen.every((s) => cobre(s.id));
   // Serviços do plano cuja cota do mês já acabou: saem cobrados.
-  const foraDaCota = chosen.filter(
-    (s) => plan?.covers.some((c) => c.id === s.id) && !cobre(s.id)
-  );
+  const foraDaCota = outroFone
+    ? []
+    : chosen.filter((s) => plan?.covers.some((c) => c.id === s.id) && !cobre(s.id));
   const totalMin = chosen.reduce((acc, s) => acc + s.durationMin, 0);
   const selectedDay = days.find((d) => d.dateKey === dateKey);
   const barber = team.find((b) => b.id === barberId);
@@ -531,6 +537,11 @@ export function BookingForm({
                 {tudoIncluso ? "Incluso no plano" : formatBRL(totalCents)}
               </span>
             </div>
+            {outroFone && chosen.length > 0 && (
+              <p className="mt-2 text-xs text-amber-200">
+                O plano vale só para o seu WhatsApp: com outro número, o horário sai como avulso.
+              </p>
+            )}
             {foraDaCota.length > 0 && (
               <p className="mt-2 text-xs text-amber-200">
                 {foraDaCota.map((s) => s.name).join(", ")}: a cota do seu plano neste mês já foi usada — sai como avulso.
