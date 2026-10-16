@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { eq } from "drizzle-orm";
-import { ArrowLeft, Bell, KeyRound, UserRound } from "lucide-react";
+import { ArrowLeft, Bell, KeyRound, Sparkles, UserRound } from "lucide-react";
 import { Background } from "@/components/Background";
 import { AppHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
@@ -21,6 +21,15 @@ const HOME = { ADMIN: "/admin", BARBER: "/barbeiro", CLIENT: "/cliente" };
 
 export default async function Conta() {
   const session = await requireRole(["ADMIN", "BARBER", "CLIENT"]);
+  // O dono que também corta tem os dois tutoriais: o do painel e o da
+  // agenda de barbeiro.
+  const tutoriais =
+    session.role === "ADMIN"
+      ? [
+          { href: "/admin?tutorial=1", label: "Tutorial do painel" },
+          ...(session.barberId ? [{ href: "/barbeiro?tutorial=1", label: "Tutorial da agenda de barbeiro" }] : []),
+        ]
+      : [{ href: `${HOME[session.role]}?tutorial=1`, label: "Ver o tutorial de novo" }];
   const [user, chavePush, aparelhos] = await Promise.all([
     db.query.users.findFirst({ where: eq(users.id, session.id) }).then((u) => u!),
     chavePublicaPush(),
@@ -89,6 +98,27 @@ export default async function Conta() {
           </div>
           <div className="mt-5 max-w-sm">
             <ChangePassword />
+          </div>
+        </div>
+
+        <div className="glass mt-5 rounded-3xl p-7">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-electric" />
+            <h2 className="font-display text-lg text-white">Tutorial</h2>
+          </div>
+          <p className="mt-2 text-sm text-steel-400">
+            O passo a passo do primeiro acesso, com o essencial de cada tela.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            {tutoriais.map((t) => (
+              <Link
+                key={t.href}
+                href={t.href}
+                className="label inline-flex items-center gap-2 rounded-full border border-electric/30 px-4 py-3 text-electric transition-colors hover:bg-electric/10"
+              >
+                {t.label}
+              </Link>
+            ))}
           </div>
         </div>
       </main>

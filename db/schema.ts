@@ -84,6 +84,9 @@ export const users = mysqlTable(
     // Sobe a cada troca/redefinição de senha: sessões antigas (cookie de
     // 30 dias) carregam a versão com que nasceram e deixam de valer.
     tokenVersion: int("token_version").notNull().default(0),
+    // Tutoriais de primeiro acesso já percorridos ("admin", "barbeiro",
+    // "cliente"). Nulo para quem nunca viu nenhum.
+    tutoriais: jsonCol<string[]>("tutoriais"),
     createdAt: tsNow("created_at"),
   },
   (t) => ({

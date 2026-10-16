@@ -34,6 +34,8 @@ import { PlanRequests } from "./PlanRequests";
 import { AvisosPush } from "@/components/AvisosPush";
 import { AtualizaSozinho } from "@/components/AtualizaSozinho";
 import { requireRole } from "@/lib/auth";
+import { tutorialPendente } from "@/lib/tutorial";
+import { TutorialPrimeiroAcesso } from "@/components/TutorialPrimeiroAcesso";
 import { chavePublicaPush } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
@@ -44,14 +46,18 @@ export const dynamic = "force-dynamic";
 // procurar cliente é tarefa da Agenda (/admin/agenda). Ter os dois
 // lugares com controles parecidos, e resultados diferentes, era metade da
 // confusão de quem abria o sistema.
-export default async function AdminDashboard() {
+export default async function AdminDashboard({
+  searchParams,
+}: {
+  searchParams?: { tutorial?: string };
+}) {
   // O layout já conferiu o papel; aqui só se pega o id (leitura em cache).
   const session = await requireRole(["ADMIN"]);
   const today = shopToday();
   const dateKey = today;
   const barberFilter = null;
 
-  const [kpi, agendaDia, semana, equipe, settings, pedidos, chavePush] = await Promise.all([
+  const [kpi, agendaDia, semana, equipe, settings, pedidos, chavePush, tutorial] = await Promise.all([
     adminOverview(),
     appointmentsOfDay(dateKey, barberFilter),
     weeklyRevenue(),
@@ -59,6 +65,7 @@ export default async function AdminDashboard() {
     getSettings(),
     openPlanRequests(),
     chavePublicaPush(),
+    tutorialPendente(session.id, "admin"),
   ]);
   const agenda = agendaDia;
 
@@ -86,6 +93,13 @@ export default async function AdminDashboard() {
     <>
       <AvisosPush chavePublica={chavePush} usuarioId={session.id} papel="ADMIN" variante="banner" />
       <AtualizaSozinho />
+      <TutorialPrimeiroAcesso
+        tour="admin"
+        nome={session.name.split(" ")[0]}
+        usuarioId={session.id}
+        mostrar={tutorial}
+        forcar={searchParams?.tutorial === "1"}
+      />
       <Reveal>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -105,6 +119,7 @@ export default async function AdminDashboard() {
           </div>
           <Link
             href="/agendar"
+            data-tour="novo-agendamento"
             className="btn-royal label inline-flex items-center gap-2 rounded-full px-5 py-3.5 text-white"
           >
             <Plus className="h-4 w-4" />
@@ -116,7 +131,7 @@ export default async function AdminDashboard() {
       {/* KPIs */}
       {/* Dois por linha já no celular: um embaixo do outro, os quatro
           números custavam meia tela de rolagem cada. */}
-      <div className="mt-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <div data-tour="kpis" className="mt-6 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Reveal delay={0.04} className="h-full">
           <Kpi
             icon={DollarSign}
@@ -161,7 +176,7 @@ export default async function AdminDashboard() {
       <div className="mt-5 grid gap-5 lg:grid-cols-[1.4fr_1fr]">
         {/* Agenda de hoje */}
         <Reveal className="min-w-0">
-          <div className="glass rounded-3xl p-6">
+          <div data-tour="agenda-hoje" className="glass rounded-3xl p-6">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="font-display text-lg text-white">Agenda de hoje</h2>

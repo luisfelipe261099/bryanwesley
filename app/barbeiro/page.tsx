@@ -21,6 +21,8 @@ import { BottomNav } from "@/components/BottomNav";
 import { Heartbeat } from "@/components/Heartbeat";
 import { Reveal } from "@/components/Reveal";
 import { requireRole } from "@/lib/auth";
+import { tutorialPendente } from "@/lib/tutorial";
+import { TutorialPrimeiroAcesso } from "@/components/TutorialPrimeiroAcesso";
 import {
   appointmentsOfDay,
   bloqueiosDoPeriodo,
@@ -47,7 +49,7 @@ export const dynamic = "force-dynamic";
 export default async function BarbeiroPanel({
   searchParams,
 }: {
-  searchParams: { dia?: string };
+  searchParams: { dia?: string; tutorial?: string };
 }) {
   const session = await requireRole(["BARBER", "ADMIN"]);
 
@@ -96,7 +98,7 @@ export default async function BarbeiroPanel({
       ? searchParams.dia
       : today;
 
-  const [agenda, bloqueios, mes, hoje, chavePush] = await Promise.all([
+  const [agenda, bloqueios, mes, hoje, chavePush, tutorial] = await Promise.all([
     appointmentsOfDay(dateKey, barber.id),
     // Bloqueios do dia (almoço, folga, manutenção): o barbeiro via o
     // buraco na agenda sem saber que era bloqueio, e ia perguntar no
@@ -105,6 +107,7 @@ export default async function BarbeiroPanel({
     barberMonthSummary(barber.id),
     barberTodaySummary(barber.id),
     chavePublicaPush(),
+    tutorialPendente(session.id, "barbeiro"),
   ]);
 
   // Meta individual, definida pelo admin em Equipe. Meta zerada é "sem
@@ -145,6 +148,13 @@ export default async function BarbeiroPanel({
 
       <main className="mx-auto max-w-3xl px-5 pb-28 pt-24 lg:px-8">
         <AvisosPush chavePublica={chavePush} usuarioId={session.id} papel={session.role === "ADMIN" ? "ADMIN" : "BARBER"} variante="banner" />
+        <TutorialPrimeiroAcesso
+          tour="barbeiro"
+          nome={barber.shortName}
+          usuarioId={session.id}
+          mostrar={tutorial}
+          forcar={searchParams.tutorial === "1"}
+        />
         {/* Identidade */}
         <Reveal>
           <div className="glass flex flex-wrap items-center justify-between gap-4 rounded-2xl p-5">
@@ -184,7 +194,7 @@ export default async function BarbeiroPanel({
         {/* Comissão + atendimentos */}
         <div className="mt-5 grid gap-5 sm:grid-cols-2">
           <Reveal delay={0.04}>
-            <div className="glass h-full rounded-2xl p-5">
+            <div data-tour="comissao" className="glass h-full rounded-2xl p-5">
               <div className="label flex items-center gap-2 text-electric">
                 <Wallet className="h-3.5 w-3.5" />
                 Comissão do mês
@@ -269,14 +279,14 @@ export default async function BarbeiroPanel({
 
         {/* Check-in */}
         <Reveal delay={0.1}>
-          <div className="mt-5">
+          <div data-tour="checkin" className="mt-5">
             <CheckinBox />
           </div>
         </Reveal>
 
         {/* Agenda */}
         <Reveal delay={0.12}>
-          <div className="glass mt-5 rounded-2xl p-5">
+          <div data-tour="agenda" className="glass mt-5 rounded-2xl p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-display text-lg text-white">Agenda diária</h2>
               <span className="label capitalize text-steel-400">
@@ -468,7 +478,7 @@ export default async function BarbeiroPanel({
 
         {/* Ações rápidas */}
         <Reveal delay={0.16}>
-          <div className="mt-5">
+          <div data-tour="encaixe" className="mt-5">
             <h3 className="label text-steel-400">Ações rápidas</h3>
             {/* Cada papel vê só o que consegue abrir: o barbeiro tocava em
                 "Bloquear" e caía na tela de login com "sem permissão". */}

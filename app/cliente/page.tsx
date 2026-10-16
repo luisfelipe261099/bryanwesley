@@ -17,6 +17,8 @@ import { AppHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
 import { Reveal } from "@/components/Reveal";
 import { requireRole } from "@/lib/auth";
+import { tutorialPendente } from "@/lib/tutorial";
+import { TutorialPrimeiroAcesso } from "@/components/TutorialPrimeiroAcesso";
 import { db } from "@/db/client";
 import { recurringSlots, planServices, subscriptions, plans } from "@/db/schema";
 import { and, desc, eq } from "drizzle-orm";
@@ -71,11 +73,11 @@ function dataCurta(d: Date) {
 export default async function ClienteDashboard({
   searchParams,
 }: {
-  searchParams: { assinatura?: string; pagamento?: string };
+  searchParams: { assinatura?: string; pagamento?: string; tutorial?: string };
 }) {
   const session = await requireRole(["CLIENT", "ADMIN"]);
 
-  const [subscription, vencida, stats, upcoming, history, totalVisits, fixo, team, services, settings, chavePush] =
+  const [subscription, vencida, stats, upcoming, history, totalVisits, fixo, team, services, settings, chavePush, tutorial] =
     await Promise.all([
       activeSubscription(session.id),
       // Vencida também aparece: sem isso o membro inadimplente via a tela
@@ -106,6 +108,8 @@ export default async function ClienteDashboard({
       listServices(),
       getSettings(),
       chavePublicaPush(),
+      // O admin também abre esta tela; o tutorial dele é o do painel.
+      session.role === "CLIENT" ? tutorialPendente(session.id, "cliente") : Promise.resolve(false),
     ]);
   const days = listOpenDays(settings, 10);
   const teamChips = team.map((b) => ({ id: b.id, shortName: b.shortName }));
@@ -181,6 +185,13 @@ export default async function ClienteDashboard({
           papel={session.role === "ADMIN" ? "ADMIN" : "CLIENT"}
           variante="banner"
         />
+        <TutorialPrimeiroAcesso
+          tour="cliente"
+          nome={session.name.split(" ")[0]}
+          usuarioId={session.id}
+          mostrar={tutorial}
+          forcar={searchParams.tutorial === "1"}
+        />
 
         {searchParams.assinatura === "pedida" && (
           <Reveal delay={0.02}>
@@ -210,7 +221,7 @@ export default async function ClienteDashboard({
         {/* Próximo horário + check-in */}
         {proximo && (
           <Reveal delay={0.04}>
-            <div className="glass mt-6 rounded-2xl border-electric/25 p-5">
+            <div data-tour="proximo" className="glass mt-6 rounded-2xl border-electric/25 p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <span className="label inline-flex items-center gap-1.5 text-electric">
                   <span className="h-1.5 w-1.5 rounded-full bg-neon" />
@@ -262,7 +273,7 @@ export default async function ClienteDashboard({
         <div className="mt-5 grid gap-5 lg:grid-cols-3">
           {/* Assinatura */}
           <Reveal className="lg:col-span-2">
-            <div className="glass relative h-full overflow-hidden rounded-3xl p-7">
+            <div data-tour="clube" className="glass relative h-full overflow-hidden rounded-3xl p-7">
               <div
                 aria-hidden="true"
                 className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-electric/15 blur-3xl"
@@ -423,7 +434,7 @@ export default async function ClienteDashboard({
 
           {/* Próximos horários */}
           <Reveal delay={0.08}>
-            <div className="glass flex h-full flex-col rounded-3xl p-7">
+            <div data-tour="horarios" className="glass flex h-full flex-col rounded-3xl p-7">
               <span className="label flex items-center gap-2 text-electric">
                 Próximos horários
                 {upcoming.length > 0 && (
@@ -480,6 +491,7 @@ export default async function ClienteDashboard({
               )}
               <Link
                 href="/agendar"
+                data-tour="agendar"
                 className="btn-royal label mt-5 inline-flex items-center justify-center gap-2 rounded-xl py-4 text-white"
               >
                 <CalendarPlus className="h-4 w-4" />
