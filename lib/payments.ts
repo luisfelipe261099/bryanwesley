@@ -105,7 +105,9 @@ export async function settlePayment(input: {
   const payment = await db.query.payments.findFirst({
     where: eq(payments.orderNsu, input.orderNsu),
   });
-  if (!payment) return { ok: false as const, error: "Cobrança desconhecida." };
+  // Mesmo texto para cobrança desconhecida e para callback incompleto: o
+  // endereço é público e a diferença dizia quais order_nsu existem.
+  if (!payment) return { ok: false as const, error: "Pagamento não confirmado." };
   if (payment.status === "PAGO") return { ok: true as const, already: true };
 
   // Nunca confia no callback: o webhook é um endereço público e sem
@@ -116,7 +118,7 @@ export async function settlePayment(input: {
   if (!input.transactionNsu || !input.slug) {
     return {
       ok: false as const,
-      error: "Callback sem transaction_nsu/slug: pagamento não confirmado.",
+      error: "Pagamento não confirmado.",
     };
   }
   const check = await checkPayment({
@@ -126,6 +128,13 @@ export async function settlePayment(input: {
   });
   if (!check.paid) {
     return { ok: false as const, error: check.error ?? "Pagamento não confirmado." };
+  }
+  // O link de pagamento se cria só com o handle público da loja: quem
+  // pagasse R$ 1 num link próprio com o order_nsu de uma cobrança anual
+  // ganhava 12 meses. Vale o valor que a InfinitePay diz que entrou.
+  if (check.paidAmount !== undefined && check.paidAmount < payment.amountCents) {
+    console.error("Pagamento abaixo do cobrado:", input.orderNsu, check.paidAmount, payment.amountCents);
+    return { ok: false as const, error: "Pagamento não confirmado." };
   }
 
   // Condicional ao PENDENTE: o provedor pode entregar o mesmo webhook duas

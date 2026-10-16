@@ -179,7 +179,10 @@ export async function login(
 }
 
 const signupSchema = z.object({
-  name: z.string().trim().min(3, "Informe seu nome completo."),
+  name: z
+    .string()
+    .transform((v) => v.replace(/[\u0000-\u001f\u007f]/g, " ").trim())
+    .pipe(z.string().min(3, "Informe seu nome completo.").max(120, "Nome muito longo (máximo de 120 letras).")),
   phone: z.string().refine(isValidPhone, "Informe um WhatsApp válido com DDD."),
   password: z.string().min(6, "A senha precisa ter ao menos 6 caracteres."),
   // Código de um agendamento feito com esse telefone — prova de posse
@@ -202,6 +205,13 @@ export async function signup(
     code: formData.get("code") || undefined,
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  // Freio por rede: sem ele um script cadastrava milhares de números (cada
+  // um custa um bcrypt) e ficava com a conta de quem ainda não tem uma.
+  const freioRede = await hitRateLimit(`cadastro:ip:${ipDaRequisicao()}`, 15, 60 * 60_000);
+  if (!freioRede.ok) {
+    return { error: "Muitos cadastros seguidos desta rede. Tente de novo mais tarde ou peça ajuda na barbearia." };
+  }
 
   const { name, password, code } = parsed.data;
   const phone = normalizePhone(parsed.data.phone);

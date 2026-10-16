@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { and, eq, gt, gte, lt } from "drizzle-orm";
 import { db } from "@/db/client";
-import { appointments, appointmentServices, services } from "@/db/schema";
+import { appointments, appointmentServices, services, users } from "@/db/schema";
 import { activeSubscription, dayBounds } from "@/lib/queries";
 import { requireRole } from "@/lib/auth";
 import { isNextControlFlow } from "@/lib/errors";
@@ -164,6 +164,18 @@ async function fazerCheckIn(input: {
     planoInfo = valido
       ? ` Plano ${sub!.plan.name.replace("Plano ", "")} ativo.`
       : " ATENÇÃO: sem plano ativo — cobrar avulso.";
+    // O plano vem pelo WhatsApp digitado: marcado com outro nome, pode ser
+    // outra pessoa usando o número de um membro. O barbeiro confere.
+    if (valido && appt.clientUserId) {
+      const dono = await db.query.users.findFirst({
+        columns: { name: true },
+        where: eq(users.id, appt.clientUserId),
+      });
+      const primeiro = (n: string) => n.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+      if (dono && primeiro(dono.name) !== primeiro(appt.clientName)) {
+        planoInfo += ` ATENÇÃO: marcado como ${appt.clientName} no plano de ${dono.name} — confira se é a mesma pessoa.`;
+      }
+    }
   }
 
   // Só inicia automaticamente se o barbeiro estiver livre; senão

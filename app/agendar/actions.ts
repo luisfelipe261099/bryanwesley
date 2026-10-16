@@ -5,12 +5,12 @@ import { z } from "@/lib/zod-pt";
 import { getAvailability, getSettings } from "@/lib/schedule";
 import { createBooking, BookingError } from "@/lib/appointments";
 import { getSession } from "@/lib/auth";
-import { isValidPhone } from "@/lib/phone";
-import { addDays } from "@/lib/time";
+import { isValidPhone, normalizePhone } from "@/lib/phone";
+import { addDays, parseDateKey, shopTimeToUtc } from "@/lib/time";
 import { hitRateLimit } from "@/lib/rate-limit";
 import { headers } from "next/headers";
 import type { Slot } from "@/lib/schedule";
-import { eq } from "drizzle-orm";
+import { and, eq, gt, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appointments } from "@/db/schema";
 
@@ -75,9 +75,11 @@ const bookingSchema = z.object({
   barberId: z.number().int().positive().nullable(),
   clientName: z
     .string()
-    .trim()
+    // Caractere de controle no nome não tem uso e quebrava a planilha.
+    .transform((v) => v.replace(/[\u0000-\u001f\u007f]/g, " "))
+    .pipe(z.string().trim()
     .min(3, "Informe seu nome completo.")
-    .max(120, "Nome muito longo (máximo de 120 letras)."),
+    .max(120, "Nome muito longo (máximo de 120 letras).")),
   clientPhone: z.string().refine(isValidPhone, "Informe um WhatsApp válido com DDD."),
   notes: z.string().trim().max(500).optional(),
 });
@@ -121,6 +123,33 @@ export async function submitBooking(
         ok: false,
         error: "Muitos agendamentos seguidos. Tente de novo mais tarde ou fale com a barbearia pelo WhatsApp.",
       };
+    }
+  }
+
+  // Mesmo pedido de novo (a resposta se perdeu na rede e o cliente tocou
+  // outra vez): devolve o horário que já foi criado, em vez de marcar um
+  // segundo — no "Mais rápido" ele ia para outro barbeiro, no mesmo horário.
+  // Nome diferente no mesmo WhatsApp (pai marcando os dois filhos) segue.
+  if (!daCasa) {
+    const { year, month, day } = parseDateKey(parsed.data.dateKey);
+    const [hh, mm] = parsed.data.time.split(":").map(Number);
+    const inicio = shopTimeToUtc(year, month, day, hh * 60 + mm);
+    const candidatos = await db
+      .select()
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.clientPhone, normalizePhone(parsed.data.clientPhone)),
+          eq(appointments.startsAt, inicio),
+          inArray(appointments.status, ["PENDENTE", "CONFIRMADO"]),
+          gt(appointments.createdAt, new Date(Date.now() - 10 * 60_000))
+        )
+      );
+    const mesmo = candidatos.find(
+      (a) => a.clientName.trim().toLowerCase() === parsed.data.clientName.trim().toLowerCase()
+    );
+    if (mesmo?.checkinToken) {
+      return { ok: true, code: mesmo.code, id: mesmo.id, token: mesmo.checkinToken };
     }
   }
 

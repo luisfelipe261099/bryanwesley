@@ -93,7 +93,7 @@ export async function checkPayment(input: {
   orderNsu: string;
   transactionNsu: string;
   slug: string;
-}): Promise<{ paid: boolean; error?: string }> {
+}): Promise<{ paid: boolean; paidAmount?: number; error?: string }> {
   const handle = process.env.INFINITEPAY_HANDLE;
   if (!handle) return { paid: false, error: "InfinitePay não configurada." };
 
@@ -109,10 +109,11 @@ export async function checkPayment(input: {
       }),
     });
     if (!res.ok) return { paid: false, error: `HTTP ${res.status}` };
-    const json = (await res.json()) as { success?: boolean; paid?: boolean };
+    const json = (await res.json()) as { success?: boolean; paid?: boolean; amount?: number; paid_amount?: number };
+    const valor = typeof json.paid_amount === "number" ? json.paid_amount : typeof json.amount === "number" ? json.amount : undefined;
     // "success" diz só que a consulta funcionou; quem diz se pagou é
     // "paid". Lido nessa ordem, um boleto em aberto contava como pago.
-    return { paid: json.paid !== undefined ? json.paid === true : json.success === true };
+    return { paid: json.paid !== undefined ? json.paid === true : json.success === true, paidAmount: valor };
   } catch (e) {
     return {
       paid: false,

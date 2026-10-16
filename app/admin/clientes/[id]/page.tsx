@@ -189,7 +189,7 @@ export default async function FichaDoCliente({
                   <span className="text-sm text-white">{formatBRL(p.amountCents)}</span>
                   {(p.receiptUrl || p.checkoutUrl) && (
                     <a
-                      href={p.receiptUrl ?? p.checkoutUrl ?? "#"}
+                      href={[p.receiptUrl, p.checkoutUrl].find((u) => u?.startsWith("https://")) ?? "#"}
                       target="_blank"
                       rel="noreferrer"
                       className="label rounded-full border border-white/12 px-3 py-2 text-steel-300 hover:border-electric/40 hover:text-white"

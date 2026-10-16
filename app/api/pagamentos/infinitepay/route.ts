@@ -27,7 +27,9 @@ export async function POST(req: Request) {
     transactionNsu: body.transaction_nsu ? String(body.transaction_nsu) : undefined,
     // O corpo documentado traz "invoice_slug"; "slug" fica para o legado.
     slug: body.invoice_slug ? String(body.invoice_slug) : body.slug ? String(body.slug) : undefined,
-    receiptUrl: body.receipt_url ? String(body.receipt_url) : undefined,
+    // O recibo vira link no painel do dono: só endereço https da própria
+    // InfinitePay (o corpo do webhook é público e sem assinatura).
+    receiptUrl: reciboConfiavel(body.receipt_url),
   });
 
   if (!res.ok) {
@@ -35,4 +37,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: res.error }, { status: 400 });
   }
   return NextResponse.json({ ok: true });
+}
+
+function reciboConfiavel(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  try {
+    const u = new URL(v);
+    return u.protocol === "https:" && (u.hostname === "infinitepay.io" || u.hostname.endsWith(".infinitepay.io"))
+      ? u.toString()
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }

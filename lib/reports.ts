@@ -143,7 +143,9 @@ export function toCsv(rows: Record<string, string | number>[], cabecalho?: strin
     // = + - @ (ou tab/CR), o Excel lê como fórmula e executa ao abrir o
     // arquivo. A aspa simples na frente neutraliza sem sujar a leitura.
     if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-    return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    // CR solto também quebra a linha no Excel: sem aspas, a linha seguinte
+    // começava com uma fórmula viva, passando por cima da aspa simples.
+    return /[;"\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const body = rows.map((r) => headers.map((h) => esc(r[h])).join(";"));
   // BOM para o Excel reconhecer o acento.
