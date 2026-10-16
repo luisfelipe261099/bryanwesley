@@ -1,9 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, gte, lt } from "drizzle-orm";
+import { and, eq, gt, gte, lt } from "drizzle-orm";
 import { db } from "@/db/client";
-import { appointments, appointmentServices } from "@/db/schema";
+import { appointments, appointmentServices, services } from "@/db/schema";
 import { activeSubscription, dayBounds } from "@/lib/queries";
 import { requireRole } from "@/lib/auth";
 import { isNextControlFlow } from "@/lib/errors";
@@ -136,19 +136,33 @@ async function fazerCheckIn(input: {
   // de graça do mesmo jeito.
   let planoInfo = "";
   let semPlano = false;
-  const itemDoPlano =
-    appt.kind === "ASSINANTE" ||
-    !!(await db.query.appointmentServices.findFirst({
-      columns: { id: true },
-      where: and(eq(appointmentServices.appointmentId, appt.id), eq(appointmentServices.priceCents, 0)),
-    }));
-  if (itemDoPlano) {
+  // Item de graça só "é do plano" se no catálogo ele tem preço: uma
+  // cortesia de R$ 0 não pode disparar o alerta.
+  const [doPlano] =
+    appt.kind === "ASSINANTE"
+      ? [{ id: 0 }]
+      : await db
+          .select({ id: appointmentServices.id })
+          .from(appointmentServices)
+          .innerJoin(services, eq(services.id, appointmentServices.serviceId))
+          .where(
+            and(
+              eq(appointmentServices.appointmentId, appt.id),
+              eq(appointmentServices.priceCents, 0),
+              gt(services.priceCents, 0)
+            )
+          )
+          .limit(1);
+  if (doPlano) {
     const sub = appt.clientUserId
       ? await activeSubscription(appt.clientUserId)
       : undefined;
-    semPlano = !sub;
-    planoInfo = sub
-      ? ` Plano ${sub.plan.name.replace("Plano ", "")} ativo.`
+    // Ciclo vencido é plano vencido, mesmo antes da rotina diária virar o
+    // status (a mesma regra de quem agenda).
+    const valido = !!sub && sub.renewsAt.getTime() > Date.now();
+    semPlano = !valido;
+    planoInfo = valido
+      ? ` Plano ${sub!.plan.name.replace("Plano ", "")} ativo.`
       : " ATENÇÃO: sem plano ativo — cobrar avulso.";
   }
 

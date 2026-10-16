@@ -274,6 +274,11 @@ export function AvisosPush({
     if (Notification.permission !== "default") return;
     const aoTocar = () => {
       if (tentouAuto.current) return;
+      // Durante o tutorial de primeiro acesso, o toque é no "Próximo": o
+      // pedido do navegador abria por cima dele, sem contexto, e quem
+      // tocava "Bloquear" por reflexo perdia os avisos de vez. Pede no
+      // primeiro toque depois que o tutorial fecha.
+      if (document.querySelector('[role="dialog"][aria-label="Tutorial"]')) return;
       tentouAuto.current = true;
       limpar();
       void ligar(true);

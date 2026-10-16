@@ -77,7 +77,7 @@ export default async function AdminAgenda({
     ? (searchParams.v as VisaoAgenda)
     : "dia";
   const dia =
-    searchParams.dia && /^\d{4}-\d{2}-\d{2}$/.test(searchParams.dia)
+    searchParams.dia && /^\d{4}-\d{2}-\d{2}$/.test(searchParams.dia) && addDays(searchParams.dia, 0) === searchParams.dia
       ? searchParams.dia
       : hoje;
   const barbeiroPedido = Number(searchParams.barbeiro);

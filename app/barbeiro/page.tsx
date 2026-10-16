@@ -19,6 +19,8 @@ import { Background } from "@/components/Background";
 import { AppHeader } from "@/components/AppHeader";
 import { BottomNav } from "@/components/BottomNav";
 import { Heartbeat } from "@/components/Heartbeat";
+import { AtualizaSozinho } from "@/components/AtualizaSozinho";
+import { resolveBarberPct } from "@/lib/commissions";
 import { Reveal } from "@/components/Reveal";
 import { requireRole } from "@/lib/auth";
 import { tutorialPendente } from "@/lib/tutorial";
@@ -94,11 +96,11 @@ export default async function BarbeiroPanel({
 
   const today = shopToday();
   const dateKey =
-    searchParams.dia && /^\d{4}-\d{2}-\d{2}$/.test(searchParams.dia)
+    searchParams.dia && /^\d{4}-\d{2}-\d{2}$/.test(searchParams.dia) && addDays(searchParams.dia, 0) === searchParams.dia
       ? searchParams.dia
       : today;
 
-  const [agenda, bloqueios, mes, hoje, chavePush, tutorial] = await Promise.all([
+  const [agenda, bloqueios, mes, hoje, chavePush, tutorial, pctAtual] = await Promise.all([
     appointmentsOfDay(dateKey, barber.id),
     // Bloqueios do dia (almoço, folga, manutenção): o barbeiro via o
     // buraco na agenda sem saber que era bloqueio, e ia perguntar no
@@ -108,6 +110,9 @@ export default async function BarbeiroPanel({
     barberTodaySummary(barber.id),
     chavePublicaPush(),
     tutorialPendente(session.id, "barbeiro"),
+    // O percentual que vale agora, com as faixas de meta: o cartão mostrava
+    // o percentual base e não batia com a comissão logo abaixo.
+    resolveBarberPct(barber.id).then((r) => r.pct).catch(() => barber.commissionPct),
   ]);
 
   // Meta individual, definida pelo admin em Equipe. Meta zerada é "sem
@@ -170,7 +175,7 @@ export default async function BarbeiroPanel({
                 <p className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-gold">
                   <Star className="h-3 w-3 fill-gold" />
                   {(barber.rating / 10).toFixed(1)} · comissão{" "}
-                  {barber.commissionPct}%
+                  {pctAtual}%
                 </p>
               </div>
             </div>
@@ -500,6 +505,9 @@ export default async function BarbeiroPanel({
 
       <BottomNav active="barbeiro" role={session.role} />
       <Heartbeat />
+      {/* A tela fica aberta na bancada o dia todo: horário novo, cancelado
+          ou remarcado aparece sozinho, e o botão de falta surge na hora. */}
+      <AtualizaSozinho />
     </>
   );
 }
