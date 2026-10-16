@@ -5,6 +5,7 @@
 // automática pelo webhook — a regra de expirar continua a mesma.
 // ───────────────────────────────────────────────────────────
 import { and, eq, isNotNull, lt } from "drizzle-orm";
+import { shopTimeToUtc, utcToShopParts } from "./time";
 import { db } from "@/db/client";
 import { subscriptions } from "@/db/schema";
 import { desligarFixosDe } from "./recurring";
@@ -59,10 +60,16 @@ export async function expireOverdueSubscriptions() {
  */
 export function nextRenewal(from: Date, cycle: "MENSAL" | "ANUAL") {
   const base = from.getTime() > Date.now() ? new Date(from) : new Date();
-  const dia = base.getDate();
-  base.setDate(1);
-  base.setMonth(base.getMonth() + (cycle === "ANUAL" ? 12 : 1));
-  const ultimo = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate();
-  base.setDate(Math.min(dia, ultimo));
-  return base;
+  // A conta é no calendário da loja, não no do servidor (UTC na Vercel):
+  // renovado às 22:30 do dia 30/jan em Curitiba (já 31/jan em UTC), o
+  // plano vencia em 27/fev à noite — um dia antes.
+  const p = utcToShopParts(base);
+  let ano = p.year;
+  let mes = p.month + (cycle === "ANUAL" ? 12 : 1);
+  while (mes > 12) {
+    mes -= 12;
+    ano++;
+  }
+  const ultimo = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+  return shopTimeToUtc(ano, mes, Math.min(p.day, ultimo), p.minutesOfDay);
 }

@@ -42,9 +42,11 @@ const MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 dias
 
 function secretKey() {
   const secret = process.env.AUTH_SECRET;
-  if (!secret || secret.length < 24) {
+  // O texto de exemplo do .env.example está no repositório público: com
+  // ele, qualquer um assinaria um cookie de administrador.
+  if (!secret || secret.length < 24 || secret.startsWith("troque-por-")) {
     throw new Error(
-      "AUTH_SECRET ausente ou muito curta (mínimo 24 caracteres)."
+      "AUTH_SECRET ausente, curta (mínimo 24 caracteres) ou ainda com o texto de exemplo."
     );
   }
   return new TextEncoder().encode(secret);

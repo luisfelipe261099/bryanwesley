@@ -12,9 +12,9 @@ if (!url) {
 
 // Roda no build: melhor quebrar o deploy aqui do que servir 500 em toda
 // rota protegida por falta da chave da sessão.
-if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 24) {
+if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 24 || process.env.AUTH_SECRET.startsWith("troque-por-")) {
   console.error(
-    "AUTH_SECRET ausente ou curta (mínimo 24 caracteres). Gere com:\n" +
+    "AUTH_SECRET ausente, curta (mínimo 24 caracteres) ou com o texto de exemplo. Gere com:\n" +
       "  node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
   );
   process.exit(1);

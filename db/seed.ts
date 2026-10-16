@@ -40,8 +40,9 @@ const TEAM = [
 export async function runSeed() {
   // A senha padrão está no repositório, que é público: em produção a
   // equipe nunca nasce com ela. Sem SEED_PASSWORD, o build para aqui.
-  if (!process.env.SEED_PASSWORD && process.env.VERCEL_ENV === "production") {
-    throw new Error("Defina SEED_PASSWORD na Vercel antes do primeiro deploy (senha inicial da equipe).");
+  const senhaSeed = process.env.SEED_PASSWORD;
+  if (process.env.VERCEL_ENV === "production" && (!senhaSeed || senhaSeed === "bryan2026")) {
+    throw new Error("Defina SEED_PASSWORD na Vercel (diferente da senha de desenvolvimento) antes do primeiro deploy.");
   }
   const defaultPassword = process.env.SEED_PASSWORD || "bryan2026";
   const hash = await bcrypt.hash(defaultPassword, 10);
@@ -129,8 +130,20 @@ export async function runSeed() {
 }
 
 // `npm run db:seed` executa direto; o migrate importa e chama runSeed().
+// Direto num banco que já tem catálogo, para: o seed reescreve preços,
+// planos e a equipe de demonstração, e o dono já mexeu em tudo isso.
 if (require.main === module) {
-  runSeed().catch(async (e) => {
+  (async () => {
+    if (!process.argv.includes("--forcar")) {
+      const ja = await db.query.services.findFirst();
+      if (ja) {
+        console.error("O banco já tem catálogo — o seed não roda por cima (use --forcar só num banco de teste).");
+        await pool.end();
+        process.exit(1);
+      }
+    }
+    await runSeed();
+  })().catch(async (e) => {
     console.error(e);
     await pool.end();
     process.exit(1);

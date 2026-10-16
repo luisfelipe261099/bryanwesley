@@ -85,6 +85,12 @@ export async function login(
   if (await rateLimitEsgotado(`login:ip:${ip}`, ERROS_LOGIN_POR_IP, JANELA_LOGIN_MS)) {
     return { error: "Muitas tentativas erradas. Aguarde alguns minutos e tente de novo." };
   }
+  // O freio acima só conta depois do bcrypt: cem pedidos em paralelo
+  // passavam todos antes da primeira contagem. Este conta na entrada.
+  const tentativas = await hitRateLimit(`login:tentativa:${ip}`, 60, JANELA_LOGIN_MS);
+  if (!tentativas.ok) {
+    return { error: "Muitas tentativas. Aguarde alguns minutos e tente de novo." };
+  }
   const asPhone = normalizePhone(identifier);
   const asEmail = identifier.toLowerCase();
 

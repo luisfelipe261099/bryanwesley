@@ -996,7 +996,14 @@ function filtroAssinantes(f: FiltroAssinantes) {
   const partes = [];
   if (f.situacao === "ativos") partes.push(eq(subscriptions.status, "ATIVA"));
   if (f.situacao === "vencidos") partes.push(eq(subscriptions.status, "INADIMPLENTE"));
-  if (f.situacao === "cancelados") partes.push(eq(subscriptions.status, "CANCELADA"));
+  // Cancelado é quem saiu do clube: a linha antiga de quem só trocou de
+  // plano também fica CANCELADA, mas essa pessoa continua membro.
+  if (f.situacao === "cancelados") {
+    partes.push(eq(subscriptions.status, "CANCELADA"));
+    partes.push(
+      sql`not exists (select 1 from subscriptions s2 where s2.user_id = ${subscriptions.userId} and s2.status in ('ATIVA', 'INADIMPLENTE'))`
+    );
+  }
   if (f.planId) partes.push(eq(subscriptions.planId, f.planId));
 
   const termo = (f.q ?? "").trim();
@@ -1025,7 +1032,12 @@ export async function clubOverview() {
 
   const ativos = rows.filter((r) => r.sub.status === "ATIVA");
   const vencidos = rows.filter((r) => r.sub.status === "INADIMPLENTE");
-  const cancelados = rows.filter((r) => r.sub.status === "CANCELADA");
+  // Pessoas, não linhas: cada troca de plano deixa uma linha CANCELADA de
+  // quem continua membro, e o número crescia a cada troca.
+  const abertos = new Set(rows.filter((r) => r.sub.status !== "CANCELADA").map((r) => r.sub.userId));
+  const cancelados = Array.from(
+    new Set(rows.filter((r) => r.sub.status === "CANCELADA" && !abertos.has(r.sub.userId)).map((r) => r.sub.userId))
+  );
   const mrrCents = ativos.reduce((acc, r) => acc + mensalDe(r.sub.cycle, r.plan), 0);
 
   const porPlano = new Map<number, { planId: number; name: string; ativos: number; mrrCents: number }>();

@@ -12,7 +12,9 @@ export async function checkinQrSvg(baseUrl: string, token: string) {
 
 /** URL pública do site, para montar o link dentro do QR. */
 export function publicBaseUrl() {
-  if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL;
+  // Sem a barra do fim: "https://dominio/" + "/api/…" dava "//", e o Next
+  // responde redirect — webhook não segue redirect em POST.
+  if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL.replace(/\/+$/, "");
   if (process.env.VERCEL_PROJECT_PRODUCTION_URL)
     return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;

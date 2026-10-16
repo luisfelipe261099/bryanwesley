@@ -44,6 +44,10 @@ const nextConfig = {
   // O site não usa next/image: desligar o otimizador fecha a rota
   // /_next/image, que concentra boa parte das falhas conhecidas do Next 14.
   images: { unoptimized: true },
+  // A importação manda o CSV inteiro numa Server Action: com o limite
+  // padrão de 1 MB, a exportação do sistema antigo (com endereço, CPF,
+  // observações) passava disso e falhava. A Vercel aceita até 4,5 MB.
+  experimental: { serverActions: { bodySizeLimit: "4mb" } },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

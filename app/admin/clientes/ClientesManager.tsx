@@ -529,7 +529,18 @@ function ImportBox({
     setMsg(null);
     clearImportReport();
     start(async () => {
-      const res = await importClients(csv);
+      let res: Awaited<ReturnType<typeof importClients>>;
+      try {
+        res = await importClients(csv);
+      } catch {
+        // Arquivo acima do limite do servidor: antes o botão só parava de
+        // girar, sem dizer nada, e a base antiga não entrava.
+        setMsg({
+          ok: false,
+          text: "Não deu para enviar o arquivo (grande demais?). Deixe só as colunas de nome, telefone e e-mail, ou divida em partes.",
+        });
+        return;
+      }
       if (res.ok) {
         // O resumo vai para o store junto com o relatório: a ação revalida
         // a rota, isso remonta a árvore e um useState seria apagado —
