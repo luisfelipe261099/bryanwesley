@@ -17,7 +17,7 @@ import { and, asc, eq, inArray, lte } from "drizzle-orm";
 import { db } from "@/db/client";
 import { notifications, whatsappPonte, type ComandoPonte } from "@/db/schema";
 import { markFailed, markSent, queueFreeText } from "./notifications";
-import { discardStaleNotifications } from "./dispatch";
+import { discardStaleNotifications, despacharPush } from "./dispatch";
 import { isValidPhone, normalizePhone, telefoneDoWhatsapp } from "./phone";
 
 /** Versão do programa da ponte. Mudou aqui, a ponte se atualiza sozinha. */
@@ -162,6 +162,8 @@ export type RespostaDoSinal = {
 
 /** Lembrete vencido sai da fila — a cada 5 minutos, não a cada sinal. */
 let ultimaFaxina = 0;
+/** Avisos no celular pegam carona no sinal da ponte, no máximo 1x/min. */
+let ultimoPush = 0;
 
 const texto = (v: unknown, max: number) =>
   typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
@@ -216,6 +218,14 @@ export async function receberSinal(s: Sinal, agora = new Date()): Promise<Respos
       ...(status === "WORKING" ? { codigoWhatsapp: null } : codigoWhatsapp ? { codigoWhatsapp } : {}),
     })
     .where(eq(whatsappPonte.id, 1));
+
+  // Os lembretes por aviso no celular saem do site, não da ponte: sem
+  // isto, com o painel fechado, o de 2h de um sábado cedo só sairia na
+  // varredura diária — depois do horário, e era descartado.
+  if (agora.getTime() - ultimoPush > 60_000) {
+    ultimoPush = agora.getTime();
+    await despacharPush(20, 5_000).catch((e) => console.error("Ponte: avisos no celular:", e));
+  }
 
   // 5. A fila de mensagens — só com o número conectado. Cada mensagem
   // entregue fica reservada por 5 minutos: se a ponte cair no meio, ela

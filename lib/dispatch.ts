@@ -16,7 +16,7 @@ import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { notifications, settings } from "@/db/schema";
 import { getSettings } from "./schedule";
-import { pendingNotifications, markSent, markFailed } from "./notifications";
+import { pendingNotifications, markSent, markFailed, reservarParaEnvio } from "./notifications";
 import { sendWhatsapp, isWhatsappConfigured, provedorAtivo } from "./providers/whatsapp";
 import { wahaStatus } from "./providers/waha";
 import { pontePareada } from "./ponte";
@@ -106,6 +106,7 @@ export async function despacharPush(limit = 50, prazoMs = DISPATCH_BUDGET_MS) {
       r.semAparelho++;
       continue;
     }
+    if (!(await reservarParaEnvio(n.id))) continue; // outra varredura já pegou
     const res = await enviarPush(
       [n.userId],
       {
@@ -319,6 +320,7 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
         break;
       }
       if (intervalo && !primeira) await new Promise((r) => setTimeout(r, intervalo()));
+      if (!(await reservarParaEnvio(n.id))) continue; // outra varredura já pegou
       primeira = false;
       const res = await sendWhatsapp(n.phone, n.body);
       if (res.sent) {

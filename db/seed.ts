@@ -54,9 +54,8 @@ export async function runSeed() {
       closedWeekdays: [0, 1],
       shopName: "Bryan Wesley Barbearia",
       shopUnit: "Unidade Cajuru",
-      shopPhone: "(41) 9 9999-0000",
-      shopAddress: "Av. Prefeito Maurício Fruet, 1200 — Cajuru, Curitiba",
-      shopInstagram: "@bryanwesley.barbearia",
+      // Telefone, endereço e Instagram ficam vazios até o dono preencher em
+      // Ajustes: valor de exemplo aparecia no rodapé e na confirmação.
       shopHoursLabel: "Ter — Sáb · 09h às 20h",
     });
   }

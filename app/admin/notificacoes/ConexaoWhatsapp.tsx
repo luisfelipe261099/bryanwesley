@@ -213,11 +213,20 @@ function Instalar({ meta, waha }: Pick<ConexaoProps, "meta" | "waha">) {
 }
 
 function ComandoDeInstalacao({ reinstalar = false }: { reinstalar?: boolean }) {
+  const router = useRouter();
   const [pending, start] = useTransition();
   const [comando, setComando] = useState<string | null>(null);
   const [expira, setExpira] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [copiado, setCopiado] = useState(false);
+
+  // Comando gerado: a instalação na máquina leva minutos, e o QR prometido
+  // só aparecia recarregando a página. Atualiza sozinho até a ponte parear.
+  useEffect(() => {
+    if (!comando) return;
+    const t = setInterval(() => router.refresh(), 4000);
+    return () => clearInterval(t);
+  }, [comando, router]);
 
   function gerar() {
     setErro(null);

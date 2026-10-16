@@ -24,7 +24,7 @@ import {
   workingWindows,
   BLOCKING_STATUSES,
 } from "./schedule";
-import { resolveBarberPct, recordCommission } from "./commissions";
+import { recordCommission } from "./commissions";
 import {
   queueBookingNotifications,
   queueNotification,
@@ -394,9 +394,11 @@ export async function createBooking(input: CreateBookingInput) {
   });
   if (!barber) throw new BookingError("Barbeiro indisponível.");
 
-  // Percentual do barbeiro congelado agora: se a meta dele mudar depois,
-  // este atendimento mantém a divisão combinada no dia.
-  const { pct: barberPct } = await resolveBarberPct(barberId);
+  // Percentual base do barbeiro congelado agora: se ele mudar depois, este
+  // atendimento mantém a divisão combinada no dia. A faixa de meta fica de
+  // fora — ela é decidida no fechamento, pelo mês do atendimento; gravada
+  // aqui, a faixa batida em janeiro valia para os horários de fevereiro.
+  const barberPct = barber.commissionPct ?? settings.defaultBarberPct;
 
   try {
     const appt = await db.transaction(async (tx) => {
@@ -954,6 +956,11 @@ export async function transitionAppointment(
   // Efeitos colaterais do novo estado.
   if (next === "CONCLUIDO") {
     await recordCommission(updated.id);
+  }
+  // Cliente que chegou cedo e já foi atendido não recebe "seu horário é
+  // daqui a pouco" depois.
+  if (next === "EM_ANDAMENTO" || next === "CONCLUIDO") {
+    await cancelPendingNotifications(updated.id, ["LEMBRETE_24H", "LEMBRETE_2H"]);
   }
   if (next === "CANCELADO" || next === "NO_SHOW") {
     await cancelPendingNotifications(updated.id);

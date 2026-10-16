@@ -7,7 +7,7 @@ import {
 } from "@/lib/queries";
 import { toCsv } from "@/lib/reports";
 import { formatPhone } from "@/lib/phone";
-import { utcToShopParts, labelDayMonth } from "@/lib/time";
+import { utcToShopParts } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
@@ -35,8 +35,13 @@ export async function GET(req: Request) {
       Situação: c.plan ? "Ativo" : c.overduePlan ? "Vencido" : "—",
       Visitas: c.visits,
       "Próximos horários": c.upcoming,
+      // Data completa: sem o ano, a cópia de segurança não dizia se a
+      // última visita foi este ano ou em 2024, e a planilha não ordenava.
       "Última visita": c.lastVisit
-        ? labelDayMonth(utcToShopParts(c.lastVisit).dateKey)
+        ? (() => {
+            const p = utcToShopParts(c.lastVisit);
+            return `${String(p.day).padStart(2, "0")}/${String(p.month).padStart(2, "0")}/${p.year}`;
+          })()
         : "",
       "Tem conta": c.hasAccount ? "Sim" : "Não",
     }))

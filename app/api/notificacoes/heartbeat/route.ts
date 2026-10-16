@@ -7,7 +7,7 @@ import {
 } from "@/lib/dispatch";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 /**
  * Batida do painel da equipe.

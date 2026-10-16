@@ -23,6 +23,9 @@ import { publicBaseUrl } from "@/lib/qr";
 import { requireRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
+// O "Enviar agora" roda aqui dentro: com o limite padrão, a varredura era
+// cortada no meio e a mensagem já aceita pelo provedor saía de novo.
+export const maxDuration = 60;
 
 export default async function AdminNotificacoes() {
   const session = await requireRole(["ADMIN"]);

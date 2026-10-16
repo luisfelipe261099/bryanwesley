@@ -57,7 +57,11 @@ export async function createPaymentLink(input: {
           ? {
               name: input.customer.name,
               email: input.customer.email,
-              phone_number: input.customer.phone ? `+55${input.customer.phone.replace(/\D/g, "")}` : undefined,
+              // O número reservado ("00…", cliente sem telefone) não vai.
+              phone_number:
+                input.customer.phone && !input.customer.phone.startsWith("00")
+                  ? `+55${input.customer.phone.replace(/\D/g, "")}`
+                  : undefined,
             }
           : undefined,
         redirect_url: input.redirectUrl,

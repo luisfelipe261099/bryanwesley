@@ -100,7 +100,7 @@ function BarberCard({ barber, meu }: { barber: BarberRow; meu: boolean }) {
       if (!ok) return;
     }
     start(async () => {
-      const res = await updateBarber({
+      const dados = {
         id: barber.id,
         shortName: form.shortName,
         title: form.title,
@@ -111,7 +111,14 @@ function BarberCard({ barber, meu }: { barber: BarberRow; meu: boolean }) {
         email: form.email,
         phone: form.phone,
         isAdmin: form.isAdmin,
-      });
+      };
+      let res = await updateBarber(dados);
+      // WhatsApp ou e-mail de uma conta de cliente: pergunta se é a mesma
+      // pessoa e, confirmando, junta as duas.
+      if (!res.ok && res.error.startsWith("Essa pessoa já tem conta de cliente")) {
+        if (window.confirm(res.error)) res = await updateBarber({ ...dados, converterConta: true });
+        else return;
+      }
       setMsg(notify(res, "Salvo."));
     });
   }

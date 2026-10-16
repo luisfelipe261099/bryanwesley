@@ -43,8 +43,10 @@ export default async function Agendar({
   const days = listOpenDays(settings, daCasa ? 21 : 10);
 
   // Assinante ativo agenda pelo plano; os serviços cobertos saem sem preço.
-  const subscription =
-    session?.role === "CLIENT" ? await activeSubscription(session.id) : null;
+  // Ciclo vencido não cobre, mesmo antes da rotina diária virar o status:
+  // é a mesma regra do servidor, que cobraria o que a tela dizia incluso.
+  const ativa = session?.role === "CLIENT" ? await activeSubscription(session.id) : null;
+  const subscription = ativa && ativa.renewsAt.getTime() > Date.now() ? ativa : null;
   const plan = subscription
     ? plans.find((p) => p.id === subscription.planId) ?? null
     : null;

@@ -219,7 +219,10 @@ export async function queueFreeText(opts: {
 }
 
 /** Cancelou o horário: avisa o cliente e derruba os lembretes pendentes. */
-export async function cancelPendingNotifications(appointmentId: number) {
+export async function cancelPendingNotifications(
+  appointmentId: number,
+  kinds: NotifKind[] = ["AGENDAMENTO_CRIADO", "AGENDAMENTO_REMARCADO", "LEMBRETE_24H", "LEMBRETE_2H"]
+) {
   await db
     .update(notifications)
     .set({ status: "CANCELADA" })
@@ -230,12 +233,9 @@ export async function cancelPendingNotifications(appointmentId: number) {
         // A confirmação também cai. Ela é enfileirada na hora, mas só sai
         // na próxima varredura: quem marcava e desmarcava em seguida
         // recebia "seu horário está confirmado" de um horário que não
-        // existia mais — e, na remarcação, com a data errada.
-        inArray(notifications.kind, [
-          "AGENDAMENTO_CRIADO",
-          "LEMBRETE_24H",
-          "LEMBRETE_2H",
-        ])
+        // existia mais — e, na remarcação, com a data errada. O mesmo vale
+        // para o "remarcado para B" de quem remarcou de novo ou cancelou.
+        inArray(notifications.kind, kinds)
       )
     );
 }
@@ -258,6 +258,27 @@ export async function pendingNotifications(limit = 50, channel: NotifChannel = "
     )
     .orderBy(notifications.scheduledFor)
     .limit(limit);
+}
+
+/**
+ * Reserva a mensagem para um envio: só quem consegue tirá-la da fila por
+ * alguns minutos manda. Duas varreduras ao mesmo tempo (o "Enviar agora"
+ * em cima da do painel, ou do cron) liam a mesma fila e mandavam a mesma
+ * mensagem duas vezes. Se o envio falhar, ela volta depois do prazo.
+ */
+export async function reservarParaEnvio(id: number, ms = 5 * 60_000) {
+  const agora = new Date();
+  const [res] = await db
+    .update(notifications)
+    .set({ scheduledFor: new Date(agora.getTime() + ms) })
+    .where(
+      and(
+        eq(notifications.id, id),
+        eq(notifications.status, "PENDENTE"),
+        lte(notifications.scheduledFor, agora)
+      )
+    );
+  return res.affectedRows === 1;
 }
 
 export async function markSent(id: number) {
@@ -300,11 +321,25 @@ export async function discardNotification(id: number) {
 }
 
 /** Recoloca uma mensagem com erro na fila. */
-export async function retryNotification(id: number) {
+export async function retryNotification(id: number): Promise<{ ok: true } | { ok: false; motivo: string }> {
+  // Lembrete e confirmação de um horário que já foi cancelado, concluído
+  // ou que já passou não saem mais: "Reenviar" mandava ao cliente o aviso
+  // de um horário que não existia.
+  const n = await db.query.notifications.findFirst({ where: eq(notifications.id, id) });
+  if (n?.appointmentId && n.kind !== "AGENDAMENTO_CANCELADO" && n.kind !== "RESPOSTA_WHATSAPP") {
+    const appt = await db.query.appointments.findFirst({
+      columns: { status: true, startsAt: true },
+      where: eq(appointments.id, n.appointmentId),
+    });
+    if (!appt || !["PENDENTE", "CONFIRMADO"].includes(appt.status) || appt.startsAt.getTime() <= Date.now()) {
+      return { ok: false, motivo: "Esse horário já foi cancelado, atendido ou passou — a mensagem não serve mais." };
+    }
+  }
   await db
     .update(notifications)
     .set({ status: "PENDENTE", attempts: 0, error: null, scheduledFor: new Date() })
     .where(eq(notifications.id, id));
+  return { ok: true };
 }
 
 /** Contagem por situação, para o painel. */

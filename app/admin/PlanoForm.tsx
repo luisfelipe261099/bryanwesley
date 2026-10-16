@@ -84,6 +84,11 @@ export function PlanoForm({
 
   function save() {
     setMsg(null);
+    // Preço mensal apagado salvava um plano de R$ 0,00 no site.
+    if (cents(f.price) <= 0) {
+      setMsg({ ok: false, text: "Informe o preço mensal do plano." });
+      return;
+    }
     start(async () => {
       const res = await savePlan({
         id: novo ? undefined : plan.id,

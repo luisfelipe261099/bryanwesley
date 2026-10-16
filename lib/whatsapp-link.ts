@@ -42,7 +42,8 @@ export function linkDeAgendamento(base: string, pre: PreAgendamento = {}) {
 /** Abre a conversa no WhatsApp com a mensagem pronta. */
 export function linkWaMe(phoneDigits: string, texto: string) {
   const d = normalizePhone(phoneDigits);
-  const numero = d.startsWith("55") ? d : `55${d}`;
+  // normalizePhone já tirou o 55 do país; um 55 aqui é o DDD de Santa Maria.
+  const numero = `55${d}`;
   return `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`;
 }
 

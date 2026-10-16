@@ -404,6 +404,17 @@ async function main() {
     const sinal = await receberSinal({ status: "WORKING", numero: "5541999990000" } as Parameters<typeof receberSinal>[0]);
     const idsPush = (await db.select({ id: notifications.id }).from(notifications).where(eq(notifications.channel, "PUSH"))).map((n) => n.id);
     ok("a ponte só recebe mensagens de WhatsApp", sinal.mensagens.every((m) => !idsPush.includes(m.id)));
+    // O sinal da ponte também despacha os avisos no celular que venceram
+    // (o site manda; a ponte só dá o ritmo).
+    const pushDoSinal = await db.query.notifications.findFirst({
+      where: and(eq(notifications.appointmentId, appt.id), eq(notifications.kind, "LEMBRETE_2H"), eq(notifications.channel, "PUSH")),
+    });
+    ok("o sinal da ponte também manda o aviso no celular vencido", pushDoSinal?.status === "ENVIADA", `${pushDoSinal?.status}`);
+    // Volta o lembrete push para a fila, para o resto do teste.
+    if (pushDoSinal) {
+      await db.update(notifications).set({ status: "PENDENTE", sentAt: null, scheduledFor: new Date(Date.now() - 60_000) })
+        .where(eq(notifications.id, pushDoSinal.id));
+    }
     // Devolve o que a ponte arrendou, para o resto do teste.
     await db.update(notifications).set({ scheduledFor: new Date(Date.now() - 60_000) })
       .where(and(eq(notifications.status, "PENDENTE"), like(notifications.phone, "4197009%")));

@@ -97,7 +97,9 @@ export async function resolveBarberPct(barberId: number, ref = new Date()) {
       drizzleSql`${commissionTiers.barberId} IS NULL`
     );
 
-  if (tiers.length > 0) pct = tiers[0].barberPct;
+  // A faixa só sobe o percentual: com base de 65% e faixa de 60%, bater a
+  // meta reduzia a comissão de quem bateu.
+  if (tiers.length > 0) pct = Math.max(pct, tiers[0].barberPct);
   return { pct, revenue };
 }
 

@@ -180,7 +180,9 @@ export async function sendMetaMessage(
 
 /** Brasil: E.164 exige o 55 na frente. */
 function destino(phoneDigits: string) {
-  return phoneDigits.startsWith("55") ? phoneDigits : `55${phoneDigits}`;
+  // Só é código do país acima de 11 dígitos: DDD 55 (Santa Maria/RS)
+  // existe e perdia o 55 da frente.
+  return phoneDigits.length > 11 && phoneDigits.startsWith("55") ? phoneDigits : `55${phoneDigits}`;
 }
 
 async function enviar(payload: Record<string, unknown>): Promise<SendResult> {

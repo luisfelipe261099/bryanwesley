@@ -42,6 +42,7 @@ type PlanRow = {
 
 const reais = (cents: number) => (cents / 100).toFixed(2).replace(".", ",");
 const cents = (v: string) => parseMoneyToCents(v);
+const PERGUNTA_GRATIS = "O preço está R$ 0,00: o serviço vai sair de graça no site. Salvar assim mesmo?";
 
 export function CatalogoManager({
   services,
@@ -97,6 +98,8 @@ function ServiceRowForm({ service }: { service: ServiceRow }) {
 
   function save() {
     setMsg(null);
+    // Campo de preço apagado vira R$ 0,00 — e o serviço sairia de graça no site.
+    if (cents(f.price) === 0 && !window.confirm(PERGUNTA_GRATIS)) return;
     start(async () => {
       const res = await saveService({
         id: service.id,
@@ -270,6 +273,7 @@ function NewService() {
           disabled={pending || f.name.length < 2}
           onClick={() => {
             setMsg(null);
+            if (cents(f.price) === 0 && !window.confirm(PERGUNTA_GRATIS)) return;
             start(async () => {
               const res = await saveService({
                 name: f.name,

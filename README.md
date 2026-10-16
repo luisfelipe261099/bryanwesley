@@ -164,11 +164,12 @@ disparam, e uma trava garante que só uma rode por vez:
 | Gatilho | Cadência | Para quê |
 |---------|----------|----------|
 | **Heartbeat do painel** — `POST /api/notificacoes/heartbeat` | a cada 10 min enquanto `/admin` ou `/barbeiro` estiver aberto | O dia a dia. A barbearia fica com o painel aberto, então os lembretes de 24h e 2h saem no horário sem nada externo |
-| Cron da Vercel — `/api/notificacoes/despachar` | diário às 09:00 UTC ([`vercel.json`](vercel.json), limite do plano Hobby) | Rede de segurança para dias sem movimento |
+| Cron da Vercel — `/api/notificacoes/despachar` | diário às 14:00 UTC, 11:00 em Brasília ([`vercel.json`](vercel.json), limite do plano Hobby) | Rede de segurança para dias sem movimento |
 | Agendador externo (opcional) | o que você configurar | Só se quiser cadência garantida mesmo com o painel fechado |
 
 O heartbeat exige sessão de equipe; o cron exige `CRON_SECRET` (header
-`Authorization: Bearer` ou `?token=`) e em produção responde 503 sem ele.
+`Authorization: Bearer <CRON_SECRET>` ou `x-cron-secret: <CRON_SECRET>`;
+token na URL não é aceito) e em produção responde 503 sem ele.
 A trava é um compare-and-swap em `settings.last_dispatch_at`: cada chamada
 tenta avançar o carimbo e só quem consegue varre a fila — duas abas abertas,
 ou cron e agendador colados, não entregam a mesma mensagem duas vezes.
@@ -521,12 +522,13 @@ Variáveis do projeto na Vercel:
    senha do seed é a mesma para todos e serve só para o primeiro acesso.
 5. **Conferir** `/api/health` — deve responder `{"ok":true,"db":"ok"}`.
 6. **Agendador externo** — o plano Hobby da Vercel só permite cron diário
-   ([`vercel.json`](vercel.json) usa `0 9 * * *`). Para lembrete de hora em
-   hora, apontar um agendador externo (cron-job.org, por exemplo) a cada 15
-   minutos para:
+   ([`vercel.json`](vercel.json) usa `0 14 * * *`, 11:00 em Brasília). Para
+   lembrete de hora em hora, apontar um agendador externo (cron-job.org, por
+   exemplo) a cada 15 minutos para o endereço abaixo, com o header
+   `x-cron-secret: CRON_SECRET` (no cron-job.org: Avançado → Cabeçalhos):
 
    ```
-   https://SEU-DOMINIO/api/notificacoes/despachar?token=CRON_SECRET
+   https://SEU-DOMINIO/api/notificacoes/despachar
    ```
 
    Sem `WHATSAPP_TOKEN` as mensagens ficam na fila sem consumir tentativa —

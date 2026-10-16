@@ -89,11 +89,12 @@ export async function saveRecurringSlot(input: {
   const sub = await db.query.subscriptions.findFirst({
     where: and(
       eq(subscriptions.userId, session.id),
-      eq(subscriptions.status, "ATIVA")
+      eq(subscriptions.status, "ATIVA"),
+      gt(subscriptions.renewsAt, new Date())
     ),
   });
   if (!sub) {
-    return { ok: false, error: "O horário fixo é um benefício de quem assina." };
+    return { ok: false, error: "O horário fixo é um benefício de quem assina (com o plano em dia)." };
   }
   if (input.serviceIds.length === 0) {
     return { ok: false, error: "Escolha ao menos um serviço." };

@@ -136,6 +136,36 @@ const settingsSchema = z.object({
   defaultBarberPct: z.number({ message: "Informe a comissão sugerida." }).int().min(0, "Comissão de 0 a 100%.").max(100, "Comissão de 0 a 100%."),
 });
 
+/**
+ * Horários já marcados (de hoje em diante) que caem fora de uma jornada
+ * nova. Mudar a folga, a jornada ou o horário da loja não mexe em quem já
+ * estava marcado — o dono precisa saber para remarcar ou avisar.
+ */
+async function marcadosFora(
+  barberId: number | null,
+  fora: (weekday: number, inicio: number, fim: number) => boolean
+) {
+  const futuros = await db
+    .select({ startsAt: appointments.startsAt, durationMin: appointments.durationMin })
+    .from(appointments)
+    .where(
+      and(
+        inArray(appointments.status, ["PENDENTE", "CONFIRMADO"]),
+        gt(appointments.startsAt, new Date()),
+        barberId ? eq(appointments.barberId, barberId) : undefined
+      )
+    );
+  return futuros.filter((a) => {
+    const p = utcToShopParts(a.startsAt);
+    return fora(p.weekday, p.minutesOfDay, p.minutesOfDay + a.durationMin);
+  }).length;
+}
+
+const avisoFora = (n: number) =>
+  n > 0
+    ? ` Atenção: ${n} atendimento(s) já marcado(s) fora do novo horário continuam de pé — remarque ou cancele pela Agenda.`
+    : "";
+
 export async function saveSettings(
   input: z.input<typeof settingsSchema>
 ): Promise<Result> {
@@ -149,7 +179,11 @@ export async function saveSettings(
       .update(settingsTable)
       .set(data)
       .where(eq(settingsTable.id, 1));
-    return done("Configurações salvas.");
+    const fora = await marcadosFora(
+      null,
+      (dia, ini, fim) => data.closedWeekdays.includes(dia) || ini < data.openMinute || fim > data.closeMinute
+    ).catch(() => 0);
+    return done(`Configurações salvas.${avisoFora(fora)}`);
   } catch (e) {
     return fail(e);
   }
@@ -365,6 +399,8 @@ export async function updateBarber(input: {
   email?: string;
   phone?: string;
   isAdmin?: boolean;
+  /** O admin confirmou: a conta de cliente com esse WhatsApp é a mesma pessoa. */
+  converterConta?: boolean;
 }): Promise<Result> {
   try {
     const session = await admin();
@@ -389,6 +425,10 @@ export async function updateBarber(input: {
     // o site seguia mostrando o nome antigo e o login seguia o mesmo.
     const contaPatch: Partial<typeof users.$inferInsert> = {};
     let mudouAcesso = false;
+    // Conta de cliente da mesma pessoa (o barbeiro real já cortou aqui ou
+    // veio na importação): sem juntar, trocar o barbeiro de demonstração
+    // pelo real esbarrava em "esse WhatsApp já é de outra conta".
+    let clienteParaJuntar: typeof users.$inferSelect | undefined;
     if (input.name !== undefined) {
       const nome = input.name.trim();
       if (nome.length < 3) return { ok: false, error: "Informe o nome completo." };
@@ -399,7 +439,16 @@ export async function updateBarber(input: {
       if (!z.string().email().safeParse(email).success) return { ok: false, error: "E-mail inválido." };
       if (email !== (conta.email ?? "")) {
         const outro = await db.query.users.findFirst({ where: eq(users.email, email) });
-        if (outro && outro.id !== conta.id) return { ok: false, error: "Esse e-mail já está em outra conta." };
+        if (outro && outro.id !== conta.id) {
+          if (outro.role !== "CLIENT") return { ok: false, error: "Esse e-mail já está em outra conta." };
+          if (!input.converterConta) {
+            return {
+              ok: false,
+              error: `${AVISO_CONTA_CLIENTE} com esse e-mail (${outro.name}). Confirme se é a mesma pessoa: o histórico de cliente passa para a conta do barbeiro.`,
+            };
+          }
+          clienteParaJuntar = outro;
+        }
         contaPatch.email = email;
         mudouAcesso = true;
       }
@@ -410,7 +459,19 @@ export async function updateBarber(input: {
       if (phone !== conta.phone) {
         const outro = await db.query.users.findFirst({ where: eq(users.phone, phone) });
         if (outro && outro.id !== conta.id) {
-          return { ok: false, error: `Esse WhatsApp já é de outra conta (${outro.name}).` };
+          if (outro.role !== "CLIENT") {
+            return { ok: false, error: `Esse WhatsApp já é de outra conta da equipe (${outro.name}).` };
+          }
+          if (clienteParaJuntar && clienteParaJuntar.id !== outro.id) {
+            return { ok: false, error: "Esse WhatsApp e esse e-mail são de duas contas de cliente diferentes. Corrija um deles." };
+          }
+          if (!input.converterConta) {
+            return {
+              ok: false,
+              error: `${AVISO_CONTA_CLIENTE} com esse WhatsApp (${outro.name}). Confirme se é a mesma pessoa: o histórico de cliente passa para a conta do barbeiro.`,
+            };
+          }
+          clienteParaJuntar = outro;
         }
         contaPatch.phone = phone;
         mudouAcesso = true;
@@ -468,6 +529,34 @@ export async function updateBarber(input: {
           }
         }
       }
+    }
+
+    // Juntar com a conta de cliente da mesma pessoa: o histórico dela
+    // (horários, plano, fixo, pedidos) passa para a conta do barbeiro, e o
+    // cadastro de cliente sai do caminho — sem telefone nem e-mail, e
+    // desativado — liberando os dois para a conta da equipe.
+    if (clienteParaJuntar) {
+      const velho = clienteParaJuntar.id;
+      const { payments, pushSubscriptions } = await import("@/db/schema");
+      await db.update(appointments).set({ clientUserId: conta.id }).where(eq(appointments.clientUserId, velho));
+      await db.update(subscriptions).set({ userId: conta.id }).where(eq(subscriptions.userId, velho));
+      await db.update(recurringSlots).set({ userId: conta.id }).where(eq(recurringSlots.userId, velho));
+      await db.update(planRequests).set({ userId: conta.id }).where(eq(planRequests.userId, velho));
+      await db.update(payments).set({ userId: conta.id }).where(eq(payments.userId, velho));
+      await db.update(notifications).set({ userId: conta.id }).where(eq(notifications.userId, velho));
+      await db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, velho));
+      const reservados = (
+        await db.select({ phone: users.phone }).from(users).where(like(users.phone, "00%"))
+      ).map((u) => u.phone);
+      await db
+        .update(users)
+        .set({
+          phone: nextPlaceholderPhone(reservados),
+          email: null,
+          active: false,
+          tokenVersion: rawSql`${users.tokenVersion} + 1`,
+        })
+        .where(eq(users.id, velho));
     }
 
     // As guardas acima recusam ANTES de gravar qualquer coisa: gravar a
@@ -590,7 +679,8 @@ export async function setBarberHours(input: {
         .insert(barberHours)
         .values({ barberId: input.barberId, weekday: input.weekday, openMinute: 0, closeMinute: 0 })
         .onDuplicateKeyUpdate({ set: { openMinute: 0, closeMinute: 0 } });
-      return done("Folga marcada nesse dia.");
+      const fora = await marcadosFora(input.barberId, (dia) => dia === input.weekday).catch(() => 0);
+      return done(`Folga marcada nesse dia.${avisoFora(fora)}`);
     }
     if (input.openMinute === null || input.closeMinute === null) {
       // Dia em branco segue o horário da loja — e só ele: os outros dias
@@ -619,7 +709,13 @@ export async function setBarberHours(input: {
       .onDuplicateKeyUpdate({
         set: { openMinute: input.openMinute, closeMinute: input.closeMinute },
       });
-    return done("Jornada salva.");
+    const abre = input.openMinute;
+    const fecha = input.closeMinute;
+    const fora = await marcadosFora(
+      input.barberId,
+      (dia, ini, fim) => dia === input.weekday && (ini < abre || fim > fecha)
+    ).catch(() => 0);
+    return done(`Jornada salva.${avisoFora(fora)}`);
   } catch (e) {
     return fail(e);
   }
@@ -1423,7 +1519,8 @@ export async function saveShopInfo(input: {
 export async function resendNotification(id: number): Promise<Result> {
   try {
     await admin();
-    await retryNotification(id);
+    const r = await retryNotification(id);
+    if (!r.ok) return { ok: false, error: r.motivo };
     return done("Mensagem recolocada na fila.");
   } catch (e) {
     return fail(e);

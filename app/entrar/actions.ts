@@ -63,7 +63,9 @@ function ipDaRequisicao() {
 
 // Erros de senha por origem: a trava da conta só atrasa cada tentativa,
 // e pedidos em paralelo passavam por cima do atraso.
-const ERROS_LOGIN_POR_IP = 20;
+// Alto o bastante para o Wi-Fi da barbearia e a rede do celular, que
+// muita gente divide, e baixo para quem tenta adivinhar.
+const ERROS_LOGIN_POR_IP = 30;
 const JANELA_LOGIN_MS = 15 * 60_000;
 
 export async function login(

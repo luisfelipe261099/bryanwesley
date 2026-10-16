@@ -1,3 +1,5 @@
+import { isPlaceholderPhone, normalizePhone } from "@/lib/phone";
+
 // Valores de partida. A identidade real fica em `settings` e é editada
 // no painel (Admin → Ajustes → Dados da barbearia).
 //
@@ -27,9 +29,11 @@ export function instagramUrl(handle: string) {
 
 /** Link de WhatsApp para o telefone da barbearia, quando há um telefone válido. */
 export function whatsappDaLoja(phone: string) {
-  const digitos = phone.replace(/\D/g, "");
-  if (digitos.length < 10) return null;
-  return `https://wa.me/${digitos.startsWith("55") ? digitos : `55${digitos}`}`;
+  // Normalizado como os demais telefones: "(041) 9 9999-0000" virava um
+  // link wa.me/55041… que não abre conversa nenhuma.
+  const digitos = normalizePhone(phone);
+  if (digitos.length < 10 || isPlaceholderPhone(digitos)) return null;
+  return `https://wa.me/55${digitos}`;
 }
 
 const DIAS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
