@@ -563,7 +563,17 @@ function ImportBox({
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (file) setCsv(await file.text());
+    if (!file) return;
+    // O "CSV" do Excel em português sai em Windows-1252, não UTF-8: lido
+    // como UTF-8, "João" virava "Jo�o" para sempre no cadastro.
+    const bytes = await file.arrayBuffer();
+    let texto: string;
+    try {
+      texto = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      texto = new TextDecoder("windows-1252").decode(bytes);
+    }
+    setCsv(texto.replace(/^\uFEFF/, ""));
   }
 
   return (
@@ -617,7 +627,9 @@ function ImportBox({
         <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-400/[0.07] p-3.5">
           <p className="label flex items-center gap-2 text-amber-200">
             <X className="h-3.5 w-3.5" />
-            {skipped.length} linha(s) ignorada(s)
+            {/* Nem toda linha daqui ficou de fora: "entrou para completar
+                depois" entrou, só falta o telefone. */}
+            {skipped.length} aviso(s) da importação
           </p>
           <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-xs text-amber-200/80">
             {skipped.map((s, i) => (

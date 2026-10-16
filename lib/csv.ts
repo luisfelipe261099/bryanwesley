@@ -115,7 +115,7 @@ export type ColunaAlvo = keyof typeof SINONIMOS;
  */
 export function mapHeader(
   primeiraLinha: string[]
-): { mapa: Record<ColunaAlvo, number>; temCabecalho: boolean } {
+): { mapa: Record<ColunaAlvo, number>; temCabecalho: boolean; telefones: number[] } {
   const normalizada = primeiraLinha.map(semAcento);
   const mapa: Record<ColunaAlvo, number> = { nome: -1, telefone: -1, email: -1 };
 
@@ -131,7 +131,20 @@ export function mapHeader(
     mapa[alvo] = i;
   }
 
+  // Todas as colunas de telefone, celular primeiro: exportação antiga
+  // costuma ter "Telefone" (fixo, muitas vezes vazio) antes de "Celular",
+  // e só a primeira entrava — o cliente vinha com o fixo ou sem número.
+  const ehFone = (h: string) =>
+    SINONIMOS.telefone.some((s) => h === s || h.startsWith(s + " "));
+  const ehCelular = (h: string) => /celular|whats|mobile|cel\b/.test(h);
+  const telefones = normalizada
+    .map((h, i) => ({ h, i }))
+    .filter(({ h }) => ehFone(h) || ehCelular(h))
+    .sort((a, b) => Number(ehCelular(b.h)) - Number(ehCelular(a.h)) || a.i - b.i)
+    .map(({ i }) => i);
+
   const temCabecalho = mapa.nome !== -1 || mapa.telefone !== -1;
-  if (!temCabecalho) return { mapa: { nome: 0, telefone: 1, email: 2 }, temCabecalho: false };
-  return { mapa, temCabecalho: true };
+  if (!temCabecalho) return { mapa: { nome: 0, telefone: 1, email: 2 }, temCabecalho: false, telefones: [1] };
+  if (!telefones.length && mapa.telefone !== -1) telefones.push(mapa.telefone);
+  return { mapa, temCabecalho: true, telefones };
 }

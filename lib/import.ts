@@ -44,7 +44,7 @@ export function planClientImport(csv: string): PlanoImportacao {
   const linhas = parseCsv(csv);
   if (linhas.length === 0) return { ok: false, error: "Arquivo vazio." };
 
-  const { mapa, temCabecalho } = mapHeader(linhas[0]);
+  const { mapa, temCabecalho, telefones } = mapHeader(linhas[0]);
   const corpo = temCabecalho ? linhas.slice(1) : linhas;
   if (corpo.length === 0) return { ok: false, error: "O arquivo só tem o cabeçalho." };
   if (mapa.nome === -1 || mapa.telefone === -1) {
@@ -76,7 +76,10 @@ export function planClientImport(csv: string): PlanoImportacao {
   corpo.forEach((cols, i) => {
     const linhaNum = i + (temCabecalho ? 2 : 1);
     const name = (cols[mapa.nome] ?? "").trim();
-    const rawPhone = (cols[mapa.telefone] ?? "").trim();
+    // O primeiro número válido entre as colunas de telefone (celular
+    // primeiro); sem nenhum válido, o primeiro preenchido, para o relatório.
+    const fones = telefones.map((i) => (cols[i] ?? "").trim()).filter(Boolean);
+    const rawPhone = fones.find((f) => isValidPhone(f)) ?? fones[0] ?? "";
     const rawEmail = mapa.email >= 0 ? (cols[mapa.email] ?? "").trim() : "";
 
     if (!name && !rawPhone) return; // linha em branco

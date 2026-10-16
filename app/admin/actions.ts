@@ -6,6 +6,7 @@ import { z } from "@/lib/zod-pt";
 import { db } from "@/db/client";
 import {
   appointments,
+  notifications,
   barbers,
   commissionTiers,
   planRequests,
@@ -45,7 +46,7 @@ import {
 import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
 import { claimDispatchSlot, runDispatch, despacharPush } from "@/lib/dispatch";
 import { chargeSubscription } from "@/lib/payments";
-import { shopTimeToUtc, parseDateKey } from "@/lib/time";
+import { shopTimeToUtc, parseDateKey, utcToShopParts } from "@/lib/time";
 import { normalizePhone, isValidPhone, nextPlaceholderPhone, isPlaceholderPhone } from "@/lib/phone";
 import { planClientImport, chaveNome } from "@/lib/import";
 import { nextRenewal } from "@/lib/subscriptions";
@@ -907,6 +908,25 @@ export async function updateClient(input: {
     }
 
     await db.update(users).set({ name, phone }).where(eq(users.id, input.userId));
+    if (phone !== atual.phone) {
+      // O número novo vale também para os próximos horários e para os
+      // lembretes já na fila: senão eles continuavam indo para o antigo, e
+      // o robô do WhatsApp não reconhecia o cliente pelo número novo.
+      await db
+        .update(appointments)
+        .set({ clientPhone: phone })
+        .where(
+          and(
+            eq(appointments.clientUserId, input.userId),
+            gt(appointments.startsAt, new Date()),
+            inArray(appointments.status, ["PENDENTE", "CONFIRMADO"])
+          )
+        );
+      await db
+        .update(notifications)
+        .set({ phone })
+        .where(and(eq(notifications.userId, input.userId), eq(notifications.status, "PENDENTE")));
+    }
     return done(
       phone !== atual.phone ? "Cadastro atualizado." : "Nome atualizado."
     );
@@ -1027,10 +1047,14 @@ export async function subscribeClient(input: {
 }): Promise<Result> {
   try {
     await admin();
-    const renewsAt = nextRenewal(new Date(), input.cycle);
     const tinhaPlano = await db.query.subscriptions.findFirst({
       where: and(eq(subscriptions.userId, input.userId), eq(subscriptions.status, "ATIVA")),
     });
+    // Trocar de plano não mexe no "pago até": recomeçar o ciclo hoje
+    // apagava meses já pagos do anual, ou dava meses de graça. Pagou o
+    // novo ciclo agora? É o "Registrar renovação" que estende.
+    const mantemVencimento = !!tinhaPlano && tinhaPlano.renewsAt.getTime() > Date.now();
+    const renewsAt = mantemVencimento ? tinhaPlano!.renewsAt : nextRenewal(new Date(), input.cycle);
 
     // Encerra o que estiver em aberto — ativa OU vencida. Só a ativa era
     // encerrada, então trocar o plano de quem estava devendo deixava duas
@@ -1061,6 +1085,12 @@ export async function subscribeClient(input: {
       .where(and(eq(planRequests.userId, input.userId), eq(planRequests.status, "ABERTA")));
     // O cliente que ligou os avisos fica sabendo na hora.
     await avisarPlanoAtivado({ userId: input.userId, planId: input.planId });
+    if (mantemVencimento) {
+      const venc = utcToShopParts(renewsAt).dateKey;
+      return done(
+        `Plano trocado. O vencimento continua em ${venc.slice(8, 10)}/${venc.slice(5, 7)} — se o cliente pagou um ciclo novo agora, use Registrar renovação.`
+      );
+    }
     return done(tinhaPlano ? "Plano trocado." : "Assinatura ativada.");
   } catch (e) {
     return fail(e);
@@ -1087,6 +1117,12 @@ export async function renewSubscription(userId: number): Promise<Result> {
         canceledAt: null,
       })
       .where(eq(subscriptions.id, current.id));
+    // Pedido de plano em aberto fica resolvido: senão um "Ativar" depois
+    // recomeçava o ciclo que acabou de ser pago.
+    await db
+      .update(planRequests)
+      .set({ status: "ATENDIDA" })
+      .where(and(eq(planRequests.userId, userId), eq(planRequests.status, "ABERTA")));
     await avisarPlanoAtivado({ userId, planId: current.planId, renovacao: true });
     return done("Renovação registrada.");
   } catch (e) {
@@ -1163,7 +1199,7 @@ export async function cancelSubscription(userId: number): Promise<Result> {
     const liberados = await desligarFixosDe([userId]);
     return done(
       liberados > 0
-        ? `Assinatura cancelada. O horário fixo foi liberado (${liberados} horário(s) futuro(s)).`
+        ? `Assinatura cancelada. O horário fixo foi liberado (${liberados} horário(s) futuro(s)) — avise o cliente: ele não recebe aviso automático desses horários.`
         : "Assinatura cancelada."
     );
   } catch (e) {
@@ -1251,7 +1287,10 @@ export async function importClients(csv: string): Promise<ImportResult> {
         const phone = nextPlaceholderPhone(reservados);
         reservados.push(phone);
         nomesPendentes.add(chaveNome(c.name));
-        novos.push({ name: c.name, phone, email: null });
+        // Sem telefone, o e-mail costuma ser o único contato que sobrou:
+        // entra junto, se nenhuma outra conta já usa.
+        const emailPendente = c.email && !donoDoEmail.has(c.email) ? c.email : null;
+        novos.push({ name: c.name, phone, email: emailPendente });
         continue;
       }
       const atual = existentes.get(c.phone);
@@ -1528,10 +1567,15 @@ export async function acceptPlanRequest(requestId: number): Promise<Result> {
 export async function rejectPlanRequest(requestId: number): Promise<Result> {
   try {
     await admin();
-    await db
+    // Só arquiva o que ainda está aberto: uma aba antiga transformava em
+    // "recusado" o pedido que outra pessoa já tinha atendido.
+    const [res] = await db
       .update(planRequests)
       .set({ status: "RECUSADA" })
-      .where(eq(planRequests.id, requestId));
+      .where(and(eq(planRequests.id, requestId), eq(planRequests.status, "ABERTA")));
+    if (res.affectedRows === 0) {
+      return { ok: false, error: "Esse pedido já foi resolvido. Atualize a página." };
+    }
     return done("Solicitação arquivada.");
   } catch (e) {
     return fail(e);
