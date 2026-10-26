@@ -1,9 +1,10 @@
 import { Clock } from "lucide-react";
 import type { Service } from "@/db/schema";
 import { formatBRL, formatDuration } from "@/lib/money";
+import { rotuloDias, rotuloFaixa, type RegraPreco } from "@/lib/precos";
 import { serviceIcons } from "./serviceIcons";
 
-export function ServiceCard({ service }: { service: Service }) {
+export function ServiceCard({ service, regras = [] }: { service: Service; regras?: RegraPreco[] }) {
   const Icon = serviceIcons[service.slug] ?? serviceIcons.corte;
   return (
     <div className="glass glass-hover group relative flex flex-col rounded-2xl p-5">
@@ -28,6 +29,17 @@ export function ServiceCard({ service }: { service: Service }) {
           {formatDuration(service.durationMin)}
         </span>
       </div>
+      {regras.length > 0 && (
+        <ul className="mt-3 space-y-1 text-xs text-steel-400">
+          {regras.map((r) => (
+            <li key={r.id}>
+              <span className="text-amber-200/90">{r.label || "Turno"}:</span>{" "}
+              <span className="tabular-nums text-steel-200">{formatBRL(r.priceCents)}</span>{" "}
+              · {rotuloDias(r.weekdays)}, {rotuloFaixa(r)}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

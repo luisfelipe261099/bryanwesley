@@ -1,5 +1,6 @@
 "use client";
 
+import { precoNoDia, type RegraPreco } from "@/lib/precos";
 import { useContext, useEffect, useState, useTransition } from "react";
 import {
   CalendarClock,
@@ -72,7 +73,7 @@ export function FichaCliente({
   cliente: Cliente;
   assinatura: Assinatura;
   plans: { id: number; name: string; priceCents: number }[];
-  services: { id: number; name: string; priceCents: number; durationMin: number }[];
+  services: { id: number; name: string; priceCents: number; durationMin: number; regras?: RegraPreco[] }[];
   team: { id: number; shortName: string }[];
   days: DayOption[];
   resumo: { concluidos: number; gasto: number; desde: string };
@@ -348,7 +349,7 @@ function Agendar({
   days,
 }: {
   cliente: Cliente;
-  services: { id: number; name: string; priceCents: number; durationMin: number }[];
+  services: { id: number; name: string; priceCents: number; durationMin: number; regras?: RegraPreco[] }[];
   team: { id: number; shortName: string }[];
   days: DayOption[];
 }) {
@@ -368,9 +369,12 @@ function Agendar({
   const duracao = services
     .filter((s) => escolhidos.includes(s.id))
     .reduce((acc, s) => acc + s.durationMin, 0);
+  // Com o horário escolhido, vale o preço do turno (noite, sábado…).
+  const precoDe = (s: (typeof services)[number]) =>
+    dateKey && time ? precoNoDia(s, s.regras ?? [], dateKey, time) : s.priceCents;
   const preco = services
     .filter((s) => escolhidos.includes(s.id))
-    .reduce((acc, s) => acc + s.priceCents, 0);
+    .reduce((acc, s) => acc + precoDe(s), 0);
 
   // A grade muda com o serviço, o dia e o barbeiro: recarrega a cada troca.
   useEffect(() => {

@@ -1,3 +1,5 @@
+import { carregarRegras } from "@/lib/precos-server";
+import { precoNoDia } from "@/lib/precos";
 import Link from "next/link";
 import { whatsappEnviando } from "@/lib/whatsapp-status";
 import {
@@ -60,11 +62,12 @@ async function nextFreeSlot(durationMin: number) {
 }
 
 export default async function Home() {
-  const [services, plans, barbers, session] = await Promise.all([
+  const [services, plans, barbers, session, regras] = await Promise.all([
     listServices(),
     listPlans(),
     listTeam(),
     getSession(),
+    carregarRegras(),
   ]);
   const combo = services.find((s) => s.slug === "combo") ?? services[0];
   const [settings, avisaPorWhatsapp] = await Promise.all([getSettings(), whatsappEnviando()]);
@@ -163,7 +166,13 @@ export default async function Home() {
                 dayLabel={next?.day.dayLabel ?? null}
                 serviceName={combo?.name ?? "Combo Completo"}
                 duration={combo ? formatDuration(combo.durationMin) : "1h15"}
-                priceCents={combo?.priceCents ?? 15000}
+                priceCents={
+                  combo
+                    ? next
+                      ? precoNoDia(combo, regras, next.day.dateKey, next.time)
+                      : combo.priceCents
+                    : 15000
+                }
                 // Abre a agenda já no serviço e no dia do cartão: sem isso
                 // caía em hoje, sem serviço, e o horário mostrado sumia.
                 href={
@@ -191,7 +200,7 @@ export default async function Home() {
           <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {services.map((s, i) => (
               <Reveal key={s.id} delay={i * 0.05}>
-                <ServiceCard service={s} />
+                <ServiceCard service={s} regras={regras.filter((r) => r.serviceId === s.id)} />
               </Reveal>
             ))}
           </div>

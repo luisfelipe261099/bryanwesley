@@ -15,6 +15,7 @@ import {
   recurringSlots,
   scheduleBlocks,
   services,
+  servicePriceRules,
   settings as settingsTable,
   subscriptions,
   users,
@@ -827,6 +828,64 @@ export async function saveService(
       });
     }
     return done("Serviço salvo.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// Preço por turno: outro valor para o serviço em certos dias e horários.
+const hhmm = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$|^24:00$/, "Horário inválido. Use HH:MM.")
+  .transform((v) => Number(v.slice(0, 2)) * 60 + Number(v.slice(3)));
+
+const priceRuleSchema = z
+  .object({
+    id: z.number().int().optional(),
+    serviceId: z.number().int(),
+    label: z.string().trim().max(40, "Nome do turno: no máximo 40 caracteres.").default(""),
+    weekdays: z
+      .array(z.number().int().min(0).max(6))
+      .min(1, "Escolha pelo menos um dia da semana."),
+    start: hhmm,
+    end: hhmm,
+    priceCents: money,
+  })
+  .refine((d) => d.end > d.start, {
+    message: "O horário final precisa ser depois do inicial.",
+  });
+
+export async function saveServicePriceRule(
+  input: z.input<typeof priceRuleSchema>
+): Promise<Result> {
+  try {
+    await admin();
+    const d = priceRuleSchema.parse(input);
+    const valores = {
+      serviceId: d.serviceId,
+      label: d.label,
+      weekdays: [...new Set(d.weekdays)].sort((a, b) => a - b),
+      startMin: d.start,
+      endMin: d.end,
+      priceCents: d.priceCents,
+    };
+    if (d.id) {
+      await db.update(servicePriceRules).set(valores).where(eq(servicePriceRules.id, d.id));
+    } else {
+      await db.insert(servicePriceRules).values(valores);
+    }
+    // Quem já marcou mantém o preço do dia em que marcou.
+    return done("Preço por turno salvo. Vale para os próximos agendamentos.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function removeServicePriceRule(id: number): Promise<Result> {
+  try {
+    await admin();
+    await db.delete(servicePriceRules).where(eq(servicePriceRules.id, id));
+    return done("Preço por turno removido.");
   } catch (e) {
     return fail(e);
   }

@@ -14,6 +14,8 @@ import { toast } from "@/lib/toast";
 import { formatBRL, parseMoneyToCents } from "@/lib/money";
 import { saveService, toggleService } from "../actions";
 import { PlanoForm } from "../PlanoForm";
+import { PrecosPorTurno } from "./PrecosPorTurno";
+import type { RegraPreco } from "@/lib/precos";
 
 type ServiceRow = {
   id: number;
@@ -46,9 +48,11 @@ const PERGUNTA_GRATIS = "O preço está R$ 0,00: o serviço vai sair de graça n
 
 export function CatalogoManager({
   services,
+  regras,
   plans,
 }: {
   services: ServiceRow[];
+  regras: RegraPreco[];
   plans: PlanRow[];
 }) {
   return (
@@ -57,7 +61,8 @@ export function CatalogoManager({
         <h1 className="font-display text-3xl text-white sm:text-4xl">Catálogo</h1>
         <p className="mt-1.5 text-sm text-steel-400">
           Os serviços que o cliente escolhe ao agendar, com preço e duração.
-          Quem já está marcado mantém o preço do dia em que marcou.
+          Cada serviço pode ter preço por turno (noite, sábado…). Quem já
+          está marcado mantém o preço do dia em que marcou.
         </p>
       </div>
       <Card
@@ -67,7 +72,7 @@ export function CatalogoManager({
       >
         <div className="space-y-3">
           {services.map((s) => (
-            <ServiceRowForm key={s.id} service={s} />
+            <ServiceRowForm key={s.id} service={s} regras={regras.filter((r) => r.serviceId === s.id)} />
           ))}
         </div>
         <NewService />
@@ -88,7 +93,7 @@ export function CatalogoManager({
   );
 }
 
-function ServiceRowForm({ service }: { service: ServiceRow }) {
+function ServiceRowForm({ service, regras }: { service: ServiceRow; regras: RegraPreco[] }) {
   const [f, setF] = useState({
     ...service,
     price: reais(service.priceCents),
@@ -165,6 +170,7 @@ function ServiceRowForm({ service }: { service: ServiceRow }) {
         <ToggleActive id={service.id} active={f.active} onChange={(v) => setF({ ...f, active: v })} />
       </div>
       <Feedback msg={msg} />
+      <PrecosPorTurno serviceId={service.id} precoNormal={service.priceCents} regras={regras} />
     </div>
   );
 }

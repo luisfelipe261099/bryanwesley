@@ -5,6 +5,7 @@
 // não achava nada, porque a lista só existia espremida num card do
 // dashboard. A configuração mudou para /admin/ajustes e aqui ficou o que
 // o nome promete.
+import { carregarRegras } from "@/lib/precos-server";
 import {
   agendaDoPeriodo,
   contarAgenda,
@@ -97,10 +98,11 @@ export default async function AdminAgenda({
       ? Math.floor(paginaPedida)
       : 1;
 
-  const [settings, equipe, catalogo] = await Promise.all([
+  const [settings, equipe, catalogo, regras] = await Promise.all([
     getSettings(),
     listTeam(),
     listServices(),
+    carregarRegras(),
   ]);
 
   // A janela de tempo de cada visão. "Próximos" começa AGORA (não no
@@ -210,6 +212,7 @@ export default async function AdminAgenda({
           name: s.name,
           priceCents: s.priceCents,
           durationMin: s.durationMin,
+          regras: regras.filter((r) => r.serviceId === s.id),
         }))}
         linhas={linhas.map(paraLinha)}
         bloqueios={bloqueios}

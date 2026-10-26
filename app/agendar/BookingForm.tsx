@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { serviceIcons } from "@/components/serviceIcons";
 import { formatBRL, formatDuration } from "@/lib/money";
+import { precoNoDia, regraDoHorario, rotuloDias, rotuloFaixa, type RegraPreco } from "@/lib/precos";
+import { weekdayOf } from "@/lib/time";
 import { normalizePhone } from "@/lib/phone";
 import type { Service, Plan } from "@/db/schema";
 import type { Slot } from "@/lib/schedule";
@@ -42,8 +44,11 @@ export function BookingForm({
   usoPorMes = {},
   barberPadrao = null,
   daCasa = false,
+  regras = [],
 }: {
   services: Service[];
+  /** Preço por turno (noite, sábado…): vale o do horário escolhido. */
+  regras?: RegraPreco[];
   team: TeamMember[];
   days: DayOption[];
   plan: (Plan & { covers: { id: number; quota: number | null }[] }) | null;
@@ -112,7 +117,14 @@ export function BookingForm({
   };
   // Total do que será cobrado: o que o plano cobre não entra. Antes o
   // resumo dizia "Incluso" na linha e somava o preço cheio no total.
-  const totalCents = chosen.reduce((acc, s) => acc + (cobre(s.id) ? 0 : s.priceCents), 0);
+  // Preço do turno do horário escolhido; antes de escolher, o normal.
+  const precoDe = (s: Service) => (dateKey && time ? precoNoDia(s, regras, dateKey, time) : s.priceCents);
+  const turnoDe = (s: Service) => {
+    if (!dateKey || !time) return null;
+    const [h, m] = time.split(":").map(Number);
+    return regraDoHorario(regras, s.id, weekdayOf(dateKey), h * 60 + m);
+  };
+  const totalCents = chosen.reduce((acc, s) => acc + (cobre(s.id) ? 0 : precoDe(s)), 0);
   const tudoIncluso = isSub && chosen.length > 0 && chosen.every((s) => cobre(s.id));
   // Serviços do plano cuja cota do mês já acabou: saem cobrados.
   const foraDaCota = outroFone
@@ -258,6 +270,15 @@ export function BookingForm({
                       </span>
                       <span className="hidden sm:inline"> · {s.description}</span>
                     </span>
+                    {!covered &&
+                      regras
+                        .filter((r) => r.serviceId === s.id)
+                        .map((r) => (
+                          <span key={r.id} className="mt-0.5 block text-xs text-amber-200/90">
+                            {r.label ? `${r.label}: ` : ""}
+                            {formatBRL(r.priceCents)} ({rotuloDias(r.weekdays)}, {rotuloFaixa(r)})
+                          </span>
+                        ))}
                   </span>
                   <span className="flex flex-none items-center gap-3">
                     <span
@@ -489,13 +510,20 @@ export function BookingForm({
                     key={s.id}
                     className="flex items-center justify-between gap-3 text-sm"
                   >
-                    <span className="text-steel-200">{s.name}</span>
+                    <span className="text-steel-200">
+                      {s.name}
+                      {!covered && turnoDe(s) && (
+                        <span className="ml-1.5 text-xs text-amber-200/90">
+                          · preço {turnoDe(s)!.label ? `de ${turnoDe(s)!.label.toLowerCase()}` : "do turno"}
+                        </span>
+                      )}
+                    </span>
                     <span
                       className={`flex-none font-semibold tabular-nums ${
                         covered ? "text-electric" : "text-white"
                       }`}
                     >
-                      {covered ? "Incluso" : formatBRL(s.priceCents)}
+                      {covered ? "Incluso" : formatBRL(precoDe(s))}
                     </span>
                   </div>
                 );

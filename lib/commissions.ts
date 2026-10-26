@@ -7,6 +7,7 @@
 // Faixas (commission_tiers) elevam o percentual do barbeiro quando ele
 // ultrapassa uma meta de faturamento no mês.
 // ───────────────────────────────────────────────────────────
+import { precosNoInstante } from "./precos-server";
 import {
   and,
   eq,
@@ -16,7 +17,6 @@ import {
   or,
   desc,
   sum,
-  inArray,
   sql as drizzleSql,
 } from "drizzle-orm";
 import { db } from "@/db/client";
@@ -26,7 +26,6 @@ import {
   appointmentServices,
   commissionTiers,
   barbers,
-  services as servicesTable,
 } from "@/db/schema";
 import { getSettings } from "./schedule";
 import { dbErrorCode } from "./errors";
@@ -167,16 +166,9 @@ export async function recordCommission(appointmentId: number) {
     const ids = items
       .map((i) => i.serviceId)
       .filter((id): id is number => id !== null);
-    const catalog = ids.length
-      ? await db
-          .select({
-            id: servicesTable.id,
-            priceCents: servicesTable.priceCents,
-          })
-          .from(servicesTable)
-          .where(inArray(servicesTable.id, ids))
-      : [];
-    const priceById = new Map(catalog.map((c) => [c.id, c.priceCents]));
+    // "Tabela" é o preço daquele horário: um corte de plano feito à noite
+    // vale, para a comissão, o mesmo que o corte avulso da noite.
+    const priceById = await precosNoInstante(ids, appt.startsAt);
     baseCents = items.reduce(
       (acc, i) =>
         acc +

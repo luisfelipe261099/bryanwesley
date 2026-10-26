@@ -678,6 +678,8 @@ function Item({
               servicos={servicos}
               atuais={a.servicoIds}
               resumo={`${a.clientName} · ${a.hora}`}
+              dia={a.dateKey}
+              hora={a.hora}
             />
             {/* Com o cliente já na cadeira não há o que remarcar: o recado
                 "seu horário foi remarcado" chegava a quem estava sentado. */}

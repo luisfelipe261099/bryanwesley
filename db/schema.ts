@@ -135,6 +135,31 @@ export const services = mysqlTable(
   (t) => ({ slugIdx: uniqueIndex("services_slug_idx").on(t.slug) })
 );
 
+/**
+ * Preço por turno: o mesmo serviço pode custar diferente conforme o dia e
+ * a hora (noite, sábado…). Fora de qualquer regra vale o preço do catálogo.
+ * O preço é resolvido na hora de marcar e gravado no atendimento, então
+ * mudar uma regra não mexe no que já foi combinado.
+ */
+export const servicePriceRules = mysqlTable(
+  "service_price_rules",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    serviceId: int("service_id")
+      .notNull()
+      .references(() => services.id, { onDelete: "cascade" }),
+    /** Nome curto que aparece para o cliente, ex.: "Noite", "Sábado". */
+    label: varchar("label", { length: 40 }).notNull().default(""),
+    /** Dias da semana em que vale (0 = domingo … 6 = sábado). */
+    weekdays: jsonCol<number[]>("weekdays").notNull(),
+    /** Faixa de horário de início do atendimento: [startMin, endMin). */
+    startMin: int("start_min").notNull(),
+    endMin: int("end_min").notNull(),
+    priceCents: int("price_cents").notNull(),
+  },
+  (t) => ({ serviceIdx: index("service_price_rules_service_idx").on(t.serviceId) })
+);
+
 // ───────────────────────── Planos ─────────────────────────
 
 export const plans = mysqlTable(
@@ -697,6 +722,7 @@ export const appointmentServicesRelations = relations(
 export type User = typeof users.$inferSelect;
 export type Barber = typeof barbers.$inferSelect;
 export type Service = typeof services.$inferSelect;
+export type ServicePriceRule = typeof servicePriceRules.$inferSelect;
 export type Plan = typeof plans.$inferSelect;
 export type Appointment = typeof appointments.$inferSelect;
 export type Subscription = typeof subscriptions.$inferSelect;

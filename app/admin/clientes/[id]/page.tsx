@@ -1,3 +1,4 @@
+import { carregarRegras } from "@/lib/precos-server";
 import { isInfinitePayConfigured } from "@/lib/payments";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -47,11 +48,12 @@ export default async function FichaDoCliente({
   const ficha = await clientDetail(id);
   if (!ficha) notFound();
 
-  const [services, team, plans, settings] = await Promise.all([
+  const [services, team, plans, settings, regras] = await Promise.all([
     listServices(),
     listTeam(),
     listPlans(),
     getSettings(),
+    carregarRegras(),
   ]);
   const days = listOpenDays(settings, 10);
 
@@ -93,6 +95,7 @@ export default async function FichaDoCliente({
           name: s.name,
           priceCents: s.priceCents,
           durationMin: s.durationMin,
+          regras: regras.filter((r) => r.serviceId === s.id),
         }))}
         team={team.map((b) => ({ id: b.id, shortName: b.shortName }))}
         days={days}

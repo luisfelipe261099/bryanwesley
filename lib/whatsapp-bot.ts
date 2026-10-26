@@ -21,6 +21,7 @@
 // esquecida depois de meia hora), junto com as opções da última pergunta
 // na ordem em que foram numeradas.
 // ───────────────────────────────────────────────────────────
+import { carregarRegras } from "./precos-server";
 import { and, eq, gt, gte, inArray, asc, isNull, lt, or } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appointments, users, whatsappSessions } from "@/db/schema";
@@ -334,11 +335,18 @@ async function pedirServico(
   // caminho para a lista inteira.
   const filtro = opts.apenas?.length ? new Set(opts.apenas) : null;
   const mostrar = filtro ? servicos.filter((s) => filtro.has(s.id)) : servicos;
-  const linhas = mostrar.slice(0, filtro ? 9 : 10).map((s) => ({
-    id: `svc:${s.id}`,
-    titulo: s.name,
-    descricao: `${formatBRL(s.priceCents)} · ${formatDuration(s.durationMin)}`,
-  }));
+  // Com preço por turno, o valor depende do horário: a lista avisa, e o
+  // valor certo vem na confirmação, já com o horário escolhido.
+  const regras = await carregarRegras(mostrar.map((s) => s.id));
+  const linhas = mostrar.slice(0, filtro ? 9 : 10).map((s) => {
+    const turnos = regras.filter((r) => r.serviceId === s.id);
+    const menor = Math.min(s.priceCents, ...turnos.map((r) => r.priceCents));
+    return {
+      id: `svc:${s.id}`,
+      titulo: s.name,
+      descricao: `${turnos.length ? "A partir de " : ""}${formatBRL(menor)} · ${formatDuration(s.durationMin)}`.slice(0, 72),
+    };
+  });
   if (filtro) {
     linhas.push({ id: "menu:agendar", titulo: "Ver todos os serviços", descricao: "O catálogo inteiro" });
   }

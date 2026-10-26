@@ -7,6 +7,7 @@
 // dispara um "seu horário foi cancelado" no WhatsApp da pessoa que está
 // sentada na cadeira.
 
+import { precoNoDia, type RegraPreco } from "@/lib/precos";
 import { useState, useTransition } from "react";
 import { Loader2, Scissors } from "lucide-react";
 import { Modal } from "@/components/Modal";
@@ -20,6 +21,8 @@ export type ServicoDoCatalogo = {
   name: string;
   priceCents: number;
   durationMin: number;
+  /** Preço por turno deste serviço (noite, sábado…). */
+  regras?: RegraPreco[];
 };
 
 export function EditarServicos({
@@ -28,8 +31,13 @@ export function EditarServicos({
   atuais,
   resumo,
   variante = "icone",
+  dia,
+  hora,
 }: {
   appointmentId: number;
+  /** Dia e hora do atendimento: o preço que entra é o do turno. */
+  dia?: string;
+  hora?: string;
   /** O catálogo ativo, para escolher. */
   servicos: ServicoDoCatalogo[];
   /** Ids do que já está marcado neste atendimento. */
@@ -44,7 +52,9 @@ export function EditarServicos({
   const [salvando, start] = useTransition();
 
   const selecionados = servicos.filter((s) => escolhidos.includes(s.id));
-  const total = selecionados.reduce((a, s) => a + s.priceCents, 0);
+  const precoDe = (s: ServicoDoCatalogo) =>
+    dia && hora ? precoNoDia(s, s.regras ?? [], dia, hora) : s.priceCents;
+  const total = selecionados.reduce((a, s) => a + precoDe(s), 0);
   const duracao = selecionados.reduce((a, s) => a + s.durationMin, 0);
 
   function abrir() {
@@ -117,7 +127,7 @@ export function EditarServicos({
                 }`}
               >
                 {s.name}
-                <span className="ml-1.5 opacity-70">{formatBRL(s.priceCents)}</span>
+                <span className="ml-1.5 opacity-70">{formatBRL(precoDe(s))}</span>
               </button>
             );
           })}

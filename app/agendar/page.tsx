@@ -1,3 +1,4 @@
+import { carregarRegras } from "@/lib/precos-server";
 import Link from "next/link";
 import { whatsappEnviando } from "@/lib/whatsapp-status";
 import { ArrowLeft, Ban } from "lucide-react";
@@ -26,7 +27,7 @@ export default async function Agendar({
 }) {
   const session = await getSession();
 
-  const [settings, services, team, plans, avisaPorWhatsapp] = await Promise.all([
+  const [settings, services, team, plans, avisaPorWhatsapp, regras] = await Promise.all([
     getSettings(),
     listServices(),
     listTeam(),
@@ -35,6 +36,7 @@ export default async function Agendar({
     // dele. Sem isso a tela cobrava o preço cheio de quem não ia pagar.
     listPlans({ todos: true }),
     whatsappEnviando(),
+    carregarRegras(),
   ]);
 
   // Quem é da casa (admin, barbeiro) lança encaixe: vê mais dias à frente
@@ -133,6 +135,7 @@ export default async function Agendar({
         ) : (
           <BookingForm
             services={services}
+            regras={regras}
             team={team.map((b) => ({
               id: b.id,
               shortName: b.shortName,

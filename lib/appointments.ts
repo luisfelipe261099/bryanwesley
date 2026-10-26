@@ -3,6 +3,8 @@
 // A prevenção de horário duplicado é da constraint de exclusão
 // no banco; aqui traduzimos a violação para uma mensagem humana.
 // ───────────────────────────────────────────────────────────
+import { carregarRegras } from "./precos-server";
+import { precoNoDia, precoNoHorario } from "./precos";
 import { and, eq, gt, gte, inArray, isNull, lt, ne, notInArray, or } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
@@ -213,11 +215,14 @@ export async function createBooking(input: CreateBookingInput) {
   const congelado = new Map(
     (input.frozenItems ?? []).map((i) => [i.serviceId, i])
   );
+  // Fora da remarcação, o preço é o do turno escolhido (noite, sábado…),
+  // ou o do catálogo quando nenhuma regra vale para esse dia e hora.
+  const regras = await carregarRegras(chosen.map((s) => s.id));
   // Preço congelado zero é o do item que o plano cobria: se agora ele não
   // é mais coberto (plano acabou, cota do mês estourou), vale a tabela.
   const preco = (s: { id: number; priceCents: number }) => {
     const c = congelado.get(s.id)?.priceCents;
-    return c !== undefined && c > 0 ? c : s.priceCents;
+    return c !== undefined && c > 0 ? c : precoNoDia(s, regras, input.dateKey, input.time);
   };
   const duracao = (s: { id: number; durationMin: number }) =>
     congelado.get(s.id)?.durationMin ?? s.durationMin;
@@ -811,8 +816,11 @@ export async function updateAppointmentServices(input: {
   const combinado = new Map(
     atuais.filter((i) => i.serviceId !== null && i.priceCents > 0).map((i) => [i.serviceId as number, i.priceCents])
   );
+  const regras = await carregarRegras(chosen.map((s) => s.id));
   const precoDe = (s: { id: number; priceCents: number }) =>
-    cobertos.has(s.id) ? 0 : combinado.get(s.id) ?? s.priceCents;
+    cobertos.has(s.id)
+      ? 0
+      : combinado.get(s.id) ?? precoNoHorario(s, regras, partes.weekday, partes.minutesOfDay);
   const tudoCoberto = !!assinatura && chosen.every((s) => cobertos.has(s.id));
   const totalCents = tudoCoberto ? 0 : chosen.reduce((acc, s) => acc + precoDe(s), 0);
 
