@@ -5,7 +5,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { users } from "@/db/schema";
 
-export const TOURS = ["admin", "barbeiro", "cliente"] as const;
+// "preco-turno" é novidade: aparece uma vez para o dono que já usa o painel.
+export const TOURS = ["admin", "barbeiro", "cliente", "preco-turno"] as const;
 export type Tour = (typeof TOURS)[number];
 
 /** A pessoa ainda não viu o tutorial dessa tela? */

@@ -49,7 +49,7 @@ export const dynamic = "force-dynamic";
 export default async function AdminDashboard({
   searchParams,
 }: {
-  searchParams?: { tutorial?: string };
+  searchParams?: { tutorial?: string; novidade?: string };
 }) {
   // O layout já conferiu o papel; aqui só se pega o id (leitura em cache).
   const session = await requireRole(["ADMIN"]);
@@ -57,7 +57,7 @@ export default async function AdminDashboard({
   const dateKey = today;
   const barberFilter = null;
 
-  const [kpi, agendaDia, semana, equipe, settings, pedidos, chavePush, tutorial] = await Promise.all([
+  const [kpi, agendaDia, semana, equipe, settings, pedidos, chavePush, tutorial, novidadeTurno] = await Promise.all([
     adminOverview(),
     appointmentsOfDay(dateKey, barberFilter),
     weeklyRevenue(),
@@ -66,6 +66,7 @@ export default async function AdminDashboard({
     openPlanRequests(),
     chavePublicaPush(),
     tutorialPendente(session.id, "admin"),
+    tutorialPendente(session.id, "preco-turno"),
   ]);
   const agenda = agendaDia;
 
@@ -99,6 +100,15 @@ export default async function AdminDashboard({
         usuarioId={session.id}
         mostrar={tutorial}
         forcar={searchParams?.tutorial === "1"}
+      />
+      {/* Novidade do preço por turno: só depois do tutorial de boas-vindas,
+          para não abrir dois de uma vez. */}
+      <TutorialPrimeiroAcesso
+        tour="preco-turno"
+        nome={session.name.split(" ")[0]}
+        usuarioId={session.id}
+        mostrar={!tutorial && novidadeTurno && searchParams?.tutorial !== "1"}
+        forcar={searchParams?.novidade === "preco-turno"}
       />
       <Reveal>
         <div className="flex flex-wrap items-end justify-between gap-4">

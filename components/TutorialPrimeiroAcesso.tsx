@@ -11,9 +11,37 @@ type Passo = {
   /** Seletores do elemento a destacar, em ordem de preferência. Sem alvo
    * na tela (ou sem seletor), o cartão aparece no centro. */
   alvo?: string[];
+  /** Botão final que leva a outra tela (ex.: "Abrir o Catálogo"). */
+  acao?: { rotulo: string; href: string };
 };
 
 function passosDe(tour: Tour, nome: string): Passo[] {
+  if (tour === "preco-turno") {
+    return [
+      {
+        titulo: `Novidade, ${nome}: preço por turno`,
+        texto:
+          "Agora cada serviço pode ter outro valor em certos dias e horários. Exemplo: o corte custa R$ 50 de dia e R$ 60 à noite, ou mais caro no sábado.",
+      },
+      {
+        titulo: "Fica no Catálogo",
+        texto:
+          "Toque na aba Catálogo. Embaixo de cada serviço aparece a parte Preço por turno, com o botão Adicionar turno.",
+        alvo: ['nav.rail a[href="/admin/catalogo"]'],
+      },
+      {
+        titulo: "Como criar um turno",
+        texto:
+          "Escreva o nome (ex.: Noite), os horários em Das e Até, o preço, e marque os dias da semana. Toque em Salvar turno. Fora dos turnos vale o preço normal do serviço.",
+      },
+      {
+        titulo: "O que o cliente vê",
+        texto:
+          "O site mostra os turnos em cada serviço, e na hora de agendar o total já sai com o preço do horário escolhido. Quem já marcou continua com o valor combinado.",
+        acao: { rotulo: "Abrir o Catálogo", href: "/admin/catalogo" },
+      },
+    ];
+  }
   if (tour === "admin") {
     return [
       {
@@ -197,6 +225,7 @@ export function TutorialPrimeiroAcesso({
       try {
         const u = new URL(window.location.href);
         u.searchParams.delete("tutorial");
+        u.searchParams.delete("novidade");
         window.history.replaceState(null, "", u.toString());
       } catch {}
     }
@@ -228,7 +257,14 @@ export function TutorialPrimeiroAcesso({
     if (el) {
       const r = el.getBoundingClientRect();
       const fora = r.top < 80 || r.bottom > window.innerHeight - 100;
-      if (fora) el.scrollIntoView({ block: r.height > window.innerHeight * 0.5 ? "start" : "center", behavior: "smooth" });
+      // Aba escondida no fim da fileira (celular): traz para o meio.
+      const deLado = r.left < 0 || r.right > window.innerWidth;
+      if (fora || deLado)
+        el.scrollIntoView({
+          block: fora ? (r.height > window.innerHeight * 0.5 ? "start" : "center") : "nearest",
+          inline: deLado ? "center" : "nearest",
+          behavior: "smooth",
+        });
     }
     medir();
     const t1 = setTimeout(medir, 350);
@@ -354,13 +390,17 @@ export function TutorialPrimeiroAcesso({
           <button
             ref={principal}
             type="button"
-            onClick={() => (ultimo ? fechar() : setI((v) => v + 1))}
+            onClick={() => {
+              if (!ultimo) return setI((v) => v + 1);
+              fechar();
+              if (passo.acao) window.location.href = passo.acao.href;
+            }}
             className="btn-royal label inline-flex items-center gap-1.5 rounded-full px-5 py-2.5 text-white"
           >
             {ultimo ? (
               <>
                 <Check className="h-3.5 w-3.5" strokeWidth={3} />
-                Começar
+                {passo.acao?.rotulo ?? "Começar"}
               </>
             ) : (
               <>

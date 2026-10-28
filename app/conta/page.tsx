@@ -27,6 +27,7 @@ export default async function Conta() {
     session.role === "ADMIN"
       ? [
           { href: "/admin?tutorial=1", label: "Tutorial do painel" },
+          { href: "/admin?novidade=preco-turno", label: "Tutorial do preço por turno" },
           ...(session.barberId ? [{ href: "/barbeiro?tutorial=1", label: "Tutorial da agenda de barbeiro" }] : []),
         ]
       : [{ href: `${HOME[session.role]}?tutorial=1`, label: "Ver o tutorial de novo" }];
