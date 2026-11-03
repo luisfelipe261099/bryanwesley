@@ -74,7 +74,7 @@ export function Modal({
       role="dialog"
       aria-modal="true"
       aria-label={label}
-      className="fixed inset-0 z-[100] grid place-items-center overflow-y-auto bg-ink/90 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] grid place-items-center overflow-y-auto bg-ink/95 p-4"
       onClick={onClose}
     >
       <div

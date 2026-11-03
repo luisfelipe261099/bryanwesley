@@ -465,7 +465,7 @@ export function AgendaManager({
             <div className="space-y-6">
               {porData.map(([dateKey, doDia]) => (
                 <div key={dateKey}>
-                  <h3 className="label sticky top-0 z-10 -mx-1 mb-2.5 bg-surface/80 px-1 py-1.5 capitalize text-electric backdrop-blur">
+                  <h3 className="label sticky top-0 z-10 -mx-1 mb-2.5 bg-surface px-1 py-1.5 capitalize text-electric">
                     {rotuloCurto(dateKey)}
                     <span className="ml-2 text-steel-400">
                       {contarAtendimentos(doDia)} agendamento

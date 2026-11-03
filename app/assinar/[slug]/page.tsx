@@ -40,7 +40,7 @@ export default async function Assinar({
   return (
     <>
       <Background />
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-ink-800/90 backdrop-blur-xl">
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-ink-800">
         <div className="mx-auto flex h-16 max-w-2xl items-center gap-2.5 px-5 lg:px-8">
           <Link
             href="/planos"

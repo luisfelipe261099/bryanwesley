@@ -85,7 +85,7 @@ export default async function Confirmado({
   return (
     <>
       <Background />
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-ink-800/90 backdrop-blur-xl">
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-ink-800">
         <div className="mx-auto flex h-16 max-w-lg items-center px-5 lg:px-8">
           <Link href="/">
             <Logo subtitle={info.unit} />

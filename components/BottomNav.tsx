@@ -72,7 +72,7 @@ export function BottomNav({
     <nav
       ref={navRef}
       aria-label="Navegação principal"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-white/8 bg-ink-800/95 backdrop-blur-xl"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-white/8 bg-ink-800"
     >
       <ul className="mx-auto flex max-w-lg items-stretch justify-between px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2">
         {items.map((item) => {

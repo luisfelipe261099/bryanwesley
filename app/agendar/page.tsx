@@ -178,7 +178,7 @@ function TopBar({
   backHref: string;
 }) {
   return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-ink-800/90 backdrop-blur-xl">
+    <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-ink-800">
       <div className="mx-auto flex h-16 max-w-5xl items-center justify-between gap-3 px-5 lg:px-8">
         <div className="flex min-w-0 items-center gap-2.5">
           <Link

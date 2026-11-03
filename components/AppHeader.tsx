@@ -14,7 +14,7 @@ export async function AppHeader({
   // A unidade vem do banco: trocar o nome no painel reflete em todo header.
   const unit = shopFrom(await getSettings().catch(() => undefined)).unit;
   return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-ink-800/90 backdrop-blur-xl">
+    <header className="fixed inset-x-0 top-0 z-50 border-b border-white/8 bg-ink-800">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 lg:px-8">
         <div className="flex items-center gap-3">
           <Link href="/">
