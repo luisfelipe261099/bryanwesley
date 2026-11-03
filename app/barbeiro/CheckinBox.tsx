@@ -1,25 +1,39 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { AlertCircle, Loader2, QrCode } from "lucide-react";
+import { useCallback, useState, useTransition } from "react";
+import { AlertCircle, Camera, Loader2, QrCode } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { checkIn } from "./actions";
+import { LerQr, type LeituraQr } from "./LerQr";
 
 /**
- * Validação de chegada. O barbeiro aponta a câmera (o QR abre a rota
- * /barbeiro/checkin/<token>) ou digita o código curto aqui.
+ * Validação de chegada. O barbeiro lê o QR do cliente com a câmera aqui
+ * mesmo (botão "Ler QR com a câmera"), aponta a câmera do celular (o QR
+ * abre a rota /barbeiro/checkin/<token>) ou digita o código curto.
  */
 export function CheckinBox() {
   const [code, setCode] = useState("");
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [camera, setCamera] = useState(false);
+  const fecharCamera = useCallback(() => setCamera(false), []);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!code.trim()) return;
+    validar({ code });
+  }
+
+  function lido(l: LeituraQr) {
+    setCamera(false);
+    if ("code" in l) setCode(l.code);
+    validar(l);
+  }
+
+  function validar(entrada: { code: string } | { token: string }) {
     setMsg(null);
     start(async () => {
-      const res = await checkIn({ code });
+      const res = await checkIn(entrada);
       if (res.ok) {
         // Aviso flutuante: a revalidação da agenda remontaria este card
         // e apagaria a confirmação bem na hora em que o barbeiro lê.
@@ -46,7 +60,20 @@ export function CheckinBox() {
         Leia o QR do cliente com a câmera ou digite o código de 6 letras que
         aparece no app dele.
       </p>
-      <form onSubmit={submit} className="mt-3 flex gap-2">
+      <button
+        type="button"
+        onClick={() => {
+          setMsg(null);
+          setCamera(true);
+        }}
+        disabled={pending}
+        className="btn-royal label mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3.5 text-white disabled:opacity-40"
+      >
+        {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+        Ler QR com a câmera
+      </button>
+      <p className="mt-3 text-center text-[11px] uppercase tracking-[0.2em] text-steel-400/70">ou digite o código</p>
+      <form onSubmit={submit} className="mt-2 flex gap-2">
         <input
           value={code}
           onChange={(e) => setCode(e.target.value.toUpperCase())}
@@ -58,7 +85,7 @@ export function CheckinBox() {
         <button
           type="submit"
           disabled={pending || code.length < 4}
-          className="btn-royal label inline-flex flex-none items-center gap-1.5 rounded-xl px-4 text-white disabled:opacity-40"
+          className="label inline-flex flex-none items-center gap-1.5 rounded-xl border border-electric/40 bg-electric/10 px-4 text-electric disabled:opacity-40"
         >
           {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Validar"}
         </button>
@@ -72,6 +99,7 @@ export function CheckinBox() {
           {msg.text}
         </p>
       )}
+      {camera && <LerQr onLer={lido} onFechar={fecharCamera} />}
     </div>
   );
 }
