@@ -1,4 +1,4 @@
-import { isInfinitePayConfigured } from "@/lib/payments";
+import { isCobrancaOnline } from "@/lib/payments";
 import {
   clubOverview,
   listPlans,
@@ -55,7 +55,7 @@ export default async function AdminClube({
 
   return (
     <ClubeManager
-      cobrancaOnline={isInfinitePayConfigured()}
+      cobrancaOnline={isCobrancaOnline()}
       resumo={resumo}
       pedidos={pedidos}
       planos={planos.map((p) => ({

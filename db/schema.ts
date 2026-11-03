@@ -87,6 +87,10 @@ export const users = mysqlTable(
     // Tutoriais de primeiro acesso já percorridos ("admin", "barbeiro",
     // "cliente"). Nulo para quem nunca viu nenhum.
     tutoriais: jsonCol<string[]>("tutoriais"),
+    // CPF (só dígitos): o Asaas não gera cobrança sem ele.
+    cpf: varchar("cpf", { length: 11 }),
+    // Cliente correspondente no Asaas, criado na primeira cobrança.
+    asaasCustomerId: varchar("asaas_customer_id", { length: 40 }),
     createdAt: tsNow("created_at"),
   },
   (t) => ({
@@ -485,7 +489,7 @@ export const settings = mysqlTable("settings", {
 export const PAYMENT_STATUSES = ["PENDENTE", "PAGO", "EXPIRADO", "CANCELADO"] as const;
 export const PAYMENT_KINDS = ["ASSINATURA", "AVULSO"] as const;
 
-// Cobrança gerada para o cliente (link da InfinitePay). O webhook dá baixa
+// Cobrança gerada para o cliente (fatura do Asaas). O webhook dá baixa
 // e a reconferência via payment_check evita confiar só no callback.
 export const payments = mysqlTable(
   "payments",
@@ -508,7 +512,7 @@ export const payments = mysqlTable(
     amountCents: int("amount_cents").notNull(),
     description: varchar("description", { length: 160 }).notNull(),
     status: mysqlEnum("status", PAYMENT_STATUSES).notNull().default("PENDENTE"),
-    provider: varchar("provider", { length: 30 }).notNull().default("infinitepay"),
+    provider: varchar("provider", { length: 30 }).notNull().default("asaas"),
     checkoutUrl: varchar("checkout_url", { length: 500 }),
     transactionNsu: varchar("transaction_nsu", { length: 60 }),
     slug: varchar("slug", { length: 60 }),

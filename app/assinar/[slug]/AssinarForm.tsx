@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowRight, Check, Loader2 } from "lucide-react";
 import { formatBRL } from "@/lib/money";
 import { requestPlan } from "@/app/cliente/actions";
+import { cpfValido, formatarCpf } from "@/lib/cpf";
 
 export function AssinarForm({
   planId,
@@ -12,7 +13,12 @@ export function AssinarForm({
   priceCents,
   annualCents,
   features,
+  cobrancaOnline = false,
+  cpfAtual = "",
 }: {
+  /** Pagamento online (Asaas) ligado: pede o CPF, que o Asaas exige. */
+  cobrancaOnline?: boolean;
+  cpfAtual?: string;
   planId: number;
   planName: string;
   priceCents: number;
@@ -22,6 +28,7 @@ export function AssinarForm({
   const [cycle, setCycle] = useState<"MENSAL" | "ANUAL">("MENSAL");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [cpf, setCpf] = useState(formatarCpf(cpfAtual));
   const router = useRouter();
 
   const unit = cycle === "ANUAL" ? annualCents : priceCents;
@@ -29,9 +36,13 @@ export function AssinarForm({
 
   function submit() {
     setError(null);
+    if (cobrancaOnline && !cpfValido(cpf)) {
+      setError("Informe um CPF válido para pagar online.");
+      return;
+    }
     start(async () => {
       try {
-        const res = await requestPlan({ planId, cycle });
+        const res = await requestPlan({ planId, cycle, cpf: cobrancaOnline ? cpf : undefined });
         if (!res.ok) {
           setError(res.error);
           return;
@@ -102,6 +113,23 @@ export function AssinarForm({
           </li>
         ))}
       </ul>
+
+      {cobrancaOnline && (
+        <label className="mt-6 block border-t border-white/8 pt-5">
+          <span className="label mb-2 block text-steel-400">CPF de quem vai usar o plano</span>
+          <input
+            inputMode="numeric"
+            autoComplete="off"
+            placeholder="000.000.000-00"
+            value={cpf}
+            onChange={(e) => setCpf(formatarCpf(e.target.value))}
+            className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none placeholder:text-steel-400/60 focus:border-electric/60"
+          />
+          <span className="mt-1.5 block text-xs text-steel-400">
+            O pagamento é feito pelo Asaas, com Pix, boleto ou cartão. O CPF é pedido por ele para emitir a cobrança.
+          </span>
+        </label>
+      )}
 
       {error && (
         <p

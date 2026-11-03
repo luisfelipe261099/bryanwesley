@@ -39,7 +39,7 @@ import { CheckinQR } from "./CheckinQR";
 import { CancelButton, EmptyState, ChangePassword } from "./MeusHorarios";
 import { Remarcar } from "./Remarcar";
 import { PagarPlano, CancelarPlano, ManterPlano } from "./MinhaAssinatura";
-import { isInfinitePayConfigured } from "@/lib/payments";
+import { isCobrancaOnline } from "@/lib/payments";
 import { listOpenDays } from "@/lib/schedule";
 import { KeyRound } from "lucide-react";
 import { AvisosPush } from "@/components/AvisosPush";
@@ -389,7 +389,7 @@ export default async function ClienteDashboard({
                   <div className="mt-6 flex flex-wrap gap-3">
                     {/* Sem cobrança online ligada, o botão só devolvia erro
                         depois do clique: o caminho é acertar na barbearia. */}
-                    {isInfinitePayConfigured() ? (
+                    {isCobrancaOnline() ? (
                       <PagarPlano rotulo="Regularizar agora" />
                     ) : (
                       <p className="w-full text-sm text-amber-200">

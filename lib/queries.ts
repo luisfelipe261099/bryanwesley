@@ -826,6 +826,7 @@ export async function clientDetail(id: number) {
       name: pessoa.name,
       phone: pessoa.phone,
       email: pessoa.email,
+      cpf: pessoa.cpf ?? null,
       createdAt: pessoa.createdAt,
       hasAccount: !!pessoa.passwordHash,
       phonePending: isPlaceholderPhone(pessoa.phone),

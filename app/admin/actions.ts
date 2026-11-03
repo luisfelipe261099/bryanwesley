@@ -47,6 +47,7 @@ import {
 import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
 import { claimDispatchSlot, runDispatch, despacharPush } from "@/lib/dispatch";
 import { chargeSubscription } from "@/lib/payments";
+import { cpfValido, soDigitosCpf } from "@/lib/cpf";
 import { shopTimeToUtc, parseDateKey, utcToShopParts } from "@/lib/time";
 import { normalizePhone, isValidPhone, nextPlaceholderPhone, isPlaceholderPhone } from "@/lib/phone";
 import { planClientImport, chaveNome } from "@/lib/import";
@@ -1032,6 +1033,8 @@ export async function updateClient(input: {
   userId: number;
   name: string;
   phone: string;
+  /** CPF para a cobrança online (Asaas). Vazio apaga; ausente não mexe. */
+  cpf?: string;
 }): Promise<Result> {
   try {
     await admin();
@@ -1062,7 +1065,14 @@ export async function updateClient(input: {
       }
     }
 
-    await db.update(users).set({ name, phone }).where(eq(users.id, input.userId));
+    let cpf = atual.cpf;
+    if (input.cpf !== undefined) {
+      const d = soDigitosCpf(input.cpf);
+      if (d && !cpfValido(d)) return { ok: false, error: "CPF inválido. Confira os números." };
+      cpf = d || null;
+    }
+
+    await db.update(users).set({ name, phone, cpf }).where(eq(users.id, input.userId));
     if (phone !== atual.phone) {
       // O número novo vale também para os próximos horários e para os
       // lembretes já na fila: senão eles continuavam indo para o antigo, e
@@ -1675,7 +1685,14 @@ export async function createSubscriptionCharge(
     });
     if (!sub) return { ok: false, error: "Cliente sem assinatura." };
     const res = await chargeSubscription(userId, sub.cycle);
-    if (!res.ok) return { ok: false, error: res.error };
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: res.precisaCpf
+          ? "Esse cliente ainda não tem CPF, e o Asaas exige. Abra a ficha dele, toque em Editar e preencha o CPF."
+          : res.error,
+      };
+    }
     revalidatePath("/admin/clientes");
     return { ok: true, url: res.url };
   } catch (e) {

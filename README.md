@@ -465,7 +465,7 @@ O que está no lugar, e por quê:
 | Retorno de login só para rota interna (`//x` e `/\x` recusados) | [`lib/url.ts`](lib/url.ts) | Redirecionamento aberto usado como isca |
 | Conta com assinatura ativa não se reivindica sozinha | [`app/entrar/actions.ts`](app/entrar/actions.ts) | Tomada de conta por quem sabe o WhatsApp |
 | Teto de horários futuros em aberto por telefone (4 / 12) | [`lib/appointments.ts`](lib/appointments.ts) | Script reservando a agenda inteira |
-| Baixa de pagamento só após `payment_check` na InfinitePay | [`lib/payments.ts`](lib/payments.ts) | Callback falso ativando plano de graça |
+| Baixa de pagamento só com o token do webhook e após consultar a cobrança no Asaas | [`lib/payments.ts`](lib/payments.ts) | Callback falso ativando plano de graça |
 | `CRON_SECRET` obrigatório em produção no despacho | [`app/api/notificacoes/despachar`](app/api/notificacoes/despachar/route.ts) | Disparo de mensagens por terceiros (custa dinheiro) |
 | CSV neutraliza `= + - @` no início do campo | [`lib/reports.ts`](lib/reports.ts) | Fórmula executando ao abrir no Excel |
 | CSP, `X-Frame-Options`, `nosniff`, HSTS, `Permissions-Policy` | [`next.config.mjs`](next.config.mjs) | Clickjacking, sniffing, downgrade |
@@ -498,7 +498,8 @@ Variáveis do projeto na Vercel:
 | `CRON_SECRET` | sim em produção | Protege o endpoint de despacho |
 | `SEED_PASSWORD` | sim, em produção | Senha inicial da equipe (o primeiro deploy para sem ela) |
 | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` | não | Entrega das mensagens |
-| `INFINITEPAY_HANDLE` | não | Cobrança avulsa online |
+| `ASAAS_API_KEY` | não | Pagamento online do Clube VIP (Asaas) |
+| `ASAAS_WEBHOOK_TOKEN` | com o Asaas | Token do webhook do Asaas (baixa dos pagamentos) |
 | `NEXT_PUBLIC_SITE_URL` | recomendada | Base dos links do QR e do webhook |
 
 ### Passo a passo da primeira publicação
@@ -542,25 +543,36 @@ direto no Excel pt-BR). A base de clientes também sai em CSV.
 
 ## Pagamentos
 
-O adaptador da **InfinitePay** está pronto em
-[`lib/providers/infinitepay.ts`](lib/providers/infinitepay.ts) (criação de
-link de pagamento e reconferência via `payment_check`), inerte até
-`INFINITEPAY_HANDLE` ser configurado.
+Os pagamentos do Clube VIP passam pelo **Asaas**
+([`lib/providers/asaas.ts`](lib/providers/asaas.ts)). Cada ciclo da
+assinatura vira uma cobrança no Asaas (`lib/payments.ts`), e o cliente paga
+na fatura do próprio Asaas com **Pix, boleto ou cartão**. O Asaas exige o
+**CPF**: ele é pedido na tela de assinar (ou ao regularizar) e fica salvo na
+conta; o dono também pode preencher na ficha do cliente.
 
-> **Limite da API:** o Checkout da InfinitePay cobre apenas **cobrança
-> avulsa** — não existe assinatura recorrente nativa. Para a mensalidade do
-> Clube VIP, ou se gera um link novo a cada renovação (com baixa por webhook),
-> ou se usa um gateway com recorrência nativa só para as assinaturas.
+Para ligar:
 
-O fluxo está fechado: o cliente escolhe o plano em `/assinar/[slug]`; com
-`INFINITEPAY_HANDLE` configurado ele vai ao checkout e o
-[webhook](app/api/pagamentos/infinitepay/route.ts) ativa a assinatura
-(reconferindo em `payment_check`, sem confiar só no callback). Sem o handle,
-vira um pedido que o admin ativa em um clique no painel. O admin também gera
-link de cobrança avulso para renovações.
+1. No Asaas, gere a chave em *Integrações → Chave de API* e coloque em
+   `ASAAS_API_KEY` (a chave de sandbox, `$aact_hmlg_…`, usa o sandbox
+   sozinha).
+2. Em *Integrações → Webhooks*, crie um webhook para
+   `https://SEU-SITE/api/pagamentos/asaas`, com os eventos de cobrança
+   (*PAYMENT_RECEIVED*, *PAYMENT_CONFIRMED*, *PAYMENT_DELETED*,
+   *PAYMENT_REFUNDED*) e um **token de autenticação**. O mesmo token vai em
+   `ASAAS_WEBHOOK_TOKEN`.
+
+O [webhook](app/api/pagamentos/asaas/route.ts) só aceita o aviso com o token
+certo e, mesmo assim, só dá baixa depois de consultar a cobrança na API do
+Asaas (situação paga, referência e valor conferidos). Estorno ou contestação
+não desfaz o plano sozinho: fica registrado para o dono decidir.
+
+Sem a chave, o cliente pede o plano pelo site e o admin ativa em um clique
+no painel. Com a chave, ele vai para a fatura do Asaas e o webhook ativa a
+assinatura quando o pagamento cai. O admin também gera a cobrança do próximo
+ciclo (botão *Cobrar* no Clube VIP ou *Gerar cobrança* na ficha).
 
 ## O que ainda depende de credencial externa
 
 - **Entrega das mensagens** — a fila está pronta; falta o número aprovado na
   Cloud API do WhatsApp (`WHATSAPP_TOKEN`).
-- **Cobrança online** — falta o handle da InfinitePay (`INFINITEPAY_HANDLE`).
+- **Cobrança online** — falta a chave e o token do webhook do Asaas (`ASAAS_API_KEY`, `ASAAS_WEBHOOK_TOKEN`).

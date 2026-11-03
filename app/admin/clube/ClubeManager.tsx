@@ -104,7 +104,7 @@ export function ClubeManager({
   pagina: number;
   porPagina: number;
   total: number;
-  /** InfinitePay ligada: só então existe o botão "Cobrar". */
+  /** Cobrança online (Asaas) ligada: só então existe o botão "Cobrar". */
   cobrancaOnline: boolean;
 }) {
   const router = useRouter();

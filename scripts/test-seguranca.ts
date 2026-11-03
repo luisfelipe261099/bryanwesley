@@ -95,9 +95,9 @@ async function main() {
       kind: "ASSINATURA", amountCents: plano.priceCents, description: "teste",
     });
 
-    // Callback "pelado": é o que um atacante conseguiria montar sozinho.
+    // Aviso "pelado": é o que um atacante conseguiria montar sozinho.
     const r = await settlePayment({ orderNsu: "BWTESTE01" });
-    ok("recusa callback sem transaction_nsu/slug", r.ok === false);
+    ok("recusa aviso sem o id da cobrança no Asaas", r.ok === false);
 
     const pago = await db.query.payments.findFirst({
       where: eq(payments.orderNsu, "BWTESTE01"),
@@ -107,9 +107,7 @@ async function main() {
     const depois = await db.query.subscriptions.findFirst({ where: eq(subscriptions.id, sub.id) });
     ok("assinatura não é ativada de graça", depois?.status === "INADIMPLENTE", depois?.status);
 
-    const desconhecida = await settlePayment({
-      orderNsu: "NAO-EXISTE", transactionNsu: "x", slug: "y",
-    });
+    const desconhecida = await settlePayment({ orderNsu: "NAO-EXISTE", paymentId: "pay_x" });
     ok("order_nsu desconhecido é recusado", desconhecida.ok === false);
   }
 

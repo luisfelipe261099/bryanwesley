@@ -24,7 +24,7 @@ import {
 } from "@/lib/appointments";
 import { avisarPedidoDePlano } from "@/lib/avisos";
 import { hitRateLimit } from "@/lib/rate-limit";
-import { chargeSubscription, isInfinitePayConfigured } from "@/lib/payments";
+import { chargeSubscription, isCobrancaOnline } from "@/lib/payments";
 import { materializeRecurring, cancelFutureOccurrences, ocorrenciasFuturas } from "@/lib/recurring";
 import { getSettings } from "@/lib/schedule";
 import { shopToday, minutesToHHMM, utcToShopParts } from "@/lib/time";
@@ -433,7 +433,7 @@ export async function rescheduleMyAppointment(input: {
 export type SubscribeResult =
   | { ok: true; mode: "pedido" }
   | { ok: true; mode: "pagamento"; url: string }
-  | { ok: false; error: string };
+  | { ok: false; error: string; precisaCpf?: boolean };
 
 /**
  * O cliente pede o plano pelo site. Com cobrança online configurada,
@@ -443,6 +443,8 @@ export type SubscribeResult =
 export async function requestPlan(input: {
   planId: number;
   cycle: "MENSAL" | "ANUAL";
+  /** CPF de quem assina: o Asaas não gera cobrança sem ele. */
+  cpf?: string;
 }): Promise<SubscribeResult> {
   const session = await requireRole(["CLIENT", "ADMIN"]);
 
@@ -486,7 +488,7 @@ export async function requestPlan(input: {
     });
   }
 
-  if (isInfinitePayConfigured()) {
+  if (isCobrancaOnline()) {
     // Cria a assinatura inadimplente e cobra o primeiro ciclo: o webhook
     // ativa quando o pagamento cair.
     // Quem já teve assinatura tem uma linha antiga guardada. Ela precisa
@@ -519,7 +521,7 @@ export async function requestPlan(input: {
       }).$returningId();
       novaId = id;
     }
-    const charge = await chargeSubscription(session.id, input.cycle);
+    const charge = await chargeSubscription(session.id, input.cycle, { cpf: input.cpf });
     if (charge.ok) {
       revalidatePath("/cliente");
       return { ok: true, mode: "pagamento", url: charge.url };
@@ -543,6 +545,9 @@ export async function requestPlan(input: {
         })
         .where(eq(subscriptions.id, existente.id));
     }
+    // Faltou (ou veio errado) o CPF: a tela pede e o cliente tenta de novo,
+    // em vez de cair no pedido para ativar no balcão.
+    if (charge.precisaCpf) return { ok: false, error: charge.error, precisaCpf: true };
   }
 
   // Pedido para ativar no balcão: o admin fica sabendo no celular — só
@@ -646,7 +651,7 @@ export async function resumeMyPlan(): Promise<ActionResult> {
 }
 
 /** Gera de novo o link de pagamento de quem está vencido. */
-export async function payMyPlan(): Promise<SubscribeResult> {
+export async function payMyPlan(input: { cpf?: string } = {}): Promise<SubscribeResult> {
   const session = await requireRole(["CLIENT", "ADMIN"]);
   const sub = await db.query.subscriptions.findFirst({
     where: and(
@@ -656,14 +661,14 @@ export async function payMyPlan(): Promise<SubscribeResult> {
     orderBy: (s, { desc }) => [desc(s.startedAt)],
   });
   if (!sub) return { ok: false, error: "Você não tem plano para pagar." };
-  if (!isInfinitePayConfigured()) {
+  if (!isCobrancaOnline()) {
     return {
       ok: false,
       error: "Pagamento online ainda não está ligado. Acerte na barbearia.",
     };
   }
-  const charge = await chargeSubscription(session.id, sub.cycle);
-  if (!charge.ok) return { ok: false, error: charge.error };
+  const charge = await chargeSubscription(session.id, sub.cycle, { cpf: input.cpf });
+  if (!charge.ok) return { ok: false, error: charge.error, precisaCpf: charge.precisaCpf };
   revalidatePath("/cliente");
   return { ok: true, mode: "pagamento", url: charge.url };
 }

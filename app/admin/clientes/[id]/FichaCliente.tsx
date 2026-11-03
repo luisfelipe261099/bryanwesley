@@ -1,5 +1,6 @@
 "use client";
 
+import { formatarCpf } from "@/lib/cpf";
 import { precoNoDia, type RegraPreco } from "@/lib/precos";
 import { useContext, useEffect, useState, useTransition } from "react";
 import {
@@ -46,6 +47,7 @@ type Cliente = {
   name: string;
   phone: string;
   email: string | null;
+  cpf: string | null;
   hasAccount: boolean;
   phonePending: boolean;
 };
@@ -78,7 +80,7 @@ export function FichaCliente({
   days: DayOption[];
   resumo: { concluidos: number; gasto: number; desde: string };
   fixo: { texto: string; barberName: string } | null;
-  /** InfinitePay ligada: só então existe o botão "Gerar cobrança". */
+  /** Cobrança online (Asaas) ligada: só então existe o botão "Gerar cobrança". */
   cobrancaOnline: boolean;
 }) {
   return (
@@ -107,6 +109,7 @@ function Cabecalho({
   const [editando, setEditando] = useState(false);
   const [nome, setNome] = useState(cliente.name);
   const [fone, setFone] = useState(cliente.phonePending ? "" : cliente.phone);
+  const [cpf, setCpf] = useState(formatarCpf(cliente.cpf ?? ""));
 
   const [trocandoSenha, setTrocandoSenha] = useState(false);
   const [senha, setSenha] = useState("");
@@ -118,6 +121,7 @@ function Cabecalho({
         userId: cliente.id,
         name: nome,
         phone: fone,
+        cpf,
       });
       setMsg(notify(res, "Cadastro atualizado."));
       if (res.ok) setEditando(false);
@@ -223,7 +227,7 @@ function Cabecalho({
       </dl>
 
       {editando && (
-        <div className="mt-5 grid gap-3 border-t border-white/8 pt-5 sm:grid-cols-[1fr_1fr_auto]">
+        <div className="mt-5 grid gap-3 border-t border-white/8 pt-5 sm:grid-cols-[1fr_1fr_1fr_auto]">
           <TextInput
             label="Nome"
             value={nome}
@@ -235,6 +239,13 @@ function Cabecalho({
             placeholder="(41) 99999-0000"
             value={fone}
             onChange={(e) => setFone(e.target.value)}
+          />
+          <TextInput
+            label="CPF (para cobrança online)"
+            inputMode="numeric"
+            placeholder="000.000.000-00"
+            value={cpf}
+            onChange={(e) => setCpf(formatarCpf(e.target.value))}
           />
           <div className="flex items-end gap-2">
             <button
@@ -251,6 +262,7 @@ function Cabecalho({
                 setEditando(false);
                 setNome(cliente.name);
                 setFone(cliente.phonePending ? "" : cliente.phone);
+                setCpf(formatarCpf(cliente.cpf ?? ""));
                 setMsg(null);
               }}
               className="label rounded-xl border border-white/12 px-4 py-3 text-steel-300 hover:text-white"

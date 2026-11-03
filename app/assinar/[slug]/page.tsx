@@ -6,7 +6,8 @@ import { Background } from "@/components/Background";
 import { BottomNav } from "@/components/BottomNav";
 import { Logo } from "@/components/Logo";
 import { db } from "@/db/client";
-import { plans } from "@/db/schema";
+import { plans, users } from "@/db/schema";
+import { isCobrancaOnline } from "@/lib/payments";
 import { getSession } from "@/lib/auth";
 import { getSettings } from "@/lib/schedule";
 import { shopFrom } from "@/lib/shop";
@@ -25,11 +26,12 @@ export default async function Assinar({
     redirect(`/entrar?proximo=${encodeURIComponent(`/assinar/${params.slug}`)}`);
   }
 
-  const [plan, settings] = await Promise.all([
+  const [plan, settings, conta] = await Promise.all([
     db.query.plans.findFirst({
       where: and(eq(plans.slug, params.slug), eq(plans.active, true)),
     }),
     getSettings(),
+    db.query.users.findFirst({ columns: { cpf: true }, where: eq(users.id, session.id) }),
   ]);
   if (!plan) notFound();
 
@@ -73,6 +75,8 @@ export default async function Assinar({
           priceCents={plan.priceCents}
           annualCents={plan.annualPriceCents}
           features={plan.features}
+          cobrancaOnline={isCobrancaOnline()}
+          cpfAtual={conta?.cpf ?? ""}
         />
       </main>
 

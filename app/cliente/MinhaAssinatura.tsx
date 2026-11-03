@@ -36,7 +36,13 @@ export function PagarPlano({ rotulo = "Pagar agora" }: { rotulo?: string }) {
     <Acao
       className="btn-royal text-white"
       onRun={async () => {
-        const r = await payMyPlan();
+        let r = await payMyPlan();
+        // Sem CPF na conta, o Asaas não gera a cobrança: pergunta e tenta de novo.
+        if (!r.ok && r.precisaCpf) {
+          const cpf = window.prompt(`${r.error}\nDigite o CPF (só os números):`);
+          if (!cpf) return;
+          r = await payMyPlan({ cpf });
+        }
         if (r.ok && r.mode === "pagamento") window.location.href = r.url;
         else if (!r.ok) toast(r.error, "erro");
       }}
