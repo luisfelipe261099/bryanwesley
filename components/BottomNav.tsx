@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -56,6 +57,8 @@ export function BottomNav({
   role: Role | null;
 }) {
   const items = itemsFor(role);
+  const navRef = useRef<HTMLElement>(null);
+  useBarraNoRodape(navRef);
   // O destaque segue o endereço aberto: o painel inteiro passa "admin",
   // mas dentro dele /admin/clube é a aba do Clube.
   const path = usePathname();
@@ -67,6 +70,7 @@ export function BottomNav({
       .find((i) => i.href !== "/" && path.startsWith(i.href))?.key ?? active;
   return (
     <nav
+      ref={navRef}
       aria-label="Navegação principal"
       className="fixed inset-x-0 bottom-0 z-40 border-t border-white/8 bg-ink-800/95 backdrop-blur-xl"
     >
@@ -96,4 +100,69 @@ export function BottomNav({
       </ul>
     </nav>
   );
+}
+
+const CAMPO = /^(INPUT|TEXTAREA|SELECT)$/;
+
+/**
+ * Mantém a barra colada no rodapé no iPhone. O Safari do iOS às vezes
+ * deixa os elementos "fixed" no meio da tela depois que o teclado fecha
+ * (a área de layout fica do tamanho de quando o teclado estava aberto) e
+ * a barra passa a flutuar ao rolar. Aqui: com o teclado aberto a barra
+ * some (não cobre o campo); ao fechar, empurramos a página 0 px para o
+ * Safari refazer o layout e, se ainda sobrar diferença entre a área
+ * visível e a de layout, compensamos com um translate.
+ */
+function useBarraNoRodape(ref: React.RefObject<HTMLElement>) {
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const nav = ref.current;
+    if (!vv || !nav) return;
+    let raf = 0;
+    let espera = 0;
+
+    const ajustar = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const el = document.activeElement as HTMLElement | null;
+        const tecladoAberto =
+          !!el && (CAMPO.test(el.tagName) || el.isContentEditable) && vv.height < window.innerHeight - 120;
+        nav.style.visibility = tecladoAberto ? "hidden" : "";
+        // Diferença entre o fim da área visível e o fim da área de layout
+        // (onde o bottom: 0 ancora). Normalmente é 0. Com zoom de pinça
+        // não mexe: aí a barra acompanhar o layout é o esperado.
+        const desvio = vv.offsetTop + vv.height - window.innerHeight;
+        const corrigir =
+          !tecladoAberto && vv.scale <= 1.01 && Math.abs(desvio) > 2 && Math.abs(desvio) < window.innerHeight * 0.6;
+        nav.style.transform = corrigir ? `translateY(${Math.round(desvio)}px)` : "";
+      });
+    };
+
+    const aoSairDoCampo = () => {
+      window.clearTimeout(espera);
+      espera = window.setTimeout(() => {
+        // Empurrão de 0 px: faz o iOS recalcular a área de layout.
+        window.scrollTo(window.scrollX, window.scrollY);
+        ajustar();
+      }, 120);
+    };
+
+    vv.addEventListener("resize", ajustar);
+    vv.addEventListener("scroll", ajustar);
+    window.addEventListener("scroll", ajustar, { passive: true });
+    window.addEventListener("orientationchange", ajustar);
+    document.addEventListener("focusin", ajustar);
+    document.addEventListener("focusout", aoSairDoCampo);
+    ajustar();
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(espera);
+      vv.removeEventListener("resize", ajustar);
+      vv.removeEventListener("scroll", ajustar);
+      window.removeEventListener("scroll", ajustar);
+      window.removeEventListener("orientationchange", ajustar);
+      document.removeEventListener("focusin", ajustar);
+      document.removeEventListener("focusout", aoSairDoCampo);
+    };
+  }, [ref]);
 }
