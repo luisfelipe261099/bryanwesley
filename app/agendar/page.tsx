@@ -14,6 +14,7 @@ import { getSession } from "@/lib/auth";
 import { usoDoPlanoNoMes } from "@/lib/appointments";
 import { formatPhone, normalizePhone } from "@/lib/phone";
 import { BookingForm } from "./BookingForm";
+import { isCobrancaOnline } from "@/lib/payments";
 
 // A agenda muda a todo instante — nada de cache.
 export const dynamic = "force-dynamic";
@@ -72,7 +73,7 @@ export default async function Agendar({
       ? await db.query.users
         .findFirst({ where: eq(users.id, session.id) })
         .then((u) =>
-          u ? { name: u.name, phone: formatPhone(u.phone) } : null
+          u ? { name: u.name, phone: formatPhone(u.phone), temCpf: !!u.cpf } : null
         )
     : null;
 
@@ -150,6 +151,7 @@ export default async function Agendar({
             prefill={prefill}
             minAdvanceHours={settings.minAdvanceHours}
             avisaPorWhatsapp={avisaPorWhatsapp}
+            cobrancaOnline={isCobrancaOnline()}
           />
         )}
       </main>

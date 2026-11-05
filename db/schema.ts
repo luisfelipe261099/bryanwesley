@@ -254,6 +254,9 @@ export const appointments = mysqlTable(
     notes: text("notes"),
     // Token do QR que o cliente apresenta para o barbeiro validar a chegada.
     checkinToken: varchar("checkin_token", { length: 40 }),
+    // Como o cliente escolheu pagar: PIX/CARTAO pelo Asaas ou BALCAO
+    // (dinheiro ou maquininha na hora). Null: plano cobre ou horário antigo.
+    paymentMethod: varchar("payment_method", { length: 10 }).$type<FormaPagamento>(),
     checkedInAt: ts("checked_in_at"),
     // Horário fixo que gerou este agendamento (null para avulso). Com o
     // vínculo, uma ocorrência cancelada continua cancelada: a próxima
@@ -487,6 +490,8 @@ export const settings = mysqlTable("settings", {
 // ───────────────────────── Pagamentos ─────────────────────────
 
 export const PAYMENT_STATUSES = ["PENDENTE", "PAGO", "EXPIRADO", "CANCELADO"] as const;
+export const FORMAS_PAGAMENTO = ["PIX", "CARTAO", "BALCAO"] as const;
+export type FormaPagamento = (typeof FORMAS_PAGAMENTO)[number];
 export const PAYMENT_KINDS = ["ASSINATURA", "AVULSO"] as const;
 
 // Cobrança gerada para o cliente (fatura do Asaas). O webhook dá baixa

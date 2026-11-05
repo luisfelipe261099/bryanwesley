@@ -1,3 +1,4 @@
+import { rotuloPagamento } from "@/lib/rotulo-pagamento";
 import Link from "next/link";
 import {
   Ban,
@@ -459,6 +460,12 @@ export default async function BarbeiroPanel({
                             ? "Plano"
                             : formatBRL(a.totalCents)}
                         </span>
+                        {(() => {
+                          const pg = rotuloPagamento(a);
+                          return pg ? (
+                            <span className={`label rounded-full px-2.5 py-1.5 ${pg.cls}`}>{pg.texto}</span>
+                          ) : null;
+                        })()}
                         <span className={`label rounded-full px-2.5 py-1.5 ${st.cls}`}>
                           {st.label}
                         </span>

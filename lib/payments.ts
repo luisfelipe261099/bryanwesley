@@ -4,20 +4,31 @@
 // baixa só acontece depois que a própria API do Asaas confirma.
 // Sem ASAAS_API_KEY o módulo fica inerte e a ativação segue manual.
 // ───────────────────────────────────────────────────────────
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
-import { payments, planRequests, plans, subscriptions, users } from "@/db/schema";
-import { avisarPagamento } from "./avisos";
+import {
+  appointmentServices,
+  appointments,
+  payments,
+  planRequests,
+  plans,
+  subscriptions,
+  users,
+  type Payment,
+} from "@/db/schema";
+import { avisarPagamento, avisarPagamentoDoHorario } from "./avisos";
 import { cpfValido, soDigitosCpf } from "./cpf";
 import {
+  apagarCobranca,
   cobrancaPaga,
   consultarCobranca,
   criarCobranca,
   isAsaasConfigured,
+  pixDaCobranca,
   salvarCliente,
 } from "./providers/asaas";
 import { nextRenewal } from "./subscriptions";
-import { addDays, shopToday } from "./time";
+import { addDays, shopToday, utcToShopParts } from "./time";
 import { randomBytes } from "node:crypto";
 
 /** A cobrança online está ligada (chave do Asaas configurada). */
@@ -230,6 +241,10 @@ export async function settlePayment(input: { orderNsu: string; paymentId?: strin
     }
   }
 
+  if (payment.kind === "AVULSO" && payment.appointmentId) {
+    await avisarPagamentoDoHorario(payment.appointmentId, payment.amountCents);
+  }
+
   return { ok: true as const, already: false };
 }
 
@@ -243,4 +258,192 @@ export async function cancelPayment(input: { orderNsu: string; paymentId?: strin
     .update(payments)
     .set({ status: "CANCELADO" })
     .where(and(eq(payments.id, payment.id), eq(payments.status, "PENDENTE")));
+}
+
+
+// ───────────────────── Pagamento do agendamento ─────────────────────
+//
+// No agendamento avulso o cliente escolhe: Pix ou cartão (pelo Asaas,
+// pago na hora pelo app) ou na barbearia (dinheiro ou maquininha). A
+// cobrança online fica ligada ao horário em `payments.appointmentId`.
+
+export type MetodoOnline = "PIX" | "CARTAO";
+
+export type CobrancaAgendamento =
+  | { ok: true; orderNsu: string; url: string }
+  | { ok: false; error: string; precisaCpf?: boolean };
+
+/**
+ * Gera (ou reaproveita) a cobrança online de um agendamento.
+ *
+ * `cpfConfiavel`: quem pede é o próprio dono do WhatsApp ou a equipe. Só
+ * aí o CPF salvo na conta pode ser usado, e o digitado pode ser salvo
+ * nela. Um visitante que digita o WhatsApp de outra pessoa não vê nem
+ * troca o CPF dela: a cobrança sai num cliente do Asaas à parte.
+ */
+export async function chargeAppointment(
+  appointmentId: number,
+  metodo: MetodoOnline,
+  opts: { cpf?: string; cpfConfiavel?: boolean } = {}
+): Promise<CobrancaAgendamento> {
+  if (!isCobrancaOnline()) {
+    return { ok: false, error: "O pagamento online ainda não está ligado. Pague na barbearia." };
+  }
+  const appt = await db.query.appointments.findFirst({ where: eq(appointments.id, appointmentId) });
+  if (!appt) return { ok: false, error: "Agendamento não encontrado." };
+  if (["CANCELADO", "NO_SHOW"].includes(appt.status)) {
+    return { ok: false, error: "Esse horário foi cancelado." };
+  }
+  if (appt.totalCents <= 0) return { ok: false, error: "Nada a pagar: o plano cobre este horário." };
+
+  const tipo = metodo === "PIX" ? "PIX" : "CREDIT_CARD";
+  const atuais = await db
+    .select()
+    .from(payments)
+    .where(and(eq(payments.appointmentId, appt.id), inArray(payments.status, ["PENDENTE", "PAGO"])))
+    .orderBy(desc(payments.id));
+  if (atuais.some((p) => p.status === "PAGO")) return { ok: false, error: "Esse horário já está pago." };
+  // Mesma forma e mesmo valor: a fatura que já existe serve.
+  const igual = atuais.find(
+    (p) => p.slug === tipo && p.amountCents === appt.totalCents && p.checkoutUrl
+  );
+  if (igual) {
+    await db.update(appointments).set({ paymentMethod: metodo }).where(eq(appointments.id, appt.id));
+    return { ok: true, orderNsu: igual.orderNsu, url: igual.checkoutUrl! };
+  }
+
+  const user = appt.clientUserId
+    ? await db.query.users.findFirst({ where: eq(users.id, appt.clientUserId) })
+    : null;
+  let cpf: string | null = null;
+  if (opts.cpf && opts.cpf.trim()) {
+    if (!cpfValido(opts.cpf)) return { ok: false, error: "CPF inválido. Confira os números.", precisaCpf: true };
+    cpf = soDigitosCpf(opts.cpf);
+  } else if (opts.cpfConfiavel && user?.cpf) {
+    cpf = user.cpf;
+  }
+  if (!cpf) {
+    return { ok: false, precisaCpf: true, error: "Para pagar com Pix ou cartão, informe o CPF." };
+  }
+
+  const confiavel = !!opts.cpfConfiavel && !!user;
+  const cliente = await salvarCliente({
+    // Só reaproveita (e atualiza) o cliente do Asaas da conta quando o
+    // pedido é confiável; senão nasce um cliente só para esta cobrança.
+    asaasId: confiavel ? user!.asaasCustomerId : null,
+    nome: appt.clientName,
+    cpf,
+    telefone: appt.clientPhone,
+    email: confiavel ? user!.email : null,
+    referencia: confiavel ? `usuario-${user!.id}` : `agendamento-${appt.id}`,
+  });
+  if (!cliente.ok) return { ok: false, error: cliente.error };
+  if (confiavel && (cliente.data.id !== user!.asaasCustomerId || cpf !== user!.cpf)) {
+    await db.update(users).set({ asaasCustomerId: cliente.data.id, cpf }).where(eq(users.id, user!.id));
+  }
+
+  const itens = await db
+    .select({ name: appointmentServices.name })
+    .from(appointmentServices)
+    .where(eq(appointmentServices.appointmentId, appt.id));
+  const servicos = itens.map((i) => i.name).join(" + ") || "Atendimento";
+  const dia = utcToShopParts(appt.startsAt).dateKey;
+  const hoje = shopToday();
+  const orderNsu = nsu();
+
+  const cobranca = await criarCobranca({
+    cliente: cliente.data.id,
+    valorCents: appt.totalCents,
+    // Vence no dia do horário (nunca antes de hoje).
+    vencimento: dia > hoje ? dia : hoje,
+    descricao: `Bryan Wesley Barbearia · ${servicos} · código ${appt.code}`,
+    referencia: orderNsu,
+    tipo,
+  });
+  if (!cobranca.ok) return { ok: false, error: cobranca.error };
+  if (!cobranca.data.invoiceUrl) return { ok: false, error: "O Asaas não devolveu o link da fatura." };
+
+  await db.insert(payments).values({
+    orderNsu,
+    userId: user?.id ?? null,
+    appointmentId: appt.id,
+    kind: "AVULSO",
+    amountCents: appt.totalCents,
+    description: `${servicos} · ${appt.code}`.slice(0, 160),
+    provider: "asaas",
+    checkoutUrl: cobranca.data.invoiceUrl,
+    transactionNsu: cobranca.data.id,
+    // A forma da fatura (PIX ou CREDIT_CARD), para reaproveitar a certa.
+    slug: tipo,
+  });
+  await db.update(appointments).set({ paymentMethod: metodo }).where(eq(appointments.id, appt.id));
+
+  // A troca de forma deixa a fatura anterior para trás: apaga lá também.
+  for (const velha of atuais.filter((p) => p.status === "PENDENTE")) {
+    await descartarCobranca(velha);
+  }
+
+  return { ok: true, orderNsu, url: cobranca.data.invoiceUrl };
+}
+
+/** Apaga no Asaas uma cobrança pendente e a marca como cancelada aqui. */
+async function descartarCobranca(p: Payment) {
+  if (p.status !== "PENDENTE") return;
+  if (p.transactionNsu) {
+    const r = await apagarCobranca(p.transactionNsu);
+    // Paga no meio do caminho: não cancela, deixa a baixa acontecer.
+    if (!r.ok && r.status !== 404) {
+      console.error("Asaas: não deu para apagar a cobrança", p.orderNsu, r.error);
+    }
+  }
+  await db
+    .update(payments)
+    .set({ status: "CANCELADO" })
+    .where(and(eq(payments.id, p.id), eq(payments.status, "PENDENTE")));
+}
+
+/** Horário cancelado ou trocado para "na barbearia": a fatura aberta sai. */
+export async function cancelarCobrancasDoAgendamento(appointmentId: number) {
+  const pendentes = await db
+    .select()
+    .from(payments)
+    .where(and(eq(payments.appointmentId, appointmentId), eq(payments.status, "PENDENTE")));
+  for (const p of pendentes) {
+    try {
+      await descartarCobranca(p);
+    } catch (e) {
+      console.error("Cancelar cobrança do agendamento falhou:", e);
+    }
+  }
+}
+
+/** A cobrança mais recente do horário (paga, pendente ou a última). */
+export async function pagamentoDoAgendamento(appointmentId: number) {
+  const lista = await db
+    .select()
+    .from(payments)
+    .where(eq(payments.appointmentId, appointmentId))
+    .orderBy(desc(payments.id));
+  return lista.find((p) => p.status === "PAGO") ?? lista.find((p) => p.status === "PENDENTE") ?? null;
+}
+
+/**
+ * Confere no Asaas uma cobrança ainda pendente e dá baixa se já foi paga.
+ * Garante o "Pago" na tela mesmo se o webhook atrasar.
+ */
+export async function conferirPagamento(p: Payment): Promise<Payment> {
+  if (p.status !== "PENDENTE" || !p.transactionNsu) return p;
+  const c = await consultarCobranca(p.transactionNsu);
+  if (c.ok && cobrancaPaga(c.data.status)) {
+    await settlePayment({ orderNsu: p.orderNsu, paymentId: p.transactionNsu });
+    return (await db.query.payments.findFirst({ where: eq(payments.id, p.id) })) ?? p;
+  }
+  return p;
+}
+
+/** QR do Pix da cobrança, para mostrar na própria tela. */
+export async function pixDoPagamento(p: Payment) {
+  if (p.status !== "PENDENTE" || p.slug !== "PIX" || !p.transactionNsu) return null;
+  const r = await pixDaCobranca(p.transactionNsu);
+  return r.ok ? { imagem: r.data.encodedImage, copiaECola: r.data.payload } : null;
 }

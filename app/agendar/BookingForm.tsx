@@ -9,6 +9,9 @@ import {
   Check,
   Clock,
   CalendarDays,
+  Banknote,
+  CreditCard,
+  QrCode,
   Sparkles,
   Crown,
   Loader2,
@@ -19,6 +22,7 @@ import { formatBRL, formatDuration } from "@/lib/money";
 import { precoNoDia, regraDoHorario, rotuloDias, rotuloFaixa, type RegraPreco } from "@/lib/precos";
 import { weekdayOf } from "@/lib/time";
 import { normalizePhone } from "@/lib/phone";
+import { formatarCpf } from "@/lib/cpf";
 import type { Service, Plan } from "@/db/schema";
 import type { Slot } from "@/lib/schedule";
 import type { DayOption } from "@/lib/schedule";
@@ -45,7 +49,10 @@ export function BookingForm({
   barberPadrao = null,
   daCasa = false,
   regras = [],
+  cobrancaOnline = false,
 }: {
+  /** Pix e cartão pelo Asaas estão ligados. */
+  cobrancaOnline?: boolean;
   services: Service[];
   /** Preço por turno (noite, sábado…): vale o do horário escolhido. */
   regras?: RegraPreco[];
@@ -58,7 +65,7 @@ export function BookingForm({
   barberPadrao?: number | null;
   /** Equipe lançando encaixe: a antecedência mínima não vale para ela. */
   daCasa?: boolean;
-  viewer: { name: string; phone: string } | null;
+  viewer: { name: string; phone: string; temCpf?: boolean } | null;
   /** O que veio no link mandado pelo WhatsApp. */
   prefill?: {
     nome: string | null;
@@ -89,6 +96,9 @@ export function BookingForm({
   const [name, setName] = useState(viewer?.name ?? prefill?.nome ?? "");
   const [phone, setPhone] = useState(viewer?.phone ?? prefill?.fone ?? "");
   const [notes, setNotes] = useState("");
+  const [pagamento, setPagamento] = useState<"PIX" | "CARTAO" | "BALCAO" | null>(null);
+  const [cpf, setCpf] = useState("");
+  const [precisaCpf, setPrecisaCpf] = useState(false);
 
   const [slots, setSlots] = useState<Slot[]>([]);
   const [closed, setClosed] = useState(false);
@@ -173,7 +183,19 @@ export function BookingForm({
     };
   }, [dateKey, totalMin, barberId, tentativa]);
 
+  // Passo do pagamento: só quando há o que pagar (fora do plano).
+  const cobra = chosen.length > 0 && totalCents > 0;
+  const online = pagamento === "PIX" || pagamento === "CARTAO";
+  // O CPF salvo vale só para o próprio cliente logado, com o WhatsApp dele.
+  const cpfSalvoServe = !daCasa && !!viewer?.temCpf && !outroFoneDoViewer();
+  const mostraCpf = online && (precisaCpf || !cpfSalvoServe);
+  function outroFoneDoViewer() {
+    return !!viewer?.phone && normalizePhone(phone) !== normalizePhone(viewer.phone);
+  }
+  const cpfOk = !mostraCpf || cpf.replace(/\D/g, "").length === 11 || daCasa;
+
   const canConfirm =
+    (!cobra || !cobrancaOnline || (pagamento !== null && cpfOk)) &&
     selected.length > 0 &&
     !!dateKey &&
     !!time &&
@@ -199,6 +221,8 @@ export function BookingForm({
         clientName: name,
         clientPhone: phone,
         notes: notes || undefined,
+        pagamento: cobra ? (cobrancaOnline ? pagamento ?? "BALCAO" : "BALCAO") : undefined,
+        cpf: online && cpf ? cpf : undefined,
       });
       if (res.ok) {
         // Confirmação é uma página de verdade: sobrevive a recarregar,
@@ -207,6 +231,10 @@ export function BookingForm({
         return;
       } else {
         setError(res.error);
+        if (res.precisaCpf) {
+          setPrecisaCpf(true);
+          return;
+        }
         // O horário pode ter sido tomado — recarrega a grade.
         if (dateKey && totalMin > 0) {
           const fresh = await fetchAvailability({
@@ -482,6 +510,81 @@ export function BookingForm({
             </p>
           </div>
         </section>
+
+        {/* ── 4. Pagamento (só o que não é do plano) ── */}
+        {cobra && (
+          <section>
+            <StepTitle n={4} title="Pagamento" />
+            {cobrancaOnline ? (
+              <>
+                <div className="mt-4 grid gap-2.5 sm:grid-cols-3">
+                  {(
+                    [
+                      { v: "PIX", rotulo: "Pix", desc: "Paga agora pelo app", Icon: QrCode },
+                      { v: "CARTAO", rotulo: "Cartão", desc: "Crédito, agora pelo app", Icon: CreditCard },
+                      { v: "BALCAO", rotulo: "Na barbearia", desc: "Dinheiro ou maquininha, na hora", Icon: Banknote },
+                    ] as const
+                  ).map(({ v, rotulo, desc, Icon }) => {
+                    const on = pagamento === v;
+                    return (
+                      <button
+                        key={v}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => setPagamento(v)}
+                        className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition-all sm:flex-col sm:items-start ${
+                          on
+                            ? "border-electric/60 bg-electric/[0.07] shadow-glow-sm"
+                            : "border-white/8 bg-surface/70 hover:border-white/20"
+                        }`}
+                      >
+                        <span
+                          className={`grid h-10 w-10 flex-none place-items-center rounded-xl ${
+                            on ? "bg-royal-grad text-white" : "border border-white/10 bg-white/5 text-steel-300"
+                          }`}
+                        >
+                          <Icon className="h-5 w-5" />
+                        </span>
+                        <span>
+                          <span className="block font-semibold text-white">{rotulo}</span>
+                          <span className="block text-xs text-steel-400">{desc}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {mostraCpf && (
+                  <div className="mt-4">
+                    <Field
+                      label={daCasa ? "CPF do cliente" : "Seu CPF"}
+                      value={cpf}
+                      onChange={(v) => setCpf(formatarCpf(v))}
+                      placeholder="000.000.000-00"
+                      autoComplete="off"
+                    />
+                    <p className="mt-1.5 text-xs text-steel-400">
+                      {daCasa
+                        ? "O Asaas pede o CPF para Pix e cartão. Se o cliente já tem CPF no cadastro, pode deixar em branco."
+                        : "O Asaas, que processa o pagamento, pede o CPF para Pix e cartão."}
+                    </p>
+                  </div>
+                )}
+                {online && (
+                  <p className="mt-3 text-xs text-steel-400">
+                    {pagamento === "PIX"
+                      ? "Na próxima tela aparece o QR e o código do Pix. A confirmação do pagamento chega na hora."
+                      : "Na próxima tela você paga no cartão, na página segura do Asaas."}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="mt-4 flex items-center gap-2 rounded-2xl border border-white/10 bg-surface/70 p-4 text-sm text-steel-300">
+                <Banknote className="h-5 w-5 flex-none text-electric" />
+                Pagamento na barbearia, na hora do atendimento.
+              </p>
+            )}
+          </section>
+        )}
       </div>
 
       {/* Resumo */}
@@ -598,11 +701,15 @@ export function BookingForm({
             ) : (
               <ArrowRight className="h-4 w-4" />
             )}
-            Confirmar agendamento
+            {online ? "Confirmar e pagar" : "Confirmar agendamento"}
           </button>
           {!canConfirm && !pending && (
             <p className="mt-2.5 text-center text-xs text-steel-400">
-              Complete os 3 passos para confirmar.
+              {cobra && cobrancaOnline
+                ? pagamento === null
+                  ? "Complete os passos e escolha como pagar."
+                  : "Complete os passos para confirmar."
+                : "Complete os 3 passos para confirmar."}
             </p>
           )}
         </div>

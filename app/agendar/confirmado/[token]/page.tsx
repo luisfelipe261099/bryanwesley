@@ -7,7 +7,15 @@ import { Background } from "@/components/Background";
 import { BottomNav } from "@/components/BottomNav";
 import { Logo } from "@/components/Logo";
 import { db } from "@/db/client";
-import { appointments } from "@/db/schema";
+import { appointments, users } from "@/db/schema";
+import { normalizePhone } from "@/lib/phone";
+import {
+  conferirPagamento,
+  isCobrancaOnline,
+  pagamentoDoAgendamento,
+  pixDoPagamento,
+} from "@/lib/payments";
+import { PagamentoAgendamento } from "./PagamentoAgendamento";
 import { attachDetails } from "@/lib/queries";
 import { getSession } from "@/lib/auth";
 import { getSettings } from "@/lib/schedule";
@@ -69,10 +77,32 @@ export default async function Confirmado({
       : null;
 
   const servicos = appt.items.map((i) => i.name).join(" + ");
+
+  // Pagamento: confere no Asaas se a fatura em aberto já caiu (o webhook
+  // pode atrasar) e traz o QR do Pix para mostrar aqui mesmo.
+  const online = isCobrancaOnline();
+  let pagamento = appt.kind === "AVULSO" && appt.totalCents > 0 ? await pagamentoDoAgendamento(appt.id) : null;
+  if (pagamento && online) pagamento = await conferirPagamento(pagamento).catch(() => pagamento!);
+  const pix = pagamento && online ? await pixDoPagamento(pagamento).catch(() => null) : null;
   const cancelado = appt.status === "CANCELADO" || appt.status === "NO_SHOW";
 
   // Encaixe lançado pela equipe: quem lê esta tela é o barbeiro, não o cliente.
   const daCasa = session?.role === "ADMIN" || session?.role === "BARBER";
+
+  // O CPF salvo só serve à equipe e ao próprio dono do WhatsApp, logado.
+  let cpfSalvoUsavel = false;
+  if (online && appt.clientUserId && session) {
+    const dono = await db.query.users.findFirst({
+      columns: { cpf: true, phone: true },
+      where: eq(users.id, appt.clientUserId),
+    });
+    const ehDono =
+      session.role === "CLIENT" &&
+      session.id === appt.clientUserId &&
+      !!dono &&
+      normalizePhone(dono.phone) === normalizePhone(appt.clientPhone);
+    cpfSalvoUsavel = !!dono?.cpf && (daCasa || ehDono);
+  }
   const voltar =
     session?.role === "ADMIN"
       ? { href: `/admin/agenda?dia=${p.dateKey}`, label: "Voltar à agenda" }
@@ -153,6 +183,21 @@ export default async function Confirmado({
               )}
             </div>
           </div>
+
+          {!cancelado && appt.kind === "AVULSO" && appt.totalCents > 0 && (
+            <PagamentoAgendamento
+              token={params.token}
+              totalCents={appt.totalCents}
+              metodo={appt.paymentMethod ?? null}
+              status={pagamento?.status === "PAGO" ? "PAGO" : pagamento?.status === "PENDENTE" ? "PENDENTE" : null}
+              pix={pix}
+              faturaUrl={pagamento?.checkoutUrl ?? null}
+              reciboUrl={pagamento?.receiptUrl ?? null}
+              online={online}
+              pedirCpf={!cpfSalvoUsavel}
+              daCasa={daCasa}
+            />
+          )}
 
           {qrSvg && (
             <div className="mt-5 flex justify-center border-t border-white/8 pt-5">

@@ -47,6 +47,8 @@ export type AppointmentItem = typeof appointmentServices.$inferSelect;
 export type AppointmentFull = Appointment & {
   barber: BarberWithUser;
   items: AppointmentItem[];
+  /** Pix/cartão pelo app: já pago, fatura em aberto ou nada online. */
+  pagamentoOnline: "PAGO" | "PENDENTE" | null;
 };
 /** Serviço coberto pelo plano, com a cota do mês (null = ilimitado). */
 export type ServicoCoberto = Service & { quota: number | null };
@@ -132,7 +134,7 @@ export async function attachDetails(
   const ids = rows.map((a) => a.id);
   const barberIds = Array.from(new Set(rows.map((a) => a.barberId)));
 
-  const [team, items] = await Promise.all([
+  const [team, items, cobrancas] = await Promise.all([
     db
       .select({ barber: barbers, user: users })
       .from(barbers)
@@ -143,13 +145,26 @@ export async function attachDetails(
       .from(appointmentServices)
       .where(inArray(appointmentServices.appointmentId, ids))
       .orderBy(asc(appointmentServices.id)),
+    db
+      .select({ appointmentId: payments.appointmentId, status: payments.status })
+      .from(payments)
+      .where(and(inArray(payments.appointmentId, ids), inArray(payments.status, ["PAGO", "PENDENTE"]))),
   ]);
+  const pagoOuNao = (id: number) => {
+    const doHorario = cobrancas.filter((c) => c.appointmentId === id);
+    return doHorario.some((c) => c.status === "PAGO")
+      ? ("PAGO" as const)
+      : doHorario.length
+        ? ("PENDENTE" as const)
+        : null;
+  };
 
   const byBarber = new Map(team.map((t) => [t.barber.id, { ...t.barber, user: t.user }]));
   return rows.map((a) => ({
     ...a,
     barber: byBarber.get(a.barberId)!,
     items: items.filter((i) => i.appointmentId === a.id),
+    pagamentoOnline: pagoOuNao(a.id),
   }));
 }
 

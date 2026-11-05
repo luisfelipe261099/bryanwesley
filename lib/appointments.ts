@@ -16,6 +16,7 @@ import {
   services as servicesTable,
   subscriptions,
   users,
+  payments,
   planServices,
 } from "@/db/schema";
 import { sql as rawSql } from "drizzle-orm";
@@ -33,6 +34,7 @@ import {
   cancelPendingNotifications,
 } from "./notifications";
 import { avisarEquipe, avisarCliente } from "./avisos";
+import { cancelarCobrancasDoAgendamento } from "./payments";
 import { randomBytes } from "node:crypto";
 import {
   shopTimeToUtc,
@@ -628,6 +630,17 @@ export async function rescheduleBooking(input: {
 
   await cancelPendingNotifications(appt.id);
 
+  // O pagamento (pago ou em aberto) acompanha o horário novo, e a forma
+  // escolhida também: quem pagou o Pix não pode aparecer devendo.
+  try {
+    await db.update(payments).set({ appointmentId: novo.id }).where(eq(payments.appointmentId, appt.id));
+    if (appt.paymentMethod) {
+      await db.update(appointments).set({ paymentMethod: appt.paymentMethod }).where(eq(appointments.id, novo.id));
+    }
+  } catch (e) {
+    console.error("Remarcação: não deu para levar o pagamento junto:", e);
+  }
+
   // O link e o QR que o cliente guardou passam a abrir o horário novo:
   // apontando para o antigo, diziam "Agendamento cancelado" a quem só
   // tinha mudado de horário — e o cliente não vinha ou marcava de novo.
@@ -850,6 +863,12 @@ export async function updateAppointmentServices(input: {
     }))
   );
 
+  // Mudou o valor: a fatura em aberto (Pix/cartão) cobraria o antigo. Sai,
+  // e o cliente gera outra com o valor novo na tela da confirmação.
+  if (totalCents !== appt.totalCents) {
+    await cancelarCobrancasDoAgendamento(appt.id);
+  }
+
   return (await db.query.appointments.findFirst({
     where: eq(appointments.id, appt.id),
   }))!;
@@ -972,6 +991,9 @@ export async function transitionAppointment(
   }
   if (next === "CANCELADO" || next === "NO_SHOW") {
     await cancelPendingNotifications(updated.id);
+    // Fatura de Pix/cartão ainda em aberto não fica cobrando um horário
+    // que não vai acontecer. O que já foi pago o dono estorna no Asaas.
+    await cancelarCobrancasDoAgendamento(updated.id);
     if (next === "CANCELADO") {
       try {
         await queueNotification({

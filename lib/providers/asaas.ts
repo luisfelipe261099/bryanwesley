@@ -27,7 +27,7 @@ function baseUrl() {
 
 type Resposta<T> = { ok: true; data: T } | { ok: false; error: string; status?: number };
 
-async function chamar<T>(metodo: "GET" | "POST", caminho: string, corpo?: unknown): Promise<Resposta<T>> {
+async function chamar<T>(metodo: "GET" | "POST" | "DELETE", caminho: string, corpo?: unknown): Promise<Resposta<T>> {
   const chave = process.env.ASAAS_API_KEY;
   if (!chave) return { ok: false, error: "Asaas não configurado (ASAAS_API_KEY ausente)." };
   try {
@@ -94,22 +94,38 @@ export type AsaasPayment = {
   deleted?: boolean;
 };
 
-/** Cria uma cobrança; o cliente escolhe Pix, boleto ou cartão na fatura. */
+/**
+ * Cria uma cobrança. Sem `tipo`, o cliente escolhe Pix, boleto ou cartão
+ * na fatura; com PIX ou CREDIT_CARD a fatura já abre nessa forma.
+ */
 export function criarCobranca(input: {
   cliente: string;
   valorCents: number;
   vencimento: string; // AAAA-MM-DD
   descricao: string;
   referencia: string;
+  tipo?: "UNDEFINED" | "PIX" | "CREDIT_CARD";
 }) {
   return chamar<AsaasPayment>("POST", "/payments", {
     customer: input.cliente,
-    billingType: "UNDEFINED",
+    billingType: input.tipo ?? "UNDEFINED",
     value: Number((input.valorCents / 100).toFixed(2)),
     dueDate: input.vencimento,
     description: input.descricao.slice(0, 500),
     externalReference: input.referencia,
   });
+}
+
+export type AsaasPix = { encodedImage: string; payload: string; expirationDate?: string | null };
+
+/** QR do Pix de uma cobrança (imagem em base64 e o "copia e cola"). */
+export function pixDaCobranca(id: string) {
+  return chamar<AsaasPix>("GET", `/payments/${encodeURIComponent(id)}/pixQrCode`);
+}
+
+/** Apaga uma cobrança ainda não paga (o cliente desistiu ou trocou a forma). */
+export function apagarCobranca(id: string) {
+  return chamar<{ deleted: boolean }>("DELETE", `/payments/${encodeURIComponent(id)}`);
 }
 
 export function consultarCobranca(id: string) {

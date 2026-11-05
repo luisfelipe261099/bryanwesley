@@ -12,7 +12,9 @@ import { headers } from "next/headers";
 import type { Slot } from "@/lib/schedule";
 import { and, eq, gt, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
-import { appointments } from "@/db/schema";
+import { appointments, users } from "@/db/schema";
+import { chargeAppointment, isCobrancaOnline } from "@/lib/payments";
+import { cpfValido } from "@/lib/cpf";
 
 /** "2026-10-47" passa na máscara e virava outro dia lá na frente. */
 const diaDeVerdade = (k: string) => /^\d{4}-\d{2}-\d{2}$/.test(k) && addDays(k, 0) === k;
@@ -82,11 +84,14 @@ const bookingSchema = z.object({
     .max(120, "Nome muito longo (máximo de 120 letras).")),
   clientPhone: z.string().refine(isValidPhone, "Informe um WhatsApp válido com DDD."),
   notes: z.string().trim().max(500).optional(),
+  /** Pix ou cartão (pelo Asaas, na hora) ou na barbearia. */
+  pagamento: z.enum(["PIX", "CARTAO", "BALCAO"]).optional(),
+  cpf: z.string().trim().max(20).optional(),
 });
 
 export type BookingResult =
-  | { ok: true; code: string; id: number; token: string }
-  | { ok: false; error: string };
+  | { ok: true; code: string; id: number; token: string; avisoPagamento?: string }
+  | { ok: false; error: string; precisaCpf?: boolean };
 
 export async function submitBooking(
   raw: z.input<typeof bookingSchema>
@@ -98,6 +103,29 @@ export async function submitBooking(
 
   const session = await getSession();
   const daCasa = session?.role === "ADMIN" || session?.role === "BARBER";
+
+  // Pix ou cartão: o CPF é conferido antes de reservar, para o horário não
+  // ficar marcado com uma cobrança que não dá para gerar.
+  const online =
+    (parsed.data.pagamento === "PIX" || parsed.data.pagamento === "CARTAO") && isCobrancaOnline();
+  const cpfConfiavel = await podeUsarCpfSalvo(session, parsed.data.clientPhone, daCasa);
+  if (online) {
+    const cpf = parsed.data.cpf ?? "";
+    if (cpf && !cpfValido(cpf)) {
+      return { ok: false, error: "CPF inválido. Confira os números.", precisaCpf: true };
+    }
+    if (!cpf) {
+      const temSalvo = cpfConfiavel
+        ? !!(await db.query.users.findFirst({
+            columns: { cpf: true },
+            where: eq(users.phone, normalizePhone(parsed.data.clientPhone)),
+          }))?.cpf
+        : false;
+      if (!temSalvo) {
+        return { ok: false, error: "Para pagar com Pix ou cartão, informe o CPF.", precisaCpf: true };
+      }
+    }
+  }
 
   // Freio por origem: sem isso um script marca o dia inteiro com
   // telefones inventados. Quem está logado (cliente, equipe) já é
@@ -162,6 +190,23 @@ export async function submitBooking(
       publicRequest: !daCasa,
       autorUserId: session?.id ?? null,
     });
+    // Só cobra o que não é do plano. Na barbearia: fica anotado e pronto.
+    let avisoPagamento: string | undefined;
+    if (appt.totalCents > 0 && parsed.data.pagamento) {
+      await db
+        .update(appointments)
+        .set({ paymentMethod: online ? parsed.data.pagamento : "BALCAO" })
+        .where(eq(appointments.id, appt.id));
+      if (online) {
+        // Falhou (Asaas fora do ar)? O horário fica e a tela da
+        // confirmação oferece gerar o pagamento de novo.
+        const cobranca = await chargeAppointment(appt.id, parsed.data.pagamento as "PIX" | "CARTAO", {
+          cpf: parsed.data.cpf,
+          cpfConfiavel,
+        });
+        if (!cobranca.ok) avisoPagamento = cobranca.error;
+      }
+    }
     revalidatePath("/cliente");
     revalidatePath("/barbeiro");
     revalidatePath("/admin");
@@ -170,6 +215,7 @@ export async function submitBooking(
       code: appt.code,
       id: appt.id,
       token: appt.checkinToken ?? "",
+      avisoPagamento,
     };
   } catch (err) {
     if (err instanceof BookingError) return { ok: false, error: err.message };
@@ -179,6 +225,22 @@ export async function submitBooking(
       error: "Não conseguimos concluir o agendamento. Tente novamente.",
     };
   }
+}
+
+/**
+ * O CPF salvo na conta do WhatsApp informado só vale quando quem pede é o
+ * dono desse WhatsApp (logado) ou a equipe. Um visitante que digita o
+ * número de outra pessoa não usa nem troca o CPF dela.
+ */
+async function podeUsarCpfSalvo(
+  session: Awaited<ReturnType<typeof getSession>>,
+  telefone: string,
+  daCasa: boolean
+) {
+  if (daCasa) return true;
+  if (!session) return false;
+  const conta = await db.query.users.findFirst({ columns: { phone: true }, where: eq(users.id, session.id) });
+  return !!conta && normalizePhone(conta.phone) === normalizePhone(telefone);
 }
 
 export async function currentSettings() {

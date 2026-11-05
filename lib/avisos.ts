@@ -295,6 +295,33 @@ export async function avisarPagamento(p: { userId: number; planId: number }): Pr
   }
 }
 
+/** Pix ou cartão de um horário confirmado: admins e o barbeiro sabem na hora. */
+export async function avisarPagamentoDoHorario(appointmentId: number, valorCents: number): Promise<ResultadoPush> {
+  try {
+    const appt = await db.query.appointments.findFirst({ where: eq(appointments.id, appointmentId) });
+    if (!appt) return { ...ZERO };
+    const [admins, barb] = await Promise.all([idsDosAdmins(), barbeiro(appt.barberId)]);
+    const { dateKey } = utcToShopParts(appt.startsAt);
+    const valor = (valorCents / 100).toFixed(2).replace(".", ",");
+    const aviso = {
+      titulo: "Pagamento recebido",
+      corpo: `${appt.clientName} pagou R$ ${valor} pelo app · ${quandoCurto(appt.startsAt)}`,
+      tag: `pagamento-${appt.id}`,
+    };
+    const opcoes = { prazoMs: PRAZO_NA_ACAO_MS };
+    const soBarbeiro = barb && !admins.includes(barb.userId) ? [barb.userId] : [];
+    return soma(
+      ...(await Promise.all([
+        enviarPush(admins, { ...aviso, url: `/admin/agenda?dia=${dateKey}` }, opcoes),
+        enviarPush(soBarbeiro, { ...aviso, url: `/barbeiro?dia=${dateKey}` }, opcoes),
+      ]))
+    );
+  } catch (e) {
+    console.error("Aviso de pagamento do horário falhou:", e);
+    return { ...ZERO };
+  }
+}
+
 /** O admin ativou (ou renovou) o plano do cliente pelo painel. */
 export async function avisarPlanoAtivado(p: {
   userId: number;

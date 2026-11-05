@@ -53,6 +53,8 @@ export type LinhaAgenda = {
   servicos: string;
   servicoIds: number[];
   totalCents: number;
+  /** "Pago no Pix", "Aguardando cartão", "Paga na hora"… */
+  pagamento: { texto: string; cls: string } | null;
   assinante: boolean;
   fixo: boolean;
   status: string;
@@ -667,6 +669,9 @@ function Item({
           <span className="text-sm font-semibold tabular-nums text-white">
             {a.assinante ? "Plano" : formatBRL(a.totalCents)}
           </span>
+          {a.pagamento && (
+            <span className={`label rounded-full px-2.5 py-1.5 ${a.pagamento.cls}`}>{a.pagamento.texto}</span>
+          )}
           <span className={`label inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 ${st.cls}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
             {st.label}
