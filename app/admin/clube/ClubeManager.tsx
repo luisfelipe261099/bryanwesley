@@ -11,6 +11,7 @@ import {
   Link2,
   Loader2,
   Phone,
+  Plus,
   RefreshCw,
   TrendingUp,
   Users,
@@ -22,6 +23,7 @@ import { formatBRL } from "@/lib/money";
 import { formatPhone } from "@/lib/phone";
 import { subscriptionStatus } from "@/lib/status";
 import {
+  ajustarExtras,
   cancelSubscription,
   createSubscriptionCharge,
   renewSubscription,
@@ -44,6 +46,13 @@ type Assinante = {
   vencida: boolean;
   /** Cancelou pelo app: usa até o fim do ciclo e não renova. */
   saindo: boolean;
+  /** Atendimentos por mês do plano (null = sem limite). */
+  limiteMensal: number | null;
+  /** Atendimentos do plano já feitos/marcados neste mês. */
+  usadosNoMes: number;
+  /** Extras liberados pelo admin que ainda sobram. */
+  extrasSaldo: number;
+  extrasLiberados: number;
 };
 
 type Resumo = {
@@ -373,6 +382,22 @@ function LinhaAssinante({
   const st = subscriptionStatus[assinante.status];
 
   const [trocando, setTrocando] = useState(false);
+  const [liberando, setLiberando] = useState(false);
+  const [qtdExtras, setQtdExtras] = useState("4");
+
+  function extras(sinal: 1 | -1) {
+    const n = Math.floor(Number(qtdExtras));
+    if (!Number.isFinite(n) || n <= 0) {
+      setMsg({ ok: false, text: "Informe quantos atendimentos." });
+      return;
+    }
+    setMsg(null);
+    start(async () => {
+      const r = await ajustarExtras(assinante.userId, sinal * n);
+      setMsg(notify(r, "Pronto."));
+      if (r.ok) setLiberando(false);
+    });
+  }
   const [novoPlano, setNovoPlano] = useState(String(assinante.planId));
   const [novoCiclo, setNovoCiclo] = useState<"MENSAL" | "ANUAL">(
     assinante.cycle === "ANUAL" ? "ANUAL" : "MENSAL"
@@ -465,6 +490,25 @@ function LinhaAssinante({
             <span className={`label rounded-full px-2.5 py-1.5 ${st?.cls ?? ""}`}>
               {st?.label ?? assinante.status}
             </span>
+            {assinante.status !== "CANCELADA" && (
+              <span
+                className={`label rounded-full px-2.5 py-1.5 ${
+                  assinante.limiteMensal !== null && assinante.usadosNoMes >= assinante.limiteMensal
+                    ? "bg-amber-400/15 text-amber-200"
+                    : "bg-white/8 text-steel-200"
+                }`}
+                title="Atendimentos do plano neste mês"
+              >
+                {assinante.limiteMensal !== null
+                  ? `${Math.min(assinante.usadosNoMes, assinante.limiteMensal)} de ${assinante.limiteMensal} no mês`
+                  : `${assinante.usadosNoMes} no mês`}
+              </span>
+            )}
+            {assinante.extrasSaldo > 0 && (
+              <span className="label rounded-full bg-emerald-400/15 px-2.5 py-1.5 text-emerald-200">
+                +{assinante.extrasSaldo} extra{assinante.extrasSaldo > 1 ? "s" : ""}
+              </span>
+            )}
             <span className="text-xs text-steel-400">
               {assinante.cycle === "ANUAL" ? "Anual" : "Mensal"} ·{" "}
               {formatBRL(assinante.monthlyCents)}/mês ·{" "}
@@ -515,6 +559,15 @@ function LinhaAssinante({
               ) : null}
               <button
                 type="button"
+                onClick={() => setLiberando((v) => !v)}
+                title="Liberar mais atendimentos para este membro"
+                className="label inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-emerald-400/10 px-3 py-2 text-emerald-200"
+              >
+                <Plus className="h-3 w-3" />
+                Extras
+              </button>
+              <button
+                type="button"
                 onClick={() => setTrocando((v) => !v)}
                 className="label rounded-full border border-white/12 px-3 py-2 text-steel-300 hover:border-electric/45 hover:text-white"
               >
@@ -541,6 +594,46 @@ function LinhaAssinante({
           </Link>
         </div>
       </div>
+      {liberando && (
+        <div className="mt-3 border-t border-white/8 pt-3">
+          <p className="text-sm text-white">Atendimentos extras para {assinante.name.split(" ")[0]}</p>
+          <p className="mt-1 text-xs text-steel-400">
+            Valem quando acabam os {assinante.limiteMensal ?? "atendimentos"} do mês e não vencem. Ex.: pagou a mais, libere 12.
+            {" "}Liberados até hoje: {assinante.extrasLiberados} · sobrando: {assinante.extrasSaldo}.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <input
+              type="number"
+              min={1}
+              max={500}
+              inputMode="numeric"
+              value={qtdExtras}
+              onChange={(e) => setQtdExtras(e.target.value)}
+              aria-label="Quantidade de atendimentos extras"
+              className="w-20 rounded-xl border border-white/10 bg-surface-2 px-3 py-2.5 text-center text-white outline-none focus:border-electric/60"
+            />
+            <button
+              type="button"
+              onClick={() => extras(1)}
+              disabled={pending}
+              className="btn-royal label inline-flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-white disabled:opacity-50"
+            >
+              {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              Liberar
+            </button>
+            {assinante.extrasSaldo > 0 && (
+              <button
+                type="button"
+                onClick={() => extras(-1)}
+                disabled={pending}
+                className="label rounded-xl border border-white/12 px-4 py-2.5 text-steel-300 disabled:opacity-50"
+              >
+                Tirar
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {trocando && (
         <div className="mt-3 grid gap-3 border-t border-white/8 pt-3 sm:grid-cols-[1fr_1fr_auto]">
           <label className="block">

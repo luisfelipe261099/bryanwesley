@@ -1119,6 +1119,8 @@ export async function listSubscribers(f: FiltroAssinantes = {}) {
     startedAt: r.sub.startedAt,
     renewsAt: r.sub.renewsAt,
     canceledAt: r.sub.canceledAt,
+    limiteMensal: r.plan.monthlyLimit ?? null,
+    extrasLiberados: r.user.extraVisits,
   }));
 }
 

@@ -24,10 +24,10 @@ const PLANS = [
     features: ["2 cortes de cabelo por mês", "Pézinho liberado entre os cortes", "10% OFF em produtos e cosméticos", "Barber Bar com café espresso & chopp"],
     covers: ["corte", "pezinho"] },
   { slug: "gold", name: "Plano Gold Black", kicker: "Experiência insígnia", tagline: "Cabelo e barba impecáveis o mês inteiro.", priceCents: 22900, annualPriceCents: 19100, highlight: true, badge: "Mais escolhido", sortOrder: 2,
-    features: ["Cortes ilimitados durante todo o mês", "Barboterapia semanal inclusa", "Prioridade máxima na agenda VIP", "Bar liberado & 20% OFF em produtos"],
+    features: ["Até 4 atendimentos por mês", "Barboterapia semanal inclusa", "Prioridade máxima na agenda VIP", "Bar liberado & 20% OFF em produtos"],
     covers: ["corte", "barba", "sobrancelha", "lavagem"] },
-  { slug: "diamond", name: "Diamond Royalty", kicker: "Nível soberano", tagline: "A experiência completa, sem limites.", priceCents: 31900, annualPriceCents: 26600, highlight: false, badge: "Top", sortOrder: 3,
-    features: ["Cortes & barba ilimitados + toalha quente", "Acesso privativo ao Lounge VIP", "1 convidado mensal grátis", "Spa capilar e 25% OFF em coloração"],
+  { slug: "diamond", name: "Diamond Royalty", kicker: "Nível soberano", tagline: "A experiência completa, do jeito que você merece.", priceCents: 31900, annualPriceCents: 26600, highlight: false, badge: "Top", sortOrder: 3,
+    features: ["Corte & barba até 4 vezes por mês + toalha quente", "Acesso privativo ao Lounge VIP", "1 convidado mensal grátis", "Spa capilar e 25% OFF em coloração"],
     covers: ["corte", "barba", "sobrancelha", "lavagem", "hidratacao"] },
 ];
 
@@ -72,7 +72,7 @@ export async function runSeed() {
 
   // ── Planos + cobertura ──
   for (const p of PLANS) {
-    const data = { name: p.name, kicker: p.kicker, tagline: p.tagline, priceCents: p.priceCents, annualPriceCents: p.annualPriceCents, features: p.features, highlight: p.highlight, badge: p.badge, sortOrder: p.sortOrder };
+    const data = { name: p.name, kicker: p.kicker, tagline: p.tagline, priceCents: p.priceCents, annualPriceCents: p.annualPriceCents, features: p.features, highlight: p.highlight, badge: p.badge, sortOrder: p.sortOrder, monthlyLimit: 4 };
     let planId: number;
     const cur = await db.query.plans.findFirst({ where: eq(plans.slug, p.slug) });
     if (cur) {

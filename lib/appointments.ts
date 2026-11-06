@@ -18,6 +18,7 @@ import {
   users,
   payments,
   planServices,
+  plans,
 } from "@/db/schema";
 import { sql as rawSql } from "drizzle-orm";
 import {
@@ -162,6 +163,86 @@ export async function usoDoPlanoNoMes(
   return out;
 }
 
+/**
+ * Atendimentos que o plano cobriu no mês de `dateKey` (sem contar os
+ * extras): horários não cancelados com algum serviço coberto (preço zero).
+ * Corte e barba na mesma visita contam uma vez.
+ */
+export async function atendimentosDoPlanoNoMes(userId: number, dateKey: string, ignorar: number[] = []) {
+  const { inicio, fim } = limitesDoMes(dateKey);
+  const [r] = await db
+    .select({ n: rawSql<number>`count(distinct ${appointments.id})` })
+    .from(appointments)
+    .innerJoin(appointmentServices, eq(appointmentServices.appointmentId, appointments.id))
+    .where(
+      and(
+        eq(appointments.clientUserId, userId),
+        eq(appointmentServices.priceCents, 0),
+        eq(appointments.extraCredit, false),
+        ne(appointments.status, "CANCELADO"),
+        gte(appointments.startsAt, inicio),
+        lt(appointments.startsAt, fim),
+        ignorar.length ? notInArray(appointments.id, ignorar) : undefined
+      )
+    );
+  return Number(r?.n ?? 0);
+}
+
+/** Atendimentos extras que ainda restam: liberados menos os já usados. */
+export async function saldoDeExtras(userId: number, ignorar: number[] = []) {
+  const [u] = await db.select({ extras: users.extraVisits }).from(users).where(eq(users.id, userId));
+  if (!u || u.extras <= 0) return 0;
+  const [r] = await db
+    .select({ n: rawSql<number>`count(*)` })
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.clientUserId, userId),
+        eq(appointments.extraCredit, true),
+        ne(appointments.status, "CANCELADO"),
+        ignorar.length ? notInArray(appointments.id, ignorar) : undefined
+      )
+    );
+  return Math.max(0, u.extras - Number(r?.n ?? 0));
+}
+
+/**
+ * O que o plano cobre neste horário: a cota de cada serviço e, por cima,
+ * o limite de atendimentos do mês. Estourou o limite: usa um extra, se o
+ * membro tiver; senão, tudo sai avulso.
+ */
+async function coberturaDoPlano(
+  ownerId: number,
+  planId: number,
+  dateKey: string,
+  serviceIds: number[],
+  ignorar: number[]
+): Promise<{ cobertos: Set<number>; usaExtra: boolean }> {
+  const [covers, plano] = await Promise.all([
+    db.query.planServices.findMany({ where: eq(planServices.planId, planId) }),
+    db.query.plans.findFirst({ columns: { monthlyLimit: true }, where: eq(plans.id, planId) }),
+  ]);
+  // Cota do mês (ex.: Silver, 2 cortes): o que já foi usado no mês do
+  // atendimento conta, e o que passa da cota sai cobrado como avulso.
+  const comCota = covers.filter((c) => c.monthlyQuota !== null && c.monthlyQuota !== undefined);
+  const usados = comCota.length
+    ? await usoDoPlanoNoMes(ownerId, dateKey, comCota.map((c) => c.serviceId), ignorar)
+    : new Map<number, number>();
+  const cobertos = new Set(
+    covers
+      .filter((c) => c.monthlyQuota == null || (usados.get(c.serviceId) ?? 0) < c.monthlyQuota)
+      .map((c) => c.serviceId)
+  );
+  const limite = plano?.monthlyLimit ?? null;
+  if (limite === null || !serviceIds.some((id) => cobertos.has(id))) {
+    return { cobertos, usaExtra: false };
+  }
+  const feitos = await atendimentosDoPlanoNoMes(ownerId, dateKey, ignorar);
+  if (feitos < limite) return { cobertos, usaExtra: false };
+  if ((await saldoDeExtras(ownerId, ignorar)) > 0) return { cobertos, usaExtra: true };
+  return { cobertos: new Set(), usaExtra: false };
+}
+
 export async function createBooking(input: CreateBookingInput) {
   const settings = await getSettings();
   if (input.publicRequest && !settings.acceptingBookings) {
@@ -273,21 +354,11 @@ export async function createBooking(input: CreateBookingInput) {
     : undefined;
 
   let coveredIds = new Set<number>();
+  let usaExtra = false;
   if (subscription) {
-    const covers = await db.query.planServices.findMany({
-      where: eq(planServices.planId, subscription.planId),
-    });
-    // Cota do mês (ex.: Silver, 2 cortes): o que já foi usado no mês do
-    // atendimento conta, e o que passa da cota sai cobrado como avulso.
-    const comCota = covers.filter((c) => c.monthlyQuota !== null && c.monthlyQuota !== undefined);
-    const usados = comCota.length
-      ? await usoDoPlanoNoMes(ownerId!, input.dateKey, comCota.map((c) => c.serviceId), ignorados)
-      : new Map<number, number>();
-    coveredIds = new Set(
-      covers
-        .filter((c) => c.monthlyQuota == null || (usados.get(c.serviceId) ?? 0) < c.monthlyQuota)
-        .map((c) => c.serviceId)
-    );
+    const c = await coberturaDoPlano(ownerId!, subscription.planId, input.dateKey, chosen.map((x) => x.id), ignorados);
+    coveredIds = c.cobertos;
+    usaExtra = c.usaExtra;
   }
   const allCovered =
     !!subscription && chosen.every((s) => coveredIds.has(s.id));
@@ -474,6 +545,8 @@ export async function createBooking(input: CreateBookingInput) {
           barberPctSnapshot: barberPct,
           notes: input.notes?.trim() || null,
           recurringSlotId: input.recurringSlotId ?? null,
+          // Só marca o extra quando algum serviço saiu mesmo pelo plano.
+          extraCredit: usaExtra && chosen.some((x) => coveredIds.has(x.id)),
         })
         .$returningId();
 
@@ -803,22 +876,14 @@ export async function updateAppointmentServices(input: {
         ),
       })
     : undefined;
+  // A mesma cota e o mesmo limite do mês de quem agenda: sem eles, mudar
+  // os serviços no balcão zerava o terceiro corte de um Silver.
   let cobertos = new Set<number>();
+  let usaExtra = false;
   if (assinatura) {
-    const cobre = await db.query.planServices.findMany({
-      where: eq(planServices.planId, assinatura.planId),
-    });
-    // A mesma cota do mês de quem agenda: sem ela, mudar os serviços no
-    // balcão zerava o terceiro corte de um Silver (cota de 2).
-    const comCota = cobre.filter((c) => c.monthlyQuota != null);
-    const usados = comCota.length
-      ? await usoDoPlanoNoMes(dono!, partes.dateKey, comCota.map((c) => c.serviceId), [appt.id])
-      : new Map<number, number>();
-    cobertos = new Set(
-      cobre
-        .filter((c) => c.monthlyQuota == null || (usados.get(c.serviceId) ?? 0) < c.monthlyQuota)
-        .map((c) => c.serviceId)
-    );
+    const c = await coberturaDoPlano(dono!, assinatura.planId, partes.dateKey, chosen.map((x) => x.id), [appt.id]);
+    cobertos = c.cobertos;
+    usaExtra = c.usaExtra;
   }
   // O que já estava no horário mantém o preço combinado; só o que entra
   // agora vai pela tabela de hoje.
@@ -845,6 +910,7 @@ export async function updateAppointmentServices(input: {
       totalCents,
       kind: tudoCoberto ? "ASSINANTE" : "AVULSO",
       subscriptionId: tudoCoberto ? assinatura!.id : null,
+      extraCredit: usaExtra && chosen.some((x) => cobertos.has(x.id)),
     })
     .where(eq(appointments.id, appt.id));
 

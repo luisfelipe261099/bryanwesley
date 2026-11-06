@@ -40,6 +40,7 @@ type PlanRow = {
   active: boolean;
   serviceIds: number[];
   quotas: Record<number, number | null>;
+  monthlyLimit: number | null;
 };
 
 const reais = (cents: number) => (cents / 100).toFixed(2).replace(".", ",");

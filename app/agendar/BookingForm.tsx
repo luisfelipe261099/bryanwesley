@@ -46,6 +46,8 @@ export function BookingForm({
   minAdvanceHours,
   avisaPorWhatsapp = false,
   usoPorMes = {},
+  atendimentosPorMes = {},
+  extrasSaldo = 0,
   barberPadrao = null,
   daCasa = false,
   regras = [],
@@ -61,6 +63,10 @@ export function BookingForm({
   plan: (Plan & { covers: { id: number; quota: number | null }[] }) | null;
   /** Cota do plano já usada em cada mês ("AAAA-MM" → serviço → vezes). */
   usoPorMes?: Record<string, Record<number, number>>;
+  /** Atendimentos do plano já usados em cada mês ("AAAA-MM" → vezes). */
+  atendimentosPorMes?: Record<string, number>;
+  /** Atendimentos extras liberados pelo admin que ainda sobram. */
+  extrasSaldo?: number;
   /** Encaixe do barbeiro: começa com ele mesmo escolhido, não "mais rápido". */
   barberPadrao?: number | null;
   /** Equipe lançando encaixe: a antecedência mínima não vale para ela. */
@@ -117,8 +123,13 @@ export function BookingForm({
   const outroFone =
     isSub && !!viewer?.phone && normalizePhone(phone).length >= 10 && normalizePhone(phone) !== normalizePhone(viewer.phone);
   // O plano cobre o serviço — e ainda tem cota no mês do dia escolhido?
+  // Limite de atendimentos do mês do plano: acabou e sem extras, sai avulso.
+  const limite = plan?.monthlyLimit ?? null;
+  const feitosNoMes = atendimentosPorMes[(dateKey ?? "").slice(0, 7)] ?? 0;
+  const estourouLimite = isSub && !outroFone && limite !== null && feitosNoMes >= limite;
+  const semExtras = estourouLimite && extrasSaldo <= 0;
   const cobre = (id: number) => {
-    if (outroFone) return false;
+    if (outroFone || semExtras) return false;
     const c = plan?.covers.find((x) => x.id === id);
     if (!c) return false;
     if (c.quota === null) return true;
@@ -673,7 +684,14 @@ export function BookingForm({
                 O plano vale só para o seu WhatsApp: com outro número, o horário sai como avulso.
               </p>
             )}
-            {foraDaCota.length > 0 && (
+            {estourouLimite && chosen.length > 0 && (
+              <p className="mt-2 text-xs text-amber-200">
+                {semExtras
+                  ? `Você já usou os ${limite} atendimentos do plano neste mês: este sai como avulso.`
+                  : `Você já usou os ${limite} atendimentos do plano neste mês: este usa 1 dos seus ${extrasSaldo} atendimentos extras.`}
+              </p>
+            )}
+            {!semExtras && foraDaCota.length > 0 && (
               <p className="mt-2 text-xs text-amber-200">
                 {foraDaCota.map((s) => s.name).join(", ")}: a cota do seu plano neste mês já foi usada — sai como avulso.
               </p>

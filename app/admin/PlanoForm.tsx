@@ -28,6 +28,8 @@ export type PlanoEditavel = {
   serviceIds: number[];
   /** Cota mensal de cada serviço incluso (serviceId → vezes; null = ilimitado). */
   quotas: Record<number, number | null>;
+  /** Atendimentos cobertos por mês (null = sem limite). */
+  monthlyLimit: number | null;
 };
 
 /** Plano em branco, para cadastrar um novo. */
@@ -44,6 +46,7 @@ const EM_BRANCO: PlanoEditavel = {
   active: true,
   serviceIds: [],
   quotas: {},
+  monthlyLimit: 4,
 };
 
 const reais = (cents: number) => (cents / 100).toFixed(2).replace(".", ",");
@@ -102,6 +105,7 @@ export function PlanoForm({
         badge: f.badge || null,
         active: f.active,
         serviceIds: f.serviceIds,
+        monthlyLimit: f.monthlyLimit && f.monthlyLimit > 0 ? Math.floor(f.monthlyLimit) : null,
         quotas: Object.fromEntries(
           f.serviceIds.map((id) => {
             const v = Number(f.quotas[id] ?? 0);
@@ -161,6 +165,30 @@ export function PlanoForm({
           onChange={(e) => setF({ ...f, featuresText: e.target.value })}
           className="w-full resize-none rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-sm text-white outline-none focus:border-electric/60"
         />
+      </label>
+
+      <label className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-electric/25 bg-electric/[0.05] p-3">
+        <span className="min-w-0">
+          <span className="label block text-electric">Atendimentos por mês</span>
+          <span className="mt-1 block text-xs text-steel-400">
+            Quantas vezes o membro é atendido pelo plano no mês (corte e barba na mesma visita contam 1).
+            Passou disso, sai avulso — ou usa os extras que você liberar para ele. Em branco = sem limite.
+          </span>
+        </span>
+        <span className="flex flex-none items-center gap-2">
+          <input
+            type="number"
+            min={1}
+            max={60}
+            inputMode="numeric"
+            placeholder="∞"
+            aria-label="Atendimentos por mês"
+            value={f.monthlyLimit ?? ""}
+            onChange={(e) => setF({ ...f, monthlyLimit: e.target.value === "" ? null : Number(e.target.value) })}
+            className="w-20 rounded-lg border border-white/10 bg-surface-2 px-2 py-2 text-center text-lg text-white outline-none focus:border-electric/60"
+          />
+          <span className="text-xs text-steel-400">por mês</span>
+        </span>
       </label>
 
       <div className="mt-3">

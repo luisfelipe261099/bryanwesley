@@ -1,3 +1,4 @@
+import { utcToShopParts } from "../lib/time";
 import "../db/load-env";
 import { db, pool } from "../db/client";
 import {
@@ -66,8 +67,17 @@ async function main() {
   const criados = await db.query.appointments.findMany({
     where: eq(appointments.clientUserId, cliente.id),
   });
-  ok("marcados como assinante (sem cobrança)",
-     criados.every((a) => a.kind === "ASSINANTE" && a.totalCents === 0));
+  // Limite do plano (atendimentos por mês): até ele, pelo plano; a 5ª
+  // semana de um mês com 5 semanas sai avulsa.
+  const limite = gold.monthlyLimit ?? Infinity;
+  const porMes = new Map<string, typeof criados>();
+  for (const a of [...criados].sort((x, y) => x.startsAt.getTime() - y.startsAt.getTime())) {
+    const m = utcToShopParts(a.startsAt).dateKey.slice(0, 7);
+    porMes.set(m, [...(porMes.get(m) ?? []), a]);
+  }
+  ok("marcados como assinante (sem cobrança) até o limite do mês",
+     [...porMes.values()].every((lista) =>
+       lista.every((a, i) => (i < limite ? a.kind === "ASSINANTE" && a.totalCents === 0 : a.kind === "AVULSO" && a.totalCents > 0))));
   ok("todos às 10:00 do dia certo",
      criados.every((a) => weekdayOf(a.startsAt.toISOString().slice(0,10)) >= 0));
 

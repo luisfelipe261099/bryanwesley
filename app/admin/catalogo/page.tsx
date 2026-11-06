@@ -36,6 +36,7 @@ export default async function AdminCatalogo() {
         active: p.active,
         serviceIds: p.covers.map((c) => c.id),
         quotas: Object.fromEntries(p.covers.map((c) => [c.id, c.quota])),
+        monthlyLimit: p.monthlyLimit ?? null,
       }))}
     />
   );

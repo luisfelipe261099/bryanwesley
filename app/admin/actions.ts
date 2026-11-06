@@ -47,6 +47,7 @@ import {
 import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
 import { claimDispatchSlot, runDispatch, despacharPush } from "@/lib/dispatch";
 import { chargeSubscription } from "@/lib/payments";
+import { saldoDeExtras } from "@/lib/appointments";
 import { cpfValido, soDigitosCpf } from "@/lib/cpf";
 import { shopTimeToUtc, parseDateKey, utcToShopParts } from "@/lib/time";
 import { normalizePhone, isValidPhone, nextPlaceholderPhone, isPlaceholderPhone } from "@/lib/phone";
@@ -936,6 +937,7 @@ const planSchema = z.object({
   serviceIds: z.array(z.number().int()).default([]),
   /** Cota mensal por serviço ("id" → vezes por mês; vazio = ilimitado). */
   quotas: z.record(z.string(), z.number().int().min(1, "A cota mínima é 1 por mês.").max(31).nullable()).default({}),
+  monthlyLimit: z.number().int().min(1, "O mínimo é 1 atendimento por mês.").max(60).nullable().default(null),
 });
 
 export async function savePlan(
@@ -959,6 +961,7 @@ export async function savePlan(
           highlight: data.highlight,
           badge: data.badge,
           active: data.active,
+          monthlyLimit: data.monthlyLimit,
         })
         .where(eq(plans.id, planId));
     } else {
@@ -984,6 +987,7 @@ export async function savePlan(
           highlight: data.highlight,
           badge: data.badge,
           active: data.active,
+          monthlyLimit: data.monthlyLimit,
           sortOrder: 99,
         })
         .$returningId();
@@ -1901,6 +1905,44 @@ export async function desligarServidorWhatsapp(): Promise<Result> {
     await admin();
     await desligarPonte();
     return done("Servidor desligado. Para voltar, gere um novo comando de instalação.");
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+
+/**
+ * Libera (ou tira) atendimentos extras do plano para um membro: o cara
+ * pagou a mais e ganhou mais 12 cortes, por exemplo. Eles valem quando o
+ * limite do mês acaba e não vencem. Tirar nunca deixa abaixo do que ele
+ * já usou.
+ */
+export async function ajustarExtras(userId: number, quantidade: number): Promise<Result> {
+  try {
+    await admin();
+    if (!Number.isInteger(quantidade) || quantidade === 0 || Math.abs(quantidade) > 500) {
+      return { ok: false, error: "Informe quantos atendimentos (de 1 a 500)." };
+    }
+    const u = await db.query.users.findFirst({ where: eq(users.id, userId) });
+    if (!u) return { ok: false, error: "Cliente não encontrado." };
+    const saldo = await saldoDeExtras(userId);
+    const usados = u.extraVisits - saldo;
+    const novo = Math.max(usados, u.extraVisits + quantidade);
+    if (novo === u.extraVisits) {
+      return { ok: false, error: "Não há extras sobrando para tirar." };
+    }
+    await db.update(users).set({ extraVisits: novo }).where(eq(users.id, userId));
+    revalidatePath("/admin/clube");
+    revalidatePath(`/admin/clientes/${userId}`);
+    revalidatePath("/cliente");
+    const restam = novo - usados;
+    return {
+      ok: true,
+      message:
+        quantidade > 0
+          ? `${quantidade} atendimento(s) extra(s) liberado(s). ${u.name.split(" ")[0]} tem ${restam} sobrando.`
+          : `Extras ajustados. Sobram ${restam}.`,
+    };
   } catch (e) {
     return fail(e);
   }

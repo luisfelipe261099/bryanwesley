@@ -34,6 +34,7 @@ import {
 } from "@/lib/queries";
 import { formatBRL, formatDuration } from "@/lib/money";
 import { formatShopTime, utcToShopParts, labelFullDate, shopToday } from "@/lib/time";
+import { atendimentosDoPlanoNoMes, saldoDeExtras } from "@/lib/appointments";
 import { checkinQrSvg, publicBaseUrl } from "@/lib/qr";
 import { CheckinQR } from "./CheckinQR";
 import { CancelButton, EmptyState, ChangePassword } from "./MeusHorarios";
@@ -155,6 +156,11 @@ export default async function ClienteDashboard({
   // dava sempre R$ 0,00, porque o item coberto pelo plano é gravado com
   // preço zero.
   const { atendimentosNoMes, economiaCents } = stats;
+  // Limite de atendimentos do plano no mês e os extras liberados.
+  const limiteDoPlano = plan?.monthlyLimit ?? null;
+  const [usadosDoPlano, extrasDoPlano] = plan
+    ? await Promise.all([atendimentosDoPlanoNoMes(session.id, shopToday()), saldoDeExtras(session.id)])
+    : [0, 0];
   const planoVencido = !subscription ? vencida[0] : undefined;
 
   return (
@@ -324,6 +330,28 @@ export default async function ClienteDashboard({
                       />
                     </div>
                   </div>
+
+                  {limiteDoPlano !== null && (
+                    <div className="relative mt-5">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-steel-300">Atendimentos do plano neste mês</span>
+                        <span className="font-medium text-white">
+                          {Math.min(usadosDoPlano, limiteDoPlano)} de {limiteDoPlano}
+                        </span>
+                      </div>
+                      <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/8">
+                        <div
+                          className={`h-full rounded-full ${usadosDoPlano >= limiteDoPlano ? "bg-amber-400" : "bg-royal-grad"}`}
+                          style={{ width: `${Math.min(100, Math.round((usadosDoPlano / limiteDoPlano) * 100))}%` }}
+                        />
+                      </div>
+                      {extrasDoPlano > 0 && (
+                        <p className="mt-2 text-xs text-emerald-200">
+                          + {extrasDoPlano} atendimento{extrasDoPlano > 1 ? "s" : ""} extra{extrasDoPlano > 1 ? "s" : ""} liberado{extrasDoPlano > 1 ? "s" : ""} para você.
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   <div className="relative mt-7 grid grid-cols-3 gap-4 border-t border-white/8 pt-6">
                     <MiniStat

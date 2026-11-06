@@ -91,6 +91,9 @@ export const users = mysqlTable(
     cpf: varchar("cpf", { length: 11 }),
     // Cliente correspondente no Asaas, criado na primeira cobrança.
     asaasCustomerId: varchar("asaas_customer_id", { length: 40 }),
+    // Atendimentos extras do plano liberados pelo admin (acumulado). O
+    // saldo é isto menos os horários que já usaram um extra.
+    extraVisits: int("extra_visits").notNull().default(0),
     createdAt: tsNow("created_at"),
   },
   (t) => ({
@@ -181,6 +184,12 @@ export const plans = mysqlTable(
     badge: varchar("badge", { length: 40 }),
     active: boolean("active").notNull().default(true),
     sortOrder: int("sort_order").notNull().default(0),
+    /**
+     * Atendimentos cobertos por mês (uma visita com corte e barba conta
+     * uma vez). Vazio = sem limite. Passou do limite, sai avulso — a
+     * menos que o membro tenha atendimentos extras liberados pelo admin.
+     */
+    monthlyLimit: int("monthly_limit"),
   },
   (t) => ({ slugIdx: uniqueIndex("plans_slug_idx").on(t.slug) })
 );
@@ -257,6 +266,9 @@ export const appointments = mysqlTable(
     // Como o cliente escolheu pagar: PIX/CARTAO pelo Asaas ou BALCAO
     // (dinheiro ou maquininha na hora). Null: plano cobre ou horário antigo.
     paymentMethod: varchar("payment_method", { length: 10 }).$type<FormaPagamento>(),
+    // Coberto por um atendimento extra (o limite do mês do plano já tinha
+    // acabado). Cancelado, o extra volta para o saldo sozinho.
+    extraCredit: boolean("extra_credit").notNull().default(false),
     checkedInAt: ts("checked_in_at"),
     // Horário fixo que gerou este agendamento (null para avulso). Com o
     // vínculo, uma ocorrência cancelada continua cancelada: a próxima

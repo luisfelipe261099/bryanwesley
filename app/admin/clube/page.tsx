@@ -12,6 +12,8 @@ import { db } from "@/db/client";
 import { services as servicesTable } from "@/db/schema";
 import { utcToShopParts, labelDayMonth } from "@/lib/time";
 import { ClubeManager } from "./ClubeManager";
+import { atendimentosDoPlanoNoMes, saldoDeExtras } from "@/lib/appointments";
+import { shopToday } from "@/lib/time";
 import { requireRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +55,15 @@ export default async function AdminClube({
     offset: (atual - 1) * POR_PAGINA,
   });
 
+  // Uso do plano no mês de cada membro da página e o saldo de extras.
+  const hoje = shopToday();
+  const uso = await Promise.all(
+    assinantes.map(async (a) => ({
+      usadosNoMes: await atendimentosDoPlanoNoMes(a.userId, hoje),
+      extrasSaldo: await saldoDeExtras(a.userId),
+    }))
+  );
+
   return (
     <ClubeManager
       cobrancaOnline={isCobrancaOnline()}
@@ -71,10 +82,12 @@ export default async function AdminClube({
         active: p.active,
         serviceIds: p.covers.map((c) => c.id),
         quotas: Object.fromEntries(p.covers.map((c) => [c.id, c.quota])),
+        monthlyLimit: p.monthlyLimit ?? null,
       }))}
       servicos={servicos.map((s) => ({ id: s.id, name: s.name }))}
-      assinantes={assinantes.map((a) => ({
+      assinantes={assinantes.map((a, i) => ({
         ...a,
+        ...uso[i],
         startedAt: labelDayMonth(utcToShopParts(a.startedAt).dateKey),
         renewsAt: labelDayMonth(utcToShopParts(a.renewsAt).dateKey),
         vencida: a.status === "ATIVA" && a.renewsAt.getTime() < Date.now(),

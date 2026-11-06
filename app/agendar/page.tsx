@@ -11,7 +11,7 @@ import { users } from "@/db/schema";
 import { getSettings, listOpenDays } from "@/lib/schedule";
 import { listServices, listPlans, listTeam, activeSubscription } from "@/lib/queries";
 import { getSession } from "@/lib/auth";
-import { usoDoPlanoNoMes } from "@/lib/appointments";
+import { atendimentosDoPlanoNoMes, saldoDeExtras, usoDoPlanoNoMes } from "@/lib/appointments";
 import { formatPhone, normalizePhone } from "@/lib/phone";
 import { BookingForm } from "./BookingForm";
 import { isCobrancaOnline } from "@/lib/payments";
@@ -57,13 +57,18 @@ export default async function Agendar({
   // Cota do plano (ex.: Silver, 2 cortes/mês): quanto já foi usado em cada
   // mês da janela, para a tela não prometer "Incluso" além da cota.
   const usoPorMes: Record<string, Record<number, number>> = {};
+  // Limite de atendimentos do mês do plano e os extras liberados.
+  const atendimentosPorMes: Record<string, number> = {};
+  let extrasSaldo = 0;
   if (plan && session) {
     const comCota = plan.covers.filter((c) => c.quota !== null).map((c) => c.id);
     const meses = Array.from(new Set(days.map((d) => d.dateKey.slice(0, 7))));
     for (const mes of meses) {
       const uso = await usoDoPlanoNoMes(session.id, `${mes}-01`, comCota);
       usoPorMes[mes] = Object.fromEntries(uso);
+      atendimentosPorMes[mes] = await atendimentosDoPlanoNoMes(session.id, `${mes}-01`);
     }
+    extrasSaldo = await saldoDeExtras(session.id);
   }
 
   // Só o cliente logado tem os próprios dados preenchidos; barbeiro ou
@@ -145,6 +150,8 @@ export default async function Agendar({
             days={days}
             plan={plan}
             usoPorMes={usoPorMes}
+            atendimentosPorMes={atendimentosPorMes}
+            extrasSaldo={extrasSaldo}
             barberPadrao={daCasa ? session?.barberId ?? null : null}
             daCasa={daCasa}
             viewer={viewer}
