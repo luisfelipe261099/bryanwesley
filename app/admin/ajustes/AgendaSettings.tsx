@@ -44,6 +44,8 @@ export function AgendaSettings({ settings }: { settings: Settings }) {
         closedWeekdays: form.closedWeekdays,
         maxAdvanceDays: form.maxAdvanceDays,
         defaultBarberPct: form.defaultBarberPct,
+        memberNightFrom: form.memberNightFrom,
+        autoCharge: form.autoCharge,
       });
       setMsg(notify(res, "Salvo."));
     });
@@ -162,6 +164,32 @@ export function AgendaSettings({ settings }: { settings: Settings }) {
             value={form.defaultBarberPct}
             onChange={(e) => patch({ defaultBarberPct: Number(e.target.value) })}
           />
+        </div>
+
+        <div className="rounded-2xl border border-electric/25 bg-electric/[0.04] p-4">
+          <p className="label text-electric">Mensalistas</p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <label className="block">
+              <span className="label mb-2 block text-steel-400">Plano não cobre a partir de</span>
+              <input
+                type="time"
+                value={form.memberNightFrom === null ? "" : minutesToHHMM(form.memberNightFrom)}
+                onChange={(e) => patch({ memberNightFrom: e.target.value ? hhmmToMinutes(e.target.value) : null })}
+                className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none [color-scheme:dark] focus:border-electric/60"
+              />
+              <span className="mt-1.5 block text-xs text-steel-400">
+                Mensalista não corta pelo plano à noite: deste horário em diante sai avulso. Em branco = sem restrição.
+              </span>
+            </label>
+            <div>
+              <Toggle
+                checked={form.autoCharge}
+                onChange={(v) => patch({ autoCharge: v })}
+                label="Cobrança automática da mensalidade"
+                hint="3 dias antes de vencer, o sistema gera o Pix da mensalidade no Asaas e avisa o membro. Pagou, o plano renova sozinho."
+              />
+            </div>
+          </div>
         </div>
 
         <button

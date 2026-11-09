@@ -192,7 +192,8 @@ async function main() {
       await transitionAppointment(gerados[0].id, "CANCELADO");
       const [{ dia: d4, livres: l4 }] = (await diasComVaga(barbeiro.id, corte.durationMin, 2, 6)).filter((d) => d.dia.slice(0, 7) === mesmoMes[0].dia.slice(0, 7)).slice(-1);
       const quarto = await createBooking({
-        serviceIds: [corte.id], dateKey: d4, time: l4[l4.length - 1], barberId: barbeiro.id,
+        // De dia: à noite o plano do mensalista não cobre.
+        serviceIds: [corte.id], dateKey: d4, time: [...l4].reverse().find((h) => h < "17:00") ?? l4[0], barberId: barbeiro.id,
         clientName: "ZZRev4 Membro", clientPhone: FONE(2), userId: membroId,
       });
       ok("cancelado não conta na cota", quarto.kind === "ASSINANTE", quarto.kind);

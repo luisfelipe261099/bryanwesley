@@ -84,7 +84,7 @@ async function main() {
     const cria = chamadas.find((c) => c.caminho === "/customers");
     ok("cria o cliente com nome, CPF e celular", cria?.corpo?.cpfCnpj === CPF && cria?.corpo?.mobilePhone === "41970200001");
     const cob = chamadas.find((c) => c.caminho === "/payments" && c.metodo === "POST");
-    ok("cobra o valor do plano, com Pix/boleto/cartão à escolha", cob?.corpo?.value === plano.priceCents / 100 && cob?.corpo?.billingType === "UNDEFINED");
+    ok("cobra o valor do plano, no Pix (sem boleto)", cob?.corpo?.value === plano.priceCents / 100 && cob?.corpo?.billingType === "PIX");
     const conta = (await db.select().from(users).where(eq(users.id, cliente.id)))[0];
     ok("o CPF e o cliente do Asaas ficam salvos na conta", conta.cpf === CPF && !!conta.asaasCustomerId);
     if (!c1.ok) throw new Error("sem cobrança");
@@ -92,8 +92,8 @@ async function main() {
     ok("a cobrança fica registrada como pendente, com o id do Asaas", pg.status === "PENDENTE" && pg.provider === "asaas" && pg.transactionNsu?.startsWith("pay_") === true);
 
     const antes = chamadas.length;
-    const c2 = await chargeSubscription(cliente.id, "MENSAL");
-    ok("na próxima vez, usa o CPF salvo e atualiza o mesmo cliente", c2.ok && chamadas.slice(antes).some((c) => c.caminho === `/customers/${conta.asaasCustomerId}`));
+    const c1b = await chargeSubscription(cliente.id, "MENSAL");
+    ok("mensalidade em aberto: reaproveita a mesma fatura", c1b.ok && c1b.orderNsu === c1.orderNsu && !chamadas.slice(antes).some((c) => c.caminho === "/payments"));
 
     console.log("3. Baixa");
     const id = pg.transactionNsu!;
@@ -130,6 +130,11 @@ async function main() {
     const denovo = (await db.select().from(subscriptions).where(eq(subscriptions.id, sub.id)))[0];
     ok("aviso repetido não estende o plano duas vezes", denovo.renewsAt.getTime() === renova);
 
+    const antes2 = chamadas.length;
+    const c2 = await chargeSubscription(cliente.id, "MENSAL", { tipo: "CREDIT_CARD" });
+    ok("próxima mensalidade usa o CPF salvo e o mesmo cliente, cartão à vista", c2.ok &&
+      chamadas.slice(antes2).some((c) => c.caminho === `/customers/${conta.asaasCustomerId}`) &&
+      chamadas.slice(antes2).some((c) => c.caminho === "/payments" && c.corpo?.billingType === "CREDIT_CARD" && c.corpo?.installmentCount === undefined));
     const pg2 = (await db.select().from(payments).where(eq(payments.orderNsu, c2.ok ? c2.orderNsu : "")))[0];
     await webhook(req("token-de-teste-123", { event: "PAYMENT_DELETED", payment: { id: pg2.transactionNsu, externalReference: pg2.orderNsu } }));
     const apagada = (await db.select().from(payments).where(eq(payments.id, pg2.id)))[0];

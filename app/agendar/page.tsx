@@ -159,6 +159,7 @@ export default async function Agendar({
             minAdvanceHours={settings.minAdvanceHours}
             avisaPorWhatsapp={avisaPorWhatsapp}
             cobrancaOnline={isCobrancaOnline()}
+            noiteMensalista={settings.memberNightFrom ?? null}
           />
         )}
       </main>

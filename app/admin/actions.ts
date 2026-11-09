@@ -137,6 +137,8 @@ const settingsSchema = z.object({
   closedWeekdays: z.array(z.number().int().min(0).max(6)),
   maxAdvanceDays: z.number({ message: "Informe até quantos dias à frente o cliente marca." }).int().min(1, "A janela vai de 1 a 365 dias.").max(365, "A janela vai de 1 a 365 dias."),
   defaultBarberPct: z.number({ message: "Informe a comissão sugerida." }).int().min(0, "Comissão de 0 a 100%.").max(100, "Comissão de 0 a 100%."),
+  memberNightFrom: z.number().int().min(0).max(1440).nullable().optional(),
+  autoCharge: z.boolean().optional(),
 });
 
 /**

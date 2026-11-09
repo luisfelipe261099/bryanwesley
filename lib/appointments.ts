@@ -216,8 +216,14 @@ async function coberturaDoPlano(
   planId: number,
   dateKey: string,
   serviceIds: number[],
-  ignorar: number[]
+  ignorar: number[],
+  minutoDoDia: number
 ): Promise<{ cobertos: Set<number>; usaExtra: boolean }> {
+  // Mensalista não corta pelo plano à noite: dali em diante sai avulso.
+  const { memberNightFrom } = await getSettings();
+  if (memberNightFrom != null && minutoDoDia >= memberNightFrom) {
+    return { cobertos: new Set(), usaExtra: false };
+  }
   const [covers, plano] = await Promise.all([
     db.query.planServices.findMany({ where: eq(planServices.planId, planId) }),
     db.query.plans.findFirst({ columns: { monthlyLimit: true }, where: eq(plans.id, planId) }),
@@ -356,7 +362,8 @@ export async function createBooking(input: CreateBookingInput) {
   let coveredIds = new Set<number>();
   let usaExtra = false;
   if (subscription) {
-    const c = await coberturaDoPlano(ownerId!, subscription.planId, input.dateKey, chosen.map((x) => x.id), ignorados);
+    const [hh, mm] = input.time.split(":").map(Number);
+    const c = await coberturaDoPlano(ownerId!, subscription.planId, input.dateKey, chosen.map((x) => x.id), ignorados, hh * 60 + mm);
     coveredIds = c.cobertos;
     usaExtra = c.usaExtra;
   }
@@ -881,7 +888,7 @@ export async function updateAppointmentServices(input: {
   let cobertos = new Set<number>();
   let usaExtra = false;
   if (assinatura) {
-    const c = await coberturaDoPlano(dono!, assinatura.planId, partes.dateKey, chosen.map((x) => x.id), [appt.id]);
+    const c = await coberturaDoPlano(dono!, assinatura.planId, partes.dateKey, chosen.map((x) => x.id), [appt.id], partes.minutesOfDay);
     cobertos = c.cobertos;
     usaExtra = c.usaExtra;
   }

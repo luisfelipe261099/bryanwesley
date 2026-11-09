@@ -6,6 +6,7 @@ export function rotuloPagamento(a: {
   totalCents: number;
   paymentMethod: string | null;
   pagamentoOnline: "PAGO" | "PENDENTE" | null;
+  mensalista?: boolean;
 }): { texto: string; cls: string } | null {
   if (a.kind === "ASSINANTE" || a.totalCents <= 0) return null;
   const forma = a.paymentMethod === "CARTAO" ? "cartão" : "Pix";
@@ -15,8 +16,11 @@ export function rotuloPagamento(a: {
   if (a.pagamentoOnline === "PENDENTE") {
     return { texto: `Aguardando ${forma}`, cls: "bg-amber-400/15 text-amber-200" };
   }
-  if (a.paymentMethod === "BALCAO") {
-    return { texto: "Paga na hora", cls: "bg-white/8 text-steel-300" };
+  if (a.paymentMethod === "BALCAO" || a.mensalista) {
+    // Mensalista não paga em dinheiro: o barbeiro cobra Pix ou cartão.
+    return a.mensalista
+      ? { texto: "Paga na hora · Pix/cartão", cls: "bg-white/8 text-steel-200" }
+      : { texto: "Paga na hora", cls: "bg-white/8 text-steel-300" };
   }
   return null;
 }

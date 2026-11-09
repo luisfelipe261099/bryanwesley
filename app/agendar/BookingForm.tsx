@@ -52,7 +52,10 @@ export function BookingForm({
   daCasa = false,
   regras = [],
   cobrancaOnline = false,
+  noiteMensalista = null,
 }: {
+  /** Minuto do dia a partir do qual o plano não cobre (mensalista à noite). */
+  noiteMensalista?: number | null;
   /** Pix e cartão pelo Asaas estão ligados. */
   cobrancaOnline?: boolean;
   services: Service[];
@@ -128,8 +131,11 @@ export function BookingForm({
   const feitosNoMes = atendimentosPorMes[(dateKey ?? "").slice(0, 7)] ?? 0;
   const estourouLimite = isSub && !outroFone && limite !== null && feitosNoMes >= limite;
   const semExtras = estourouLimite && extrasSaldo <= 0;
+  // À noite o plano não cobre: mensalista corta de noite só avulso.
+  const minutoEscolhido = time ? Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)) : null;
+  const deNoite = isSub && noiteMensalista !== null && minutoEscolhido !== null && minutoEscolhido >= noiteMensalista;
   const cobre = (id: number) => {
-    if (outroFone || semExtras) return false;
+    if (outroFone || semExtras || deNoite) return false;
     const c = plan?.covers.find((x) => x.id === id);
     if (!c) return false;
     if (c.quota === null) return true;
@@ -532,8 +538,14 @@ export function BookingForm({
                   {(
                     [
                       { v: "PIX", rotulo: "Pix", desc: "Paga agora pelo app", Icon: QrCode },
-                      { v: "CARTAO", rotulo: "Cartão", desc: "Crédito, agora pelo app", Icon: CreditCard },
-                      { v: "BALCAO", rotulo: "Na barbearia", desc: "Dinheiro ou maquininha, na hora", Icon: Banknote },
+                      { v: "CARTAO", rotulo: "Cartão", desc: "Crédito à vista, agora pelo app", Icon: CreditCard },
+                      {
+                        v: "BALCAO",
+                        rotulo: "Na barbearia",
+                        // Mensalista não paga em dinheiro: no salão é Pix ou cartão à vista.
+                        desc: isSub ? "Pix ou cartão à vista, na hora (sem dinheiro)" : "Dinheiro ou maquininha, na hora",
+                        Icon: Banknote,
+                      },
                     ] as const
                   ).map(({ v, rotulo, desc, Icon }) => {
                     const on = pagamento === v;
@@ -684,7 +696,13 @@ export function BookingForm({
                 O plano vale só para o seu WhatsApp: com outro número, o horário sai como avulso.
               </p>
             )}
-            {estourouLimite && chosen.length > 0 && (
+            {deNoite && chosen.length > 0 && (
+              <p className="mt-2 text-xs text-amber-200">
+                O plano não cobre horários a partir das {String(Math.floor(noiteMensalista! / 60)).padStart(2, "0")}:
+                {String(noiteMensalista! % 60).padStart(2, "0")}: à noite sai como avulso. Para usar o plano, escolha um horário antes.
+              </p>
+            )}
+            {!deNoite && estourouLimite && chosen.length > 0 && (
               <p className="mt-2 text-xs text-amber-200">
                 {semExtras
                   ? `Você já usou os ${limite} atendimentos do plano neste mês: este sai como avulso.`

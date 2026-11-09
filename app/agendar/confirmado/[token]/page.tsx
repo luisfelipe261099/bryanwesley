@@ -196,6 +196,7 @@ export default async function Confirmado({
               online={online}
               pedirCpf={!cpfSalvoUsavel}
               daCasa={daCasa}
+              mensalista={appt.mensalista}
             />
           )}
 

@@ -132,6 +132,13 @@ export async function saveRecurringSlot(input: {
       error: `Escolha um horário da grade, de ${minutesToHHMM(cfg.openMinute)} às ${minutesToHHMM(cfg.closeMinute)}, de ${cfg.slotMinutes} em ${cfg.slotMinutes} minutos.`,
     };
   }
+  // Mensalista não corta pelo plano à noite: o fixo sairia avulso toda semana.
+  if (cfg.memberNightFrom != null && hora >= cfg.memberNightFrom) {
+    return {
+      ok: false,
+      error: `O plano não cobre horários a partir das ${minutesToHHMM(cfg.memberNightFrom)}. Escolha um horário antes disso.`,
+    };
+  }
   if (input.frequency === "SEMANAL") {
     if (input.weekday === null || input.weekday < 0 || input.weekday > 6) {
       return { ok: false, error: "Escolha o dia da semana." };
@@ -651,7 +658,9 @@ export async function resumeMyPlan(): Promise<ActionResult> {
 }
 
 /** Gera de novo o link de pagamento de quem está vencido. */
-export async function payMyPlan(input: { cpf?: string } = {}): Promise<SubscribeResult> {
+export async function payMyPlan(
+  input: { cpf?: string; metodo?: "PIX" | "CARTAO" } = {}
+): Promise<SubscribeResult> {
   const session = await requireRole(["CLIENT", "ADMIN"]);
   const sub = await db.query.subscriptions.findFirst({
     where: and(
@@ -667,7 +676,11 @@ export async function payMyPlan(input: { cpf?: string } = {}): Promise<Subscribe
       error: "Pagamento online ainda não está ligado. Acerte na barbearia.",
     };
   }
-  const charge = await chargeSubscription(session.id, sub.cycle, { cpf: input.cpf });
+  const charge = await chargeSubscription(session.id, sub.cycle, {
+    cpf: input.cpf,
+    // Mensalista: só Pix ou cartão à vista.
+    tipo: input.metodo === "CARTAO" ? "CREDIT_CARD" : "PIX",
+  });
   if (!charge.ok) return { ok: false, error: charge.error, precisaCpf: charge.precisaCpf };
   revalidatePath("/cliente");
   return { ok: true, mode: "pagamento", url: charge.url };

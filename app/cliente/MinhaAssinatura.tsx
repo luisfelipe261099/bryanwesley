@@ -5,7 +5,7 @@
 // estava devendo — só descobria quando o benefício sumia.
 
 import { useTransition } from "react";
-import { Loader2, CreditCard, X, Undo2 } from "lucide-react";
+import { Loader2, CreditCard, QrCode, X, Undo2 } from "lucide-react";
 import { cancelMyPlan, resumeMyPlan, payMyPlan } from "./actions";
 import { toast } from "@/lib/toast";
 
@@ -31,25 +31,30 @@ function Acao({
   );
 }
 
-export function PagarPlano({ rotulo = "Pagar agora" }: { rotulo?: string }) {
+/** Mensalidade: Pix ou cartão de crédito à vista (sem boleto, sem parcelar). */
+export function PagarPlano({ rotulo = "Pagar com Pix" }: { rotulo?: string }) {
+  const pagar = (metodo: "PIX" | "CARTAO") => async () => {
+    let r = await payMyPlan({ metodo });
+    // Sem CPF na conta, o Asaas não gera a cobrança: pergunta e tenta de novo.
+    if (!r.ok && r.precisaCpf) {
+      const cpf = window.prompt(`${r.error}\nDigite o CPF (só os números):`);
+      if (!cpf) return;
+      r = await payMyPlan({ cpf, metodo });
+    }
+    if (r.ok && r.mode === "pagamento") window.location.href = r.url;
+    else if (!r.ok) toast(r.error, "erro");
+  };
   return (
-    <Acao
-      className="btn-royal text-white"
-      onRun={async () => {
-        let r = await payMyPlan();
-        // Sem CPF na conta, o Asaas não gera a cobrança: pergunta e tenta de novo.
-        if (!r.ok && r.precisaCpf) {
-          const cpf = window.prompt(`${r.error}\nDigite o CPF (só os números):`);
-          if (!cpf) return;
-          r = await payMyPlan({ cpf });
-        }
-        if (r.ok && r.mode === "pagamento") window.location.href = r.url;
-        else if (!r.ok) toast(r.error, "erro");
-      }}
-    >
-      <CreditCard className="h-3.5 w-3.5" />
-      {rotulo}
-    </Acao>
+    <span className="inline-flex flex-wrap gap-2">
+      <Acao className="btn-royal text-white" onRun={pagar("PIX")}>
+        <QrCode className="h-3.5 w-3.5" />
+        {rotulo}
+      </Acao>
+      <Acao className="border border-electric/40 bg-electric/10 text-electric" onRun={pagar("CARTAO")}>
+        <CreditCard className="h-3.5 w-3.5" />
+        Cartão à vista
+      </Acao>
+    </span>
   );
 }
 

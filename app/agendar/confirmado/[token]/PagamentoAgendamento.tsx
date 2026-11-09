@@ -25,7 +25,10 @@ export function PagamentoAgendamento({
   online,
   pedirCpf,
   daCasa,
+  mensalista = false,
 }: {
+  /** Cliente com plano: no salão é só Pix ou cartão à vista, sem dinheiro. */
+  mensalista?: boolean;
   token: string;
   totalCents: number;
   metodo: Metodo | null;
@@ -176,7 +179,7 @@ export function PagamentoAgendamento({
           disabled={pending}
           className="label inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/12 px-3 py-3 text-steel-300 disabled:opacity-50"
         >
-          <Banknote className="h-4 w-4" /> Pagar na barbearia (dinheiro)
+          <Banknote className="h-4 w-4" /> {mensalista ? "Pagar na barbearia (Pix ou cartão)" : "Pagar na barbearia (dinheiro)"}
         </button>
       )}
     </div>
@@ -265,7 +268,13 @@ export function PagamentoAgendamento({
             Pagamento na barbearia · {formatBRL(totalCents)}
           </p>
           <p className="mt-1 text-sm text-steel-400">
-            {daCasa ? "O cliente paga na hora, em dinheiro ou na maquininha." : "Paga na hora, em dinheiro ou na maquininha."}
+            {mensalista
+              ? daCasa
+                ? "Mensalista: cobre na hora só Pix ou cartão à vista (sem dinheiro)."
+                : "Na hora, com Pix ou cartão à vista. Mensalista não paga em dinheiro."
+              : daCasa
+                ? "O cliente paga na hora, em dinheiro ou na maquininha."
+                : "Paga na hora, em dinheiro ou na maquininha."}
           </p>
           <button
             type="button"

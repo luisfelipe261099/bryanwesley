@@ -4,7 +4,7 @@
 // baixa só acontece depois que a própria API do Asaas confirma.
 // Sem ASAAS_API_KEY o módulo fica inerte e a ativação segue manual.
 // ───────────────────────────────────────────────────────────
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, lte } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointmentServices,
@@ -16,7 +16,7 @@ import {
   users,
   type Payment,
 } from "@/db/schema";
-import { avisarPagamento, avisarPagamentoDoHorario } from "./avisos";
+import { avisarMensalidade, avisarPagamento, avisarPagamentoDoHorario } from "./avisos";
 import { cpfValido, soDigitosCpf } from "./cpf";
 import {
   apagarCobranca,
@@ -54,8 +54,15 @@ const PRAZO_DIAS = 3;
 export async function chargeSubscription(
   userId: number,
   cycle: "MENSAL" | "ANUAL",
-  opts: { cpf?: string } = {}
+  opts: {
+    cpf?: string;
+    /** Mensalista paga só Pix ou cartão à vista (sem boleto, sem parcelar). */
+    tipo?: "PIX" | "CREDIT_CARD";
+    /** Vencimento (AAAA-MM-DD); sem ele, daqui a 3 dias. */
+    vencimento?: string;
+  } = {}
 ): Promise<ChargeResult> {
+  const tipo = opts.tipo ?? "PIX";
   if (!isCobrancaOnline()) {
     return { ok: false, error: "Cobrança online não configurada (ASAAS_API_KEY ausente)." };
   }
@@ -79,6 +86,20 @@ export async function chargeSubscription(
     db.query.users.findFirst({ where: eq(users.id, userId) }),
   ]);
   if (!plan || !user) return { ok: false, error: "Plano ou cliente não encontrado." };
+
+  const meses0 = cycle === "ANUAL" ? 12 : 1;
+  const valor0 = (cycle === "ANUAL" ? plan.annualPriceCents : plan.priceCents) * meses0;
+  // Mensalidade já em aberto: a mesma fatura serve (forma e valor iguais).
+  // Forma diferente: a velha sai, para não ficarem duas cobranças.
+  const abertas = await db
+    .select()
+    .from(payments)
+    .where(and(eq(payments.subscriptionId, sub.id), eq(payments.kind, "ASSINATURA"), eq(payments.status, "PENDENTE")))
+    .orderBy(desc(payments.id));
+  const mesma = abertas.find(
+    (p) => p.checkoutUrl && p.amountCents === valor0 && p.cycle === cycle && (p.slug ?? "UNDEFINED") === tipo
+  );
+  if (mesma) return { ok: true, url: mesma.checkoutUrl!, orderNsu: mesma.orderNsu };
 
   let cpf = user.cpf;
   if (opts.cpf) {
@@ -115,9 +136,10 @@ export async function chargeSubscription(
   const cobranca = await criarCobranca({
     cliente: cliente.data.id,
     valorCents: amountCents,
-    vencimento: addDays(shopToday(), PRAZO_DIAS),
+    vencimento: opts.vencimento && opts.vencimento > shopToday() ? opts.vencimento : addDays(shopToday(), PRAZO_DIAS),
     descricao: `Clube VIP Bryan Wesley · ${descricao}`,
     referencia: orderNsu,
+    tipo,
   });
   if (!cobranca.ok) return { ok: false, error: cobranca.error };
   if (!cobranca.data.invoiceUrl) return { ok: false, error: "O Asaas não devolveu o link da fatura." };
@@ -135,7 +157,9 @@ export async function chargeSubscription(
     checkoutUrl: cobranca.data.invoiceUrl,
     // O id da cobrança no Asaas: a baixa só aceita esta cobrança.
     transactionNsu: cobranca.data.id,
+    slug: tipo,
   });
+  for (const velha of abertas) await descartarCobranca(velha);
 
   return { ok: true, url: cobranca.data.invoiceUrl, orderNsu };
 }
@@ -446,4 +470,59 @@ export async function pixDoPagamento(p: Payment) {
   if (p.status !== "PENDENTE" || p.slug !== "PIX" || !p.transactionNsu) return null;
   const r = await pixDaCobranca(p.transactionNsu);
   return r.ok ? { imagem: r.data.encodedImage, copiaECola: r.data.payload } : null;
+}
+
+
+// ───────────────────── Cobrança automática da mensalidade ─────────────────────
+
+/** Dias antes do vencimento em que a mensalidade é gerada. */
+export const DIAS_ANTES_DA_MENSALIDADE = 3;
+
+/**
+ * Gera sozinha a cobrança (Pix) da mensalidade de quem vence nos próximos
+ * dias e avisa o membro no celular. O Asaas também manda o aviso por
+ * e-mail/SMS. Pagou, o webhook renova o plano. Roda uma vez por dia
+ * (dentro da varredura diária); quem já tem cobrança aberta é pulado.
+ */
+export async function cobrarMensalidadesAutomaticas(opts: { forcar?: boolean; limite?: number } = {}) {
+  const r = { geradas: 0, semCpf: 0, falhas: 0, puladas: 0 };
+  if (!isCobrancaOnline()) return r;
+  const { getSettings } = await import("./schedule");
+  const cfg = await getSettings();
+  if (!cfg.autoCharge) return r;
+  if (!opts.forcar) {
+    const { hitRateLimit } = await import("./rate-limit");
+    const vez = await hitRateLimit(`cobranca-auto:${shopToday()}`, 1, 26 * 3600_000);
+    if (!vez.ok) return r;
+  }
+
+  const ate = new Date(Date.now() + DIAS_ANTES_DA_MENSALIDADE * 86400_000);
+  const candidatas = await db
+    .select({ sub: subscriptions, user: users })
+    .from(subscriptions)
+    .innerJoin(users, eq(users.id, subscriptions.userId))
+    .where(and(inArray(subscriptions.status, ["ATIVA", "INADIMPLENTE"]), lte(subscriptions.renewsAt, ate)))
+    .limit(opts.limite ?? 40);
+
+  for (const { sub, user } of candidatas) {
+    // Pediu para sair no fim do ciclo: não se cobra o próximo.
+    if (sub.canceledAt) { r.puladas++; continue; }
+    const aberta = await db.query.payments.findFirst({
+      where: and(eq(payments.subscriptionId, sub.id), eq(payments.kind, "ASSINATURA"), eq(payments.status, "PENDENTE")),
+    });
+    if (aberta) { r.puladas++; continue; }
+    if (!user.cpf) { r.semCpf++; continue; }
+    const venc = utcToShopParts(sub.renewsAt).dateKey;
+    try {
+      const c = await chargeSubscription(user.id, sub.cycle, { tipo: "PIX", vencimento: venc });
+      if (!c.ok) { r.falhas++; console.error("Mensalidade automática falhou:", user.id, c.error); continue; }
+      r.geradas++;
+      const linha = await db.query.payments.findFirst({ where: eq(payments.orderNsu, c.orderNsu) });
+      await avisarMensalidade(user.id, linha?.amountCents ?? 0, venc);
+    } catch (e) {
+      r.falhas++;
+      console.error("Mensalidade automática falhou:", user.id, e);
+    }
+  }
+  return r;
 }

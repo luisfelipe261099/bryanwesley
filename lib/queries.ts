@@ -49,6 +49,8 @@ export type AppointmentFull = Appointment & {
   items: AppointmentItem[];
   /** Pix/cartão pelo app: já pago, fatura em aberto ou nada online. */
   pagamentoOnline: "PAGO" | "PENDENTE" | null;
+  /** Cliente com plano ativo: no salão paga só Pix ou cartão (sem dinheiro). */
+  mensalista: boolean;
 };
 /** Serviço coberto pelo plano, com a cota do mês (null = ilimitado). */
 export type ServicoCoberto = Service & { quota: number | null };
@@ -134,7 +136,8 @@ export async function attachDetails(
   const ids = rows.map((a) => a.id);
   const barberIds = Array.from(new Set(rows.map((a) => a.barberId)));
 
-  const [team, items, cobrancas] = await Promise.all([
+  const clientes = Array.from(new Set(rows.map((a) => a.clientUserId).filter((x): x is number => x !== null)));
+  const [team, items, cobrancas, ativos] = await Promise.all([
     db
       .select({ barber: barbers, user: users })
       .from(barbers)
@@ -149,7 +152,14 @@ export async function attachDetails(
       .select({ appointmentId: payments.appointmentId, status: payments.status })
       .from(payments)
       .where(and(inArray(payments.appointmentId, ids), inArray(payments.status, ["PAGO", "PENDENTE"]))),
+    clientes.length
+      ? db
+          .select({ userId: subscriptions.userId })
+          .from(subscriptions)
+          .where(and(inArray(subscriptions.userId, clientes), eq(subscriptions.status, "ATIVA")))
+      : Promise.resolve([] as { userId: number }[]),
   ]);
+  const mensalistas = new Set(ativos.map((a) => a.userId));
   const pagoOuNao = (id: number) => {
     const doHorario = cobrancas.filter((c) => c.appointmentId === id);
     return doHorario.some((c) => c.status === "PAGO")
@@ -165,6 +175,7 @@ export async function attachDetails(
     barber: byBarber.get(a.barberId)!,
     items: items.filter((i) => i.appointmentId === a.id),
     pagamentoOnline: pagoOuNao(a.id),
+    mensalista: a.clientUserId !== null && mensalistas.has(a.clientUserId),
   }));
 }
 

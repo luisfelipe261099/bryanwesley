@@ -20,7 +20,7 @@ import { requireRole } from "@/lib/auth";
 import { tutorialPendente } from "@/lib/tutorial";
 import { TutorialPrimeiroAcesso } from "@/components/TutorialPrimeiroAcesso";
 import { db } from "@/db/client";
-import { recurringSlots, planServices, subscriptions, plans } from "@/db/schema";
+import { recurringSlots, planServices, subscriptions, plans, payments } from "@/db/schema";
 import { and, desc, eq } from "drizzle-orm";
 import { getSettings, gradeDeHorarios } from "@/lib/schedule";
 import { listTeam, listServices } from "@/lib/queries";
@@ -156,6 +156,17 @@ export default async function ClienteDashboard({
   // dava sempre R$ 0,00, porque o item coberto pelo plano é gravado com
   // preço zero.
   const { atendimentosNoMes, economiaCents } = stats;
+  // Mensalidade gerada (automática ou pelo admin) e ainda não paga.
+  const mensalidadeAberta = subscription
+    ? await db.query.payments.findFirst({
+        where: and(
+          eq(payments.subscriptionId, subscription.id),
+          eq(payments.kind, "ASSINATURA"),
+          eq(payments.status, "PENDENTE")
+        ),
+        orderBy: (p, { desc }) => [desc(p.id)],
+      })
+    : null;
   // Limite de atendimentos do plano no mês e os extras liberados.
   const limiteDoPlano = plan?.monthlyLimit ?? null;
   const [usadosDoPlano, extrasDoPlano] = plan
@@ -330,6 +341,20 @@ export default async function ClienteDashboard({
                       />
                     </div>
                   </div>
+
+                  {mensalidadeAberta && isCobrancaOnline() && (
+                    <div className="relative mt-5 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4">
+                      <p className="text-sm font-semibold text-amber-100">
+                        Mensalidade em aberto · {formatBRL(mensalidadeAberta.amountCents)}
+                      </p>
+                      <p className="mt-1 text-xs text-amber-100/80">
+                        Pague com Pix ou cartão à vista. Caiu o pagamento, o plano renova sozinho.
+                      </p>
+                      <div className="mt-3">
+                        <PagarPlano rotulo="Pagar com Pix" />
+                      </div>
+                    </div>
+                  )}
 
                   {limiteDoPlano !== null && (
                     <div className="relative mt-5">
@@ -558,7 +583,7 @@ export default async function ClienteDashboard({
                     : null
                 }
                 closedWeekdays={settings.closedWeekdays}
-                horarios={gradeDeHorarios(settings)}
+                horarios={gradeDeHorarios(settings).filter((h) => settings.memberNightFrom == null || Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5)) < settings.memberNightFrom)}
               />
             </div>
           </Reveal>

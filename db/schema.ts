@@ -475,6 +475,11 @@ export const settings = mysqlTable("settings", {
   closeMinute: int("close_minute").notNull().default(20 * 60), // 20:00
   closedWeekdays: jsonCol<number[]>("closed_weekdays").notNull(),
   maxAdvanceDays: int("max_advance_days").notNull().default(60),
+    // Mensalista não corta pelo plano à noite: a partir deste minuto do
+    // dia o plano não cobre (sai avulso). Null = sem restrição.
+    memberNightFrom: int("member_night_from").default(18 * 60),
+    // Gera sozinho a cobrança (Pix) da mensalidade antes de vencer.
+    autoCharge: boolean("auto_charge").notNull().default(true),
   // Divisão padrão: metade do barbeiro, metade da barbearia.
   defaultBarberPct: int("default_barber_pct").notNull().default(50),
   // Base de comissão no atendimento de assinante: preço de tabela do

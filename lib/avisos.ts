@@ -295,6 +295,27 @@ export async function avisarPagamento(p: { userId: number; planId: number }): Pr
   }
 }
 
+/** A mensalidade foi gerada (Pix): o membro paga pelo app antes de vencer. */
+export async function avisarMensalidade(userId: number, valorCents: number, vencimento: string): Promise<ResultadoPush> {
+  try {
+    const valor = (valorCents / 100).toFixed(2).replace(".", ",");
+    const [, m, d] = vencimento.split("-");
+    return await enviarPush(
+      [userId],
+      {
+        titulo: "Mensalidade do Clube",
+        corpo: `Sua mensalidade de R$ ${valor} vence dia ${d}/${m}. O Pix já está no app: é só pagar.`,
+        url: "/cliente",
+        tag: `mensalidade-${vencimento}`,
+      },
+      { prazoMs: PRAZO_NA_ACAO_MS }
+    );
+  } catch (e) {
+    console.error("Aviso de mensalidade falhou:", e);
+    return { ...ZERO };
+  }
+}
+
 /** Pix ou cartão de um horário confirmado: admins e o barbeiro sabem na hora. */
 export async function avisarPagamentoDoHorario(appointmentId: number, valorCents: number): Promise<ResultadoPush> {
   try {
