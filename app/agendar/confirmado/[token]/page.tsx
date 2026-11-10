@@ -197,6 +197,7 @@ export default async function Confirmado({
               pedirCpf={!cpfSalvoUsavel}
               daCasa={daCasa}
               mensalista={appt.mensalista}
+              formaPaga={pagamento?.status === "PAGO" ? pagamento.slug : null}
             />
           )}
 

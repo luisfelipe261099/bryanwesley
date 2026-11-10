@@ -7,11 +7,19 @@ export function rotuloPagamento(a: {
   paymentMethod: string | null;
   pagamentoOnline: "PAGO" | "PENDENTE" | null;
   mensalista?: boolean;
+  formaPaga?: string | null;
 }): { texto: string; cls: string } | null {
   if (a.kind === "ASSINANTE" || a.totalCents <= 0) return null;
   const forma = a.paymentMethod === "CARTAO" ? "cartão" : "Pix";
   if (a.pagamentoOnline === "PAGO") {
-    return { texto: `Pago no ${forma}`, cls: "bg-emerald-400/15 text-emerald-200" };
+    const texto =
+      a.formaPaga === "DINHEIRO" ? "Pago em dinheiro"
+      : a.formaPaga === "PIX_BALCAO" ? "Pago no Pix (balcão)"
+      : a.formaPaga === "CARTAO_BALCAO" ? "Pago no cartão (balcão)"
+      : a.formaPaga === "PIX" ? "Pago no Pix"
+      : a.formaPaga?.startsWith("CREDIT_CARD") ? "Pago no cartão"
+      : `Pago no ${forma}`;
+    return { texto, cls: "bg-emerald-400/15 text-emerald-200" };
   }
   if (a.pagamentoOnline === "PENDENTE") {
     return { texto: `Aguardando ${forma}`, cls: "bg-amber-400/15 text-amber-200" };

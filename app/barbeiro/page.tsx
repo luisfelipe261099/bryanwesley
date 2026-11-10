@@ -40,6 +40,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appointments } from "@/db/schema";
 import { formatPhone } from "@/lib/phone";
+import { CobrarAtendimento } from "./CobrarAtendimento";
 import { AppointmentActions } from "./AgendaActions";
 import { appointmentStatus as statusStyles } from "@/lib/status";
 import { CheckinBox } from "./CheckinBox";
@@ -476,6 +477,20 @@ export default async function BarbeiroPanel({
                               id={a.id}
                               status={a.status}
                               depoisDoInicio={a.startsAt.getTime() <= Date.now()}
+                            />
+                          </div>
+                        )}
+                        {podeAgir &&
+                          a.kind !== "ASSINANTE" &&
+                          a.totalCents > 0 &&
+                          a.pagamentoOnline !== "PAGO" &&
+                          !["CANCELADO", "NO_SHOW"].includes(a.status) && (
+                          <div className="ml-auto sm:ml-0">
+                            <CobrarAtendimento
+                              id={a.id}
+                              token={a.checkinToken}
+                              totalCents={a.totalCents}
+                              mensalista={a.mensalista}
                             />
                           </div>
                         )}

@@ -50,6 +50,8 @@ export type AppointmentFull = Appointment & {
   items: AppointmentItem[];
   /** Pix/cartão pelo app: já pago, fatura em aberto ou nada online. */
   pagamentoOnline: "PAGO" | "PENDENTE" | null;
+  /** Como foi pago, se pago (PIX, CREDIT_CARD, DINHEIRO, PIX_BALCAO…). */
+  formaPaga: string | null;
   /** Cliente com plano ativo: no salão paga só Pix ou cartão (sem dinheiro). */
   mensalista: boolean;
 };
@@ -150,7 +152,7 @@ export async function attachDetails(
       .where(inArray(appointmentServices.appointmentId, ids))
       .orderBy(asc(appointmentServices.id)),
     db
-      .select({ appointmentId: payments.appointmentId, status: payments.status })
+      .select({ appointmentId: payments.appointmentId, status: payments.status, slug: payments.slug })
       .from(payments)
       .where(and(inArray(payments.appointmentId, ids), inArray(payments.status, ["PAGO", "PENDENTE"]))),
     clientes.length
@@ -176,6 +178,8 @@ export async function attachDetails(
     barber: byBarber.get(a.barberId)!,
     items: items.filter((i) => i.appointmentId === a.id),
     pagamentoOnline: pagoOuNao(a.id),
+    /** Como foi pago (PIX, CREDIT_CARD, DINHEIRO, PIX_BALCAO, CARTAO_BALCAO). */
+    formaPaga: cobrancas.find((c) => c.appointmentId === a.id && c.status === "PAGO")?.slug ?? null,
     mensalista: a.clientUserId !== null && mensalistas.has(a.clientUserId),
   }));
 }

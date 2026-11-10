@@ -26,7 +26,10 @@ export function PagamentoAgendamento({
   pedirCpf,
   daCasa,
   mensalista = false,
+  formaPaga = null,
 }: {
+  /** Como foi pago (DINHEIRO, PIX_BALCAO, CARTAO_BALCAO, PIX…). */
+  formaPaga?: string | null;
   /** Cliente com plano: no salão é só Pix ou cartão à vista, sem dinheiro. */
   mensalista?: boolean;
   token: string;
@@ -86,10 +89,19 @@ export function PagamentoAgendamento({
       <div className="mt-5 rounded-2xl border border-emerald-400/30 bg-emerald-400/10 p-4 text-left">
         <p className="flex items-center gap-2 font-semibold text-emerald-200">
           <CheckCircle2 className="h-5 w-5" />
-          Pago {metodo === "CARTAO" ? "no cartão" : "no Pix"} · {formatBRL(totalCents)}
+          {formaPaga === "DINHEIRO"
+            ? "Pago em dinheiro"
+            : formaPaga === "PIX_BALCAO"
+              ? "Pago no Pix (balcão)"
+              : formaPaga === "CARTAO_BALCAO"
+                ? "Pago no cartão (balcão)"
+                : `Pago ${formaPaga?.startsWith("CREDIT_CARD") || (!formaPaga && metodo === "CARTAO") ? "no cartão" : "no Pix"}`}{" "}
+          · {formatBRL(totalCents)}
         </p>
         <p className="mt-1 text-sm text-emerald-100/80">
-          {daCasa ? "O cliente já pagou pelo app. Nada a cobrar no balcão." : "Tudo certo! É só chegar no horário."}
+          {formaPaga && ["DINHEIRO", "PIX_BALCAO", "CARTAO_BALCAO"].includes(formaPaga)
+            ? "Recebido na barbearia."
+            : daCasa ? "O cliente já pagou pelo app. Nada a cobrar no balcão." : "Tudo certo! É só chegar no horário."}
         </p>
         {reciboUrl && (
           <a

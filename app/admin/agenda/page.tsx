@@ -243,6 +243,13 @@ function paraLinha(
     servicos: a.items.map((i) => i.name).join(" + "),
     totalCents: a.totalCents,
     pagamento: rotuloPagamento(a),
+    aCobrar:
+      a.kind !== "ASSINANTE" &&
+      a.totalCents > 0 &&
+      a.pagamentoOnline !== "PAGO" &&
+      !["CANCELADO", "NO_SHOW"].includes(a.status),
+    token: a.checkinToken,
+    mensalista: a.mensalista,
     servicoIds: a.items
       .map((i) => i.serviceId)
       .filter((id): id is number => id !== null),

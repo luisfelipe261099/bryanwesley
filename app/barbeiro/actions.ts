@@ -8,6 +8,8 @@ import { activeSubscription, dayBounds } from "@/lib/queries";
 import { requireRole } from "@/lib/auth";
 import { isNextControlFlow } from "@/lib/errors";
 import { transitionAppointment, BookingError } from "@/lib/appointments";
+import { registrarPagamentoNoBalcao, type FormaBalcao } from "@/lib/payments";
+import { subscriptions } from "@/db/schema";
 import { shopToday, utcToShopParts, labelFullDate } from "@/lib/time";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -229,4 +231,32 @@ function toResult(e: unknown): ActionResult {
   if (e instanceof BookingError) return { ok: false, error: e.message };
   console.error(e);
   return { ok: false, error: "Não foi possível concluir a ação." };
+}
+
+
+/** O barbeiro recebeu na hora: dinheiro, Pix no balcão ou cartão. */
+export async function receberNoBalcao(id: number, forma: FormaBalcao): Promise<ActionResult> {
+  try {
+    const { appt } = await assertOwnership(id);
+    if (!["DINHEIRO", "PIX_BALCAO", "CARTAO_BALCAO"].includes(forma)) {
+      return { ok: false, error: "Escolha como recebeu." };
+    }
+    const mensalista = appt.clientUserId
+      ? !!(await db.query.subscriptions.findFirst({
+          where: and(
+            eq(subscriptions.userId, appt.clientUserId),
+            eq(subscriptions.status, "ATIVA"),
+            gt(subscriptions.renewsAt, new Date())
+          ),
+          columns: { id: true },
+        }))
+      : false;
+    const r = await registrarPagamentoNoBalcao(id, forma, { mensalista });
+    if (!r.ok) return r;
+    revalidateAll();
+    revalidatePath("/admin/agenda");
+    return { ok: true, message: "Pagamento registrado." };
+  } catch (e) {
+    return toResult(e);
+  }
 }

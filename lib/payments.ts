@@ -803,3 +803,46 @@ export async function encerrarCartaoRecorrente(userId: number): Promise<{ ok: tr
   }
   return { ok: true };
 }
+
+
+// ───────────────────── Recebido no balcão ─────────────────────
+
+export type FormaBalcao = "DINHEIRO" | "PIX_BALCAO" | "CARTAO_BALCAO";
+
+/**
+ * O barbeiro recebeu na hora (dinheiro, Pix na maquininha/chave da loja ou
+ * cartão): o horário fica pago, e a fatura online em aberto sai (se o
+ * cliente já tinha pago o Pix, a baixa dela acontece normalmente).
+ */
+export async function registrarPagamentoNoBalcao(
+  appointmentId: number,
+  forma: FormaBalcao,
+  opts: { mensalista?: boolean } = {}
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const appt = await db.query.appointments.findFirst({ where: eq(appointments.id, appointmentId) });
+  if (!appt) return { ok: false, error: "Agendamento não encontrado." };
+  if (appt.totalCents <= 0) return { ok: false, error: "Nada a cobrar: o plano cobre este horário." };
+  if (["CANCELADO", "NO_SHOW"].includes(appt.status)) return { ok: false, error: "Esse horário foi cancelado." };
+  if (forma === "DINHEIRO" && opts.mensalista) {
+    return { ok: false, error: "Mensalista não paga em dinheiro: receba no Pix ou no cartão." };
+  }
+  const pago = await db.query.payments.findFirst({
+    where: and(eq(payments.appointmentId, appt.id), eq(payments.status, "PAGO")),
+  });
+  if (pago) return { ok: false, error: "Esse horário já está pago." };
+  await cancelarCobrancasDoAgendamento(appt.id);
+  await db.insert(payments).values({
+    orderNsu: nsu(),
+    userId: appt.clientUserId,
+    appointmentId: appt.id,
+    kind: "AVULSO",
+    amountCents: appt.totalCents,
+    description: `Recebido no balcão · ${appt.code}`,
+    status: "PAGO",
+    provider: "balcao",
+    slug: forma,
+    paidAt: new Date(),
+  });
+  await db.update(appointments).set({ paymentMethod: "BALCAO" }).where(eq(appointments.id, appt.id));
+  return { ok: true };
+}

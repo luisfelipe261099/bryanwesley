@@ -31,6 +31,7 @@ import { formatPhone } from "@/lib/phone";
 import { appointmentStatus as statusStyles } from "@/lib/status";
 import type { RecorteAgenda } from "@/lib/queries";
 import { ApptControls } from "../AgendaHoje";
+import { CobrarAtendimento } from "@/app/barbeiro/CobrarAtendimento";
 import { RemarcarAdmin } from "./RemarcarAdmin";
 import { EditarServicos, type ServicoDoCatalogo } from "./EditarServicos";
 
@@ -55,6 +56,11 @@ export type LinhaAgenda = {
   totalCents: number;
   /** "Pago no Pix", "Aguardando cartão", "Paga na hora"… */
   pagamento: { texto: string; cls: string } | null;
+  /** Ainda há valor a receber (não pago): mostra "Cobrar". */
+  aCobrar: boolean;
+  /** Token da tela do agendamento (onde aparece o Pix). */
+  token: string | null;
+  mensalista: boolean;
   assinante: boolean;
   fixo: boolean;
   status: string;
@@ -700,6 +706,9 @@ function Item({
               />
             )}
           </ApptControls>
+          {a.aCobrar && (
+            <CobrarAtendimento id={a.id} token={a.token} totalCents={a.totalCents} mensalista={a.mensalista} />
+          )}
         </div>
       </div>
       {a.notes && !(a.fixo && /^hor.rio fixo do plano$/i.test(a.notes.trim())) && (
