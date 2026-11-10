@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { AlertCircle, Check, Loader2, Play, UserX } from "lucide-react";
 import { toast } from "@/lib/toast";
+import { formatBRL } from "@/lib/money";
 import {
   startAppointment,
   finishAppointment,
@@ -14,7 +15,10 @@ export function AppointmentActions({
   id,
   status,
   depoisDoInicio = true,
+  naoPagoCents = 0,
 }: {
+  /** Valor ainda não pago: finalizar pede confirmação. */
+  naoPagoCents?: number;
   id: number;
   status: string;
   /** O horário já começou? Falta só depois dele. */
@@ -23,6 +27,7 @@ export function AppointmentActions({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [confirmandoFalta, setConfirmandoFalta] = useState(false);
+  const [confirmandoSemPagar, setConfirmandoSemPagar] = useState(false);
 
   function run(fn: (id: number) => Promise<ActionResult>) {
     setError(null);
@@ -36,6 +41,36 @@ export function AppointmentActions({
   const busy = pending ? (
     <Loader2 className="h-3 w-3 animate-spin" />
   ) : null;
+
+  if (confirmandoSemPagar) {
+    return (
+      <div className="flex flex-col items-end gap-2 rounded-xl border-2 border-red-500/70 bg-red-500/15 p-2.5">
+        <p className="max-w-[240px] text-right text-xs font-semibold text-red-100">
+          Ainda não foi pago ({formatBRL(naoPagoCents)}). Cobre antes de o cliente sair: toque em Cobrar.
+        </p>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setConfirmandoSemPagar(false)}
+            className="label rounded-full border border-white/15 px-3 py-2 text-steel-200"
+          >
+            Voltar
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => {
+              setConfirmandoSemPagar(false);
+              run(finishAppointment);
+            }}
+            className="label rounded-full border border-red-400/60 px-3 py-2 text-red-100 disabled:opacity-50"
+          >
+            {busy ?? "Finalizar sem pagar"}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (confirmandoFalta) {
     return (
@@ -99,7 +134,7 @@ export function AppointmentActions({
         <button
           type="button"
           disabled={pending}
-          onClick={() => run(finishAppointment)}
+          onClick={() => (naoPagoCents > 0 ? setConfirmandoSemPagar(true) : run(finishAppointment))}
           className="btn-royal label inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-white disabled:opacity-50"
         >
           {busy ?? <Check className="h-3 w-3" strokeWidth={3} />}

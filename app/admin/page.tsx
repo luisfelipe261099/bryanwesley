@@ -10,6 +10,7 @@ import {
   Percent,
   Wallet,
   type LucideIcon,
+  AlertTriangle,
 } from "lucide-react";
 import { Reveal } from "@/components/Reveal";
 import {
@@ -31,6 +32,8 @@ import { openPlanRequests } from "@/lib/queries";
 import { pedidosDeSenhaAbertos } from "@/lib/senha-link";
 import { appointmentStatus as statusStyles } from "@/lib/status";
 import { ApptControls } from "./AgendaHoje";
+import { CobrarAtendimento } from "@/app/barbeiro/CobrarAtendimento";
+import { aReceber, devendo, rotuloPagamento } from "@/lib/rotulo-pagamento";
 import { PlanRequests } from "./PlanRequests";
 import { AvisosPush } from "@/components/AvisosPush";
 import { AtualizaSozinho } from "@/components/AtualizaSozinho";
@@ -212,6 +215,28 @@ export default async function AdminDashboard({
               </Link>
             </div>
 
+            {(() => {
+              const semPagar = agenda.filter((a) => devendo(a));
+              if (!semPagar.length) return null;
+              return (
+                <Link
+                  href="/admin/agenda"
+                  className="mt-4 block rounded-2xl border-2 border-red-500/70 bg-red-500/15 p-3.5"
+                >
+                  <p className="flex items-center gap-2 font-semibold text-red-100">
+                    <AlertTriangle className="h-4 w-4 flex-none text-red-300" />
+                    {semPagar.length === 1
+                      ? "1 atendimento ainda não foi pago"
+                      : `${semPagar.length} atendimentos ainda não foram pagos`}{" "}
+                    · {formatBRL(semPagar.reduce((t, a) => t + a.totalCents, 0))}
+                  </p>
+                  <p className="mt-1 text-sm text-red-50">
+                    {semPagar.map((a) => `${formatShopTime(a.startsAt)} ${a.clientName}`).join(" · ")}
+                  </p>
+                </Link>
+              );
+            })()}
+
             {agenda.length === 0 ? (
               <p className="mt-5 rounded-2xl border border-dashed border-white/10 px-4 py-10 text-center text-sm text-steel-400">
                 Nenhum agendamento nesse dia.
@@ -220,10 +245,14 @@ export default async function AdminDashboard({
               <ul className="mt-5 space-y-2">
                 {agenda.slice(0, MOSTRAR).map((a) => {
                   const st = statusStyles[a.status];
+                  const pg = rotuloPagamento(a);
+                  const naoPago = devendo(a);
                   return (
                     <li
                       key={a.id}
-                      className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-white/6 bg-white/[0.02] p-3 transition-colors hover:border-electric/30 sm:flex-nowrap sm:gap-4 sm:p-3.5"
+                      className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border p-3 transition-colors hover:border-electric/30 sm:flex-nowrap sm:gap-4 sm:p-3.5 ${
+                        naoPago ? "border-2 border-red-500/70 bg-red-500/[0.07]" : "border-white/6 bg-white/[0.02]"
+                      }`}
                     >
                       <div className="flex w-14 flex-none flex-col items-center">
                         <span className="font-display text-base leading-none text-white sm:text-lg">
@@ -262,7 +291,13 @@ export default async function AdminDashboard({
                           <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
                           {st.label}
                         </span>
+                        {pg && (
+                          <span className={`label rounded-full px-2.5 py-1.5 ${pg.cls}`}>{pg.texto}</span>
+                        )}
                         <ApptControls id={a.id} status={a.status} dia={dateKey} inicio={a.startsAt.toISOString()} />
+                        {aReceber(a) && (
+                          <CobrarAtendimento id={a.id} token={a.checkinToken} totalCents={a.totalCents} mensalista={a.mensalista} ajustes={a.items.filter((i) => i.serviceId === null).map((i) => ({ id: i.id, name: i.name, priceCents: i.priceCents }))} />
+                        )}
                       </div>
                     </li>
                   );

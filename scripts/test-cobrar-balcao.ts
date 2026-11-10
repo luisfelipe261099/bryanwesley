@@ -6,10 +6,11 @@ import {
   appointmentCommissions, appointmentServices, appointments, notifications, payments,
   services as sv, subscriptions, users,
 } from "../db/schema";
-import { createBooking } from "../lib/appointments";
+import { ajustarValorDoAtendimento, createBooking, removerAjusteDoAtendimento, updateAppointmentServices } from "../lib/appointments";
 import { getAvailability, getSettings } from "../lib/schedule";
 import { attachDetails } from "../lib/queries";
-import { rotuloPagamento } from "../lib/rotulo-pagamento";
+import { recordCommission } from "../lib/commissions";
+import { devendo, rotuloPagamento } from "../lib/rotulo-pagamento";
 import { addDays, shopToday, weekdayOf } from "../lib/time";
 import { eq, inArray, like } from "drizzle-orm";
 
@@ -65,7 +66,7 @@ async function main() {
     const corte = (await db.select().from(sv).where(eq(sv.slug, "corte")))[0];
     const settings = await getSettings();
     const livres: { dia: string; hora: string; barberId: number }[] = [];
-    for (let i = 2; i <= 30 && livres.length < 2; i++) {
+    for (let i = 2; i <= 30 && livres.length < 3; i++) {
       const d = addDays(shopToday(), i);
       if (settings.closedWeekdays.includes(weekdayOf(d))) continue;
       const { slots, closed } = await getAvailability({ dateKey: d, durationMin: corte.durationMin, ignorarAntecedencia: true });
@@ -101,7 +102,56 @@ async function main() {
     const [fb] = await attachDetails([bb]);
     ok("agenda mostra 'Pago no cartão (balcão)'", rotuloPagamento(fb)?.texto === "Pago no cartão (balcão)");
 
-    console.log("3. Nada a cobrar");
+    console.log("3. Atendido e não pago fica em vermelho");
+    const base = { kind: "AVULSO", totalCents: 3500, paymentMethod: "PIX", pagamentoOnline: null as "PAGO" | "PENDENTE" | null };
+    ok("concluído sem pagar: 'Não pago'", rotuloPagamento({ ...base, status: "CONCLUIDO" })?.texto === "Não pago" && devendo({ ...base, status: "CONCLUIDO" }));
+    ok("na cadeira com Pix em aberto: 'Não pago · Pix em aberto'", rotuloPagamento({ ...base, pagamentoOnline: "PENDENTE", status: "EM_ANDAMENTO" })?.texto === "Não pago · Pix em aberto");
+    ok("concluído e pago: não alerta", !devendo({ ...base, pagamentoOnline: "PAGO", status: "CONCLUIDO" }));
+    ok("ainda vai acontecer: não alerta", !devendo({ ...base, status: "CONFIRMADO" }));
+    ok("plano: não alerta", !devendo({ ...base, kind: "ASSINANTE", totalCents: 0, status: "CONCLUIDO" }));
+
+    console.log("4. Desconto e venda extra");
+    const c3 = await createBooking({ serviceIds: [corte.id], dateKey: livres[2].dia, time: livres[2].hora, barberId: livres[2].barberId, clientName: "Balcão 3", clientPhone: "41970270003" });
+    const base3 = c3.totalCents;
+    const pix3 = await pay.chargeAppointment(c3.id, "PIX", { cpf: "52998224725" });
+    const apagadasAntes = apagadas.length;
+    let t = await ajustarValorDoAtendimento(c3.id, { tipo: "EXTRA", valorCents: 2500, descricao: "Pomada" });
+    ok("venda extra soma ao total", t === base3 + 2500);
+    ok("o Pix antigo (valor velho) sai", pix3.ok && apagadas.length === apagadasAntes + 1);
+    t = await ajustarValorDoAtendimento(c3.id, { tipo: "DESCONTO", valorCents: 1000 });
+    ok("desconto tira do total", t === base3 + 1500);
+    const itens3 = await db.select().from(appointmentServices).where(eq(appointmentServices.appointmentId, c3.id));
+    ok("aparecem na lista do atendimento", itens3.some((i) => i.name === "Pomada" && i.priceCents === 2500) && itens3.some((i) => i.name === "Desconto" && i.priceCents === -1000));
+    let erro = "";
+    try { await ajustarValorDoAtendimento(c3.id, { tipo: "DESCONTO", valorCents: 999_999 }); } catch (e) { erro = (e as Error).message; }
+    ok("desconto maior que o total é recusado", /passa do valor/.test(erro));
+    erro = "";
+    try { await ajustarValorDoAtendimento(c3.id, { tipo: "EXTRA", valorCents: 500, descricao: " " }); } catch (e) { erro = (e as Error).message; }
+    ok("venda extra pede o que foi vendido", /vendido/.test(erro));
+    const desconto = itens3.find((i) => i.name === "Desconto")!;
+    t = await removerAjusteDoAtendimento(c3.id, desconto.id);
+    ok("remover o desconto volta o valor", t === base3 + 2500);
+    const r5 = await updateAppointmentServices({ appointmentId: c3.id, serviceIds: [corte.id] });
+    ok("trocar os serviços mantém a venda extra", r5.totalCents === base3 + 2500 && (await db.select().from(appointmentServices).where(eq(appointmentServices.appointmentId, c3.id))).some((i) => i.name === "Pomada"));
+    const pixNovo = await pay.chargeAppointment(c3.id, "PIX", { cpf: "52998224725" });
+    const linhaNova = (await db.select().from(payments).where(eq(payments.appointmentId, c3.id))).find((x) => x.status === "PENDENTE");
+    ok("o Pix novo sai com o valor ajustado", pixNovo.ok && linhaNova?.amountCents === base3 + 2500);
+    // Concluir de verdade só no dia: aqui grava como o fechamento grava.
+    await db.update(appointments).set({ status: "CONCLUIDO" }).where(eq(appointments.id, c3.id));
+    await recordCommission(c3.id);
+    const comAntes = (await db.select().from(appointmentCommissions).where(eq(appointmentCommissions.appointmentId, c3.id)))[0];
+    ok("comissão sai sobre o valor ajustado", comAntes?.baseCents === base3 + 2500);
+    t = await ajustarValorDoAtendimento(c3.id, { tipo: "DESCONTO", valorCents: 500 });
+    const comDepois = (await db.select().from(appointmentCommissions).where(eq(appointmentCommissions.appointmentId, c3.id)))[0];
+    ok("desconto depois de concluir acerta a comissão", comDepois.baseCents === t && comDepois.barberCents + comDepois.shopCents === t);
+    await pay.registrarPagamentoNoBalcao(c3.id, "PIX_BALCAO");
+    erro = "";
+    try { await ajustarValorDoAtendimento(c3.id, { tipo: "EXTRA", valorCents: 500, descricao: "Gel" }); } catch (e) { erro = (e as Error).message; }
+    ok("depois de pago não muda o valor", /já está pago/.test(erro));
+    const pg3 = (await db.select().from(payments).where(eq(payments.appointmentId, c3.id))).find((x) => x.status === "PAGO");
+    ok("o recebido no balcão é o valor ajustado", pg3?.amountCents === t);
+
+    console.log("5. Nada a cobrar");
     await db.update(appointments).set({ status: "CANCELADO" }).where(eq(appointments.id, b.id));
     await db.delete(payments).where(eq(payments.appointmentId, b.id));
     ok("horário cancelado não recebe", !(await pay.registrarPagamentoNoBalcao(b.id, "PIX_BALCAO")).ok);

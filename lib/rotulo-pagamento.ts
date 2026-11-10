@@ -8,8 +8,16 @@ export function rotuloPagamento(a: {
   pagamentoOnline: "PAGO" | "PENDENTE" | null;
   mensalista?: boolean;
   formaPaga?: string | null;
+  /** Com o status, o atendimento já feito e não pago vira alerta vermelho. */
+  status?: string;
 }): { texto: string; cls: string } | null {
   if (a.kind === "ASSINANTE" || a.totalCents <= 0) return null;
+  if (a.status && devendo({ ...a, status: a.status })) {
+    return {
+      texto: a.pagamentoOnline === "PENDENTE" ? "Não pago · Pix em aberto" : "Não pago",
+      cls: "bg-red-500 text-white ring-2 ring-red-400/40",
+    };
+  }
   const forma = a.paymentMethod === "CARTAO" ? "cartão" : "Pix";
   if (a.pagamentoOnline === "PAGO") {
     const texto =
@@ -31,4 +39,19 @@ export function rotuloPagamento(a: {
       : { texto: "Paga na hora", cls: "bg-white/8 text-steel-300" };
   }
   return null;
+}
+
+/** Ainda há valor a receber neste horário (não pago, não cancelado). */
+export function aReceber(a: { kind: string; totalCents: number; pagamentoOnline: "PAGO" | "PENDENTE" | null; status: string }) {
+  return (
+    a.kind !== "ASSINANTE" &&
+    a.totalCents > 0 &&
+    a.pagamentoOnline !== "PAGO" &&
+    !["CANCELADO", "NO_SHOW"].includes(a.status)
+  );
+}
+
+/** Já atendido (ou na cadeira) e ainda não pago: o cliente não pode sair assim. */
+export function devendo(a: { kind: string; totalCents: number; pagamentoOnline: "PAGO" | "PENDENTE" | null; status: string }) {
+  return aReceber(a) && (a.status === "EM_ANDAMENTO" || a.status === "CONCLUIDO");
 }

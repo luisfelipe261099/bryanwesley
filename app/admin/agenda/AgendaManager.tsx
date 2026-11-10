@@ -11,6 +11,7 @@ import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  AlertTriangle,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -58,9 +59,13 @@ export type LinhaAgenda = {
   pagamento: { texto: string; cls: string } | null;
   /** Ainda há valor a receber (não pago): mostra "Cobrar". */
   aCobrar: boolean;
+  /** Já atendido (ou na cadeira) e não pago: alerta vermelho. */
+  naoPago: boolean;
   /** Token da tela do agendamento (onde aparece o Pix). */
   token: string | null;
   mensalista: boolean;
+  /** Descontos e vendas extras lançados no "Cobrar". */
+  ajustes: { id: number; name: string; priceCents: number }[];
   assinante: boolean;
   fixo: boolean;
   status: string;
@@ -267,6 +272,32 @@ export function AgendaManager({
           Novo agendamento
         </Link>
       </div>
+
+      {/* Atendido e não pago: o cliente não pode sair sem pagar. */}
+      {(() => {
+        const semPagar = linhas.filter((a) => a.naoPago);
+        if (!semPagar.length) return null;
+        return (
+          <div className="rounded-2xl border-2 border-red-500/70 bg-red-500/15 p-4">
+            <p className="flex items-center gap-2 font-semibold text-red-100">
+              <AlertTriangle className="h-4 w-4 flex-none text-red-300" />
+              {semPagar.length === 1
+                ? "1 atendimento ainda não foi pago"
+                : `${semPagar.length} atendimentos ainda não foram pagos`}{" "}
+              · {formatBRL(semPagar.reduce((t, a) => t + a.totalCents, 0))}
+            </p>
+            <ul className="mt-2 space-y-0.5 text-sm text-red-50">
+              {semPagar.map((a) => (
+                <li key={a.id}>
+                  {visao !== "dia" && `${a.dateKey.split("-").reverse().slice(0, 2).join("/")} `}
+                  {a.hora} · {a.clientName} · {a.barberName} · {formatBRL(a.totalCents)}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1.5 text-xs text-red-100/80">Toque em <b>Cobrar</b> no horário para receber.</p>
+          </div>
+        );
+      })()}
 
       {/* Visão: dia, semana ou tudo que vem pela frente */}
       <div className="flex flex-wrap gap-2">
@@ -622,7 +653,9 @@ function Item({
   return (
     <li
       className={`rounded-2xl border p-3 transition-colors sm:p-3.5 ${
-        caiu
+        a.naoPago
+          ? "border-2 border-red-500/70 bg-red-500/[0.07]"
+          : caiu
           ? "border-white/5 bg-white/[0.01] opacity-60"
           : "border-white/6 bg-white/[0.02] hover:border-electric/30"
       }`}
@@ -707,7 +740,7 @@ function Item({
             )}
           </ApptControls>
           {a.aCobrar && (
-            <CobrarAtendimento id={a.id} token={a.token} totalCents={a.totalCents} mensalista={a.mensalista} />
+            <CobrarAtendimento id={a.id} token={a.token} totalCents={a.totalCents} mensalista={a.mensalista} ajustes={a.ajustes} />
           )}
         </div>
       </div>

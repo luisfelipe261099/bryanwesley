@@ -10,6 +10,8 @@ const config: Config = {
   content: [
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
+    // Etiquetas de status e de pagamento moram em lib/.
+    "./lib/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {

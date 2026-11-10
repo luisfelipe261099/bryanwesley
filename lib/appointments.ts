@@ -19,6 +19,7 @@ import {
   payments,
   planServices,
   plans,
+  appointmentCommissions,
 } from "@/db/schema";
 import { sql as rawSql } from "drizzle-orm";
 import {
@@ -28,7 +29,7 @@ import {
   workingWindows,
   BLOCKING_STATUSES,
 } from "./schedule";
-import { recordCommission } from "./commissions";
+import { recordCommission, splitCommission } from "./commissions";
 import {
   queueBookingNotifications,
   queueNotification,
@@ -984,7 +985,17 @@ export async function updateAppointmentServices(input: {
       ? 0
       : combinado.get(s.id) ?? precoNoHorario(s, regras, partes.weekday, partes.minutesOfDay);
   const tudoCoberto = !!assinatura && chosen.every((s) => cobertos.has(s.id));
-  const totalCents = tudoCoberto ? 0 : chosen.reduce((acc, s) => acc + precoDe(s), 0);
+  // Desconto e venda extra lançados no "Cobrar" (linhas sem serviço)
+  // continuam valendo quando os serviços mudam.
+  const ajustes = tudoCoberto
+    ? []
+    : await db
+        .select()
+        .from(appointmentServices)
+        .where(and(eq(appointmentServices.appointmentId, appt.id), isNull(appointmentServices.serviceId)));
+  const totalCents = tudoCoberto
+    ? 0
+    : Math.max(0, chosen.reduce((acc, s) => acc + precoDe(s), 0) + ajustes.reduce((t, a) => t + a.priceCents, 0));
 
   await db
     .update(appointments)
@@ -1003,15 +1014,22 @@ export async function updateAppointmentServices(input: {
   await db
     .delete(appointmentServices)
     .where(eq(appointmentServices.appointmentId, appt.id));
-  await db.insert(appointmentServices).values(
-    chosen.map((s) => ({
+  await db.insert(appointmentServices).values([
+    ...chosen.map((s) => ({
       appointmentId: appt.id,
       serviceId: s.id,
       name: s.name,
       priceCents: precoDe(s),
       durationMin: s.durationMin,
-    }))
-  );
+    })),
+    ...ajustes.map((a) => ({
+      appointmentId: appt.id,
+      serviceId: null,
+      name: a.name,
+      priceCents: a.priceCents,
+      durationMin: 0,
+    })),
+  ]);
 
   // Mudou o valor: a fatura em aberto (Pix/cartão) cobraria o antigo. Sai,
   // e o cliente gera outra com o valor novo na tela da confirmação.
@@ -1166,4 +1184,95 @@ export async function transitionAppointment(
   }
 
   return updated;
+}
+
+
+// ───────────────────── Desconto e venda extra ─────────────────────
+//
+// Na hora de cobrar, o barbeiro dá um desconto ou soma um produto
+// (pomada, bebida…). Cada ajuste é uma linha sem serviço no atendimento:
+// aparece na lista, entra no total, no Pix e na comissão.
+
+export const PREFIXO_DESCONTO = "Desconto";
+
+async function recalcularTotal(appointmentId: number) {
+  const itens = await db
+    .select({ priceCents: appointmentServices.priceCents })
+    .from(appointmentServices)
+    .where(eq(appointmentServices.appointmentId, appointmentId));
+  const total = Math.max(0, itens.reduce((t, i) => t + i.priceCents, 0));
+  const antes = await db.query.appointments.findFirst({ where: eq(appointments.id, appointmentId) });
+  await db.update(appointments).set({ totalCents: total }).where(eq(appointments.id, appointmentId));
+  // Já concluído: a comissão acompanha o valor novo.
+  const com = await db.query.appointmentCommissions.findFirst({
+    where: eq(appointmentCommissions.appointmentId, appointmentId),
+  });
+  if (com && !com.fromSubscription) {
+    const split = splitCommission(total, com.barberPct);
+    await db
+      .update(appointmentCommissions)
+      .set({ baseCents: split.baseCents, barberCents: split.barberCents, shopCents: split.shopCents })
+      .where(eq(appointmentCommissions.id, com.id));
+  }
+  // A fatura em aberto cobraria o valor antigo: sai, e o Pix novo sai certo.
+  if (antes && antes.totalCents !== total) await cancelarCobrancasDoAgendamento(appointmentId);
+  return total;
+}
+
+async function podeAjustar(appointmentId: number) {
+  const appt = await db.query.appointments.findFirst({ where: eq(appointments.id, appointmentId) });
+  if (!appt) throw new BookingError("Agendamento não encontrado.");
+  if (appt.kind !== "AVULSO") throw new BookingError("Horário do plano: não há valor para ajustar.");
+  if (["CANCELADO", "NO_SHOW"].includes(appt.status)) throw new BookingError("Esse horário foi cancelado.");
+  const pago = await db.query.payments.findFirst({
+    where: and(eq(payments.appointmentId, appt.id), eq(payments.status, "PAGO")),
+  });
+  if (pago) throw new BookingError("Esse horário já está pago: não dá para mudar o valor.");
+  return appt;
+}
+
+/** Soma uma venda extra ou dá um desconto. Devolve o total novo. */
+export async function ajustarValorDoAtendimento(
+  appointmentId: number,
+  input: { tipo: "DESCONTO" | "EXTRA"; valorCents: number; descricao?: string | null }
+) {
+  const valor = Math.round(input.valorCents);
+  if (!Number.isFinite(valor) || valor <= 0 || valor > 1_000_000) throw new BookingError("Digite um valor válido.");
+  const appt = await podeAjustar(appointmentId);
+  const desc = (input.descricao ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+  if (input.tipo === "DESCONTO") {
+    if (valor > appt.totalCents) throw new BookingError("O desconto passa do valor do atendimento.");
+    await db.insert(appointmentServices).values({
+      appointmentId,
+      serviceId: null,
+      name: desc ? `${PREFIXO_DESCONTO} · ${desc}` : PREFIXO_DESCONTO,
+      priceCents: -valor,
+      durationMin: 0,
+    });
+  } else {
+    if (!desc) throw new BookingError("Diga o que foi vendido (ex.: pomada).");
+    await db.insert(appointmentServices).values({
+      appointmentId,
+      serviceId: null,
+      name: desc,
+      priceCents: valor,
+      durationMin: 0,
+    });
+  }
+  return recalcularTotal(appointmentId);
+}
+
+/** Tira um desconto ou venda extra lançado por engano. */
+export async function removerAjusteDoAtendimento(appointmentId: number, itemId: number) {
+  await podeAjustar(appointmentId);
+  const item = await db.query.appointmentServices.findFirst({
+    where: and(
+      eq(appointmentServices.id, itemId),
+      eq(appointmentServices.appointmentId, appointmentId),
+      isNull(appointmentServices.serviceId)
+    ),
+  });
+  if (!item) throw new BookingError("Esse ajuste não existe mais.");
+  await db.delete(appointmentServices).where(eq(appointmentServices.id, item.id));
+  return recalcularTotal(appointmentId);
 }

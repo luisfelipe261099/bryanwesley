@@ -5,7 +5,7 @@
 // não achava nada, porque a lista só existia espremida num card do
 // dashboard. A configuração mudou para /admin/ajustes e aqui ficou o que
 // o nome promete.
-import { rotuloPagamento } from "@/lib/rotulo-pagamento";
+import { aReceber, devendo, rotuloPagamento } from "@/lib/rotulo-pagamento";
 import { carregarRegras } from "@/lib/precos-server";
 import {
   agendaDoPeriodo,
@@ -243,13 +243,13 @@ function paraLinha(
     servicos: a.items.map((i) => i.name).join(" + "),
     totalCents: a.totalCents,
     pagamento: rotuloPagamento(a),
-    aCobrar:
-      a.kind !== "ASSINANTE" &&
-      a.totalCents > 0 &&
-      a.pagamentoOnline !== "PAGO" &&
-      !["CANCELADO", "NO_SHOW"].includes(a.status),
+    aCobrar: aReceber(a),
+    naoPago: devendo(a),
     token: a.checkinToken,
     mensalista: a.mensalista,
+    ajustes: a.items
+      .filter((i) => i.serviceId === null)
+      .map((i) => ({ id: i.id, name: i.name, priceCents: i.priceCents })),
     servicoIds: a.items
       .map((i) => i.serviceId)
       .filter((id): id is number => id !== null),

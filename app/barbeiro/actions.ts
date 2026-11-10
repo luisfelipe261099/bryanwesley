@@ -7,7 +7,7 @@ import { appointments, appointmentServices, services, users } from "@/db/schema"
 import { activeSubscription, dayBounds } from "@/lib/queries";
 import { requireRole } from "@/lib/auth";
 import { isNextControlFlow } from "@/lib/errors";
-import { transitionAppointment, BookingError } from "@/lib/appointments";
+import { transitionAppointment, BookingError, ajustarValorDoAtendimento, removerAjusteDoAtendimento } from "@/lib/appointments";
 import { registrarPagamentoNoBalcao, type FormaBalcao } from "@/lib/payments";
 import { subscriptions } from "@/db/schema";
 import { shopToday, utcToShopParts, labelFullDate } from "@/lib/time";
@@ -256,6 +256,37 @@ export async function receberNoBalcao(id: number, forma: FormaBalcao): Promise<A
     revalidateAll();
     revalidatePath("/admin/agenda");
     return { ok: true, message: "Pagamento registrado." };
+  } catch (e) {
+    return toResult(e);
+  }
+}
+
+/** Desconto ou venda extra na hora de cobrar. */
+export async function ajustarValor(
+  id: number,
+  tipo: "DESCONTO" | "EXTRA",
+  valorCents: number,
+  descricao: string
+): Promise<ActionResult> {
+  try {
+    await assertOwnership(id);
+    if (tipo !== "DESCONTO" && tipo !== "EXTRA") return { ok: false, error: "Escolha desconto ou extra." };
+    const total = await ajustarValorDoAtendimento(id, { tipo, valorCents: Number(valorCents), descricao: String(descricao ?? "") });
+    revalidateAll();
+    revalidatePath("/admin/agenda");
+    return { ok: true, message: tipo === "DESCONTO" ? `Desconto aplicado. Novo total: R$ ${(total / 100).toFixed(2).replace(".", ",")}` : `Extra somado. Novo total: R$ ${(total / 100).toFixed(2).replace(".", ",")}` };
+  } catch (e) {
+    return toResult(e);
+  }
+}
+
+export async function removerAjuste(id: number, itemId: number): Promise<ActionResult> {
+  try {
+    await assertOwnership(id);
+    await removerAjusteDoAtendimento(id, Number(itemId));
+    revalidateAll();
+    revalidatePath("/admin/agenda");
+    return { ok: true, message: "Ajuste removido." };
   } catch (e) {
     return toResult(e);
   }

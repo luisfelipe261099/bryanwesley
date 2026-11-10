@@ -1,4 +1,4 @@
-import { rotuloPagamento } from "@/lib/rotulo-pagamento";
+import { aReceber, devendo, rotuloPagamento } from "@/lib/rotulo-pagamento";
 import Link from "next/link";
 import {
   Ban,
@@ -15,6 +15,7 @@ import {
   ChevronRight,
   UserRound,
   type LucideIcon,
+  AlertTriangle,
 } from "lucide-react";
 import { Background } from "@/components/Background";
 import { AppHeader } from "@/components/AppHeader";
@@ -391,6 +392,33 @@ export default async function BarbeiroPanel({
               </ul>
             )}
 
+            {(() => {
+              const semPagar = agenda.filter((a) => devendo(a));
+              if (!semPagar.length) return null;
+              const total = semPagar.reduce((t, a) => t + a.totalCents, 0);
+              return (
+                <div className="mt-4 rounded-2xl border-2 border-red-500/70 bg-red-500/15 p-3.5">
+                  <p className="flex items-center gap-2 font-semibold text-red-100">
+                    <AlertTriangle className="h-4 w-4 flex-none text-red-300" />
+                    {semPagar.length === 1
+                      ? "1 atendimento ainda não foi pago"
+                      : `${semPagar.length} atendimentos ainda não foram pagos`}{" "}
+                    · {formatBRL(total)}
+                  </p>
+                  <p className="mt-1 text-xs text-red-100/80">
+                    Cobre antes de o cliente sair: toque em <b>Cobrar</b> no horário.
+                  </p>
+                  <ul className="mt-2 space-y-0.5 text-sm text-red-50">
+                    {semPagar.map((a) => (
+                      <li key={a.id}>
+                        {formatShopTime(a.startsAt)} · {a.clientName} · {formatBRL(a.totalCents)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })()}
+
             {agenda.length === 0 ? (
               <p className="mt-5 rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-steel-400">
                 {bloqueios.length > 0
@@ -402,11 +430,14 @@ export default async function BarbeiroPanel({
                 {agenda.map((a) => {
                   const st = statusStyles[a.status];
                   const atual = a.status === "EM_ANDAMENTO";
+                  const naoPago = devendo(a);
                   return (
                     <li
                       key={a.id}
                       className={`flex flex-wrap items-center gap-x-3 gap-y-2.5 rounded-2xl border p-3.5 transition-colors ${
-                        atual
+                        naoPago
+                          ? "border-2 border-red-500/70 bg-red-500/[0.07]"
+                          : atual
                           ? "border-electric/50 bg-electric/[0.06]"
                           : "border-white/6 bg-white/[0.02]"
                       }`}
@@ -477,20 +508,18 @@ export default async function BarbeiroPanel({
                               id={a.id}
                               status={a.status}
                               depoisDoInicio={a.startsAt.getTime() <= Date.now()}
+                              naoPagoCents={aReceber(a) ? a.totalCents : 0}
                             />
                           </div>
                         )}
-                        {podeAgir &&
-                          a.kind !== "ASSINANTE" &&
-                          a.totalCents > 0 &&
-                          a.pagamentoOnline !== "PAGO" &&
-                          !["CANCELADO", "NO_SHOW"].includes(a.status) && (
+                        {podeAgir && aReceber(a) && (
                           <div className="ml-auto sm:ml-0">
                             <CobrarAtendimento
                               id={a.id}
                               token={a.checkinToken}
                               totalCents={a.totalCents}
                               mensalista={a.mensalista}
+                              ajustes={a.items.filter((i) => i.serviceId === null).map((i) => ({ id: i.id, name: i.name, priceCents: i.priceCents }))}
                             />
                           </div>
                         )}
