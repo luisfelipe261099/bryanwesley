@@ -421,6 +421,19 @@ export const recurringSlots = mysqlTable(
 // ───────────────────────── Notificações ─────────────────────────
 
 // Caixa de saída: a aplicação só enfileira; quem entrega é o worker.
+// "Esqueci minha senha": código mandado no WhatsApp (só o hash).
+export const passwordResets = mysqlTable("password_resets", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  codeHash: varchar("code_hash", { length: 100 }).notNull(),
+  expiresAt: ts("expires_at").notNull(),
+  attempts: int("attempts").notNull().default(0),
+  usedAt: ts("used_at"),
+  createdAt: tsNow("created_at"),
+});
+
 export const notifications = mysqlTable(
   "notifications",
   {

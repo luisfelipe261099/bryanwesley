@@ -4,10 +4,13 @@ import { removerInscricao } from "@/lib/push";
 
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { and, eq, isNotNull, lte, or, sql as rawSql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, lt, lte, or, sql as rawSql } from "drizzle-orm";
+import { randomInt } from "node:crypto";
+import { queueFreeText } from "@/lib/notifications";
+import { whatsappEnviando } from "@/lib/whatsapp-status";
 import { z } from "@/lib/zod-pt";
 import { db } from "@/db/client";
-import { users, barbers, appointments, subscriptions } from "@/db/schema";
+import { users, barbers, appointments, subscriptions, passwordResets } from "@/db/schema";
 import { verifyPassword, hashPassword } from "@/lib/auth/password";
 import {
   SESSION_COOKIE,
@@ -234,7 +237,7 @@ export async function signup(
     if (existing.passwordHash) {
       return {
         error:
-          "Já existe uma conta com esse WhatsApp. Faça login — se esqueceu a senha, peça na barbearia para redefinir.",
+          "Já existe uma conta com esse WhatsApp. Faça login — se esqueceu a senha, toque em \"Esqueci minha senha\".",
       };
     }
 
@@ -368,4 +371,160 @@ export async function logout(formData?: FormData) {
   }
   cookies().delete(SESSION_COOKIE);
   redirect("/entrar");
+}
+
+// ───────────────────────── Esqueci minha senha ─────────────────────────
+//
+// O cliente cria uma senha nova sozinho, provando que é ele de um destes
+// jeitos: o código de 6 números mandado no WhatsApp da barbearia (quando
+// ele está conectado) ou o código de um atendimento em que esteve na
+// barbearia (check-in feito ou atendimento concluído) — esse ninguém
+// fabrica marcando horário no nome de outra pessoa. Conta da equipe não
+// passa por aqui: o administrador redefine no painel.
+
+const MINUTOS_CODIGO = 15;
+const TENTATIVAS_CODIGO = 5;
+
+export async function pedirCodigoNoWhatsapp(telefone: string): Promise<{ ok: boolean; mensagem: string }> {
+  if (!isValidPhone(telefone)) return { ok: false, mensagem: "Informe o WhatsApp com DDD." };
+  const phone = normalizePhone(telefone);
+  const ip = ipDaRequisicao();
+  const [porRede, porFone] = await Promise.all([
+    hitRateLimit(`senha:pedido:ip:${ip}`, 10, 60 * 60_000),
+    hitRateLimit(`senha:pedido:fone:${phone}`, 3, 60 * 60_000),
+  ]);
+  if (!porRede.ok || !porFone.ok) {
+    return { ok: false, mensagem: "Muitos pedidos seguidos. Aguarde um pouco ou use o código de um atendimento." };
+  }
+  if (!(await whatsappEnviando())) {
+    return {
+      ok: false,
+      mensagem: "O WhatsApp da barbearia não está mandando mensagens agora. Use o código de um atendimento seu.",
+    };
+  }
+  // A resposta é a mesma exista a conta ou não: não revela quem é cliente.
+  const generica = { ok: true, mensagem: "Se esse WhatsApp tiver conta, o código chega em instantes." };
+  const user = await db.query.users.findFirst({ where: eq(users.phone, phone) });
+  if (!user || user.role !== "CLIENT" || !user.active) return generica;
+
+  const codigo = String(randomInt(0, 1_000_000)).padStart(6, "0");
+  // O pedido novo vale; os anteriores em aberto deixam de valer.
+  await db
+    .update(passwordResets)
+    .set({ usedAt: new Date() })
+    .where(and(eq(passwordResets.userId, user.id), isNull(passwordResets.usedAt)));
+  await db.insert(passwordResets).values({
+    userId: user.id,
+    codeHash: await hashPassword(codigo),
+    expiresAt: new Date(Date.now() + MINUTOS_CODIGO * 60_000),
+  });
+  await queueFreeText({
+    phone,
+    body: `Bryan Wesley Barbearia: seu código para criar uma nova senha é ${codigo}. Vale por ${MINUTOS_CODIGO} minutos. Se não foi você, ignore esta mensagem.`,
+  });
+  return generica;
+}
+
+const novaSenhaSchema = z.object({
+  phone: z.string().refine(isValidPhone, "Informe o WhatsApp com DDD."),
+  codigo: z.string().trim().min(6, "Informe o código.").max(8),
+  senha: z.string().min(6, "A senha precisa ter ao menos 6 caracteres.").max(100),
+  confirmar: z.string(),
+});
+
+export type NovaSenhaState = { error?: string } | undefined;
+
+export async function redefinirMinhaSenha(_prev: NovaSenhaState, formData: FormData): Promise<NovaSenhaState> {
+  const parsed = novaSenhaSchema.safeParse({
+    phone: formData.get("phone"),
+    codigo: formData.get("codigo"),
+    senha: formData.get("senha"),
+    confirmar: formData.get("confirmar"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const { senha, confirmar } = parsed.data;
+  if (senha !== confirmar) return { error: "As duas senhas não estão iguais." };
+  const phone = normalizePhone(parsed.data.phone);
+  const codigo = parsed.data.codigo.toUpperCase().replace(/\s/g, "");
+
+  const ip = ipDaRequisicao();
+  const [porRede, porFone] = await Promise.all([
+    hitRateLimit(`senha:tentativa:ip:${ip}`, 20, JANELA_LOGIN_MS),
+    hitRateLimit(`senha:tentativa:fone:${phone}`, 8, 60 * 60_000),
+  ]);
+  if (!porRede.ok || !porFone.ok) {
+    return { error: "Muitas tentativas. Aguarde um pouco ou peça ajuda na barbearia." };
+  }
+
+  const naoConfere = {
+    error:
+      "Código não confere. Use o código que chegou no WhatsApp ou o de um atendimento em que você esteve na barbearia.",
+  };
+  const user = await db.query.users.findFirst({ where: eq(users.phone, phone) });
+  if (!user || !user.active) return naoConfere;
+  if (user.role !== "CLIENT") {
+    return { error: "Conta da equipe: a senha é redefinida pelo administrador, no painel." };
+  }
+
+  let pedidoUsado: number | null = null;
+  let confere = false;
+
+  // 1) Código de 6 números do WhatsApp.
+  if (/^\d{6}$/.test(codigo)) {
+    const pedido = await db.query.passwordResets.findFirst({
+      where: and(
+        eq(passwordResets.userId, user.id),
+        isNull(passwordResets.usedAt),
+        gt(passwordResets.expiresAt, new Date()),
+        lt(passwordResets.attempts, TENTATIVAS_CODIGO)
+      ),
+      orderBy: (r, { desc }) => [desc(r.id)],
+    });
+    if (pedido) {
+      if (await verifyPassword(codigo, pedido.codeHash)) {
+        confere = true;
+        pedidoUsado = pedido.id;
+      } else {
+        await db
+          .update(passwordResets)
+          .set({ attempts: rawSql`${passwordResets.attempts} + 1` })
+          .where(eq(passwordResets.id, pedido.id));
+      }
+    }
+  }
+
+  // 2) Código de um atendimento em que a pessoa esteve na barbearia.
+  if (!confere) {
+    const atendimento = await db.query.appointments.findFirst({
+      where: and(
+        eq(appointments.clientPhone, phone),
+        eq(appointments.code, codigo),
+        or(isNotNull(appointments.checkedInAt), eq(appointments.status, "CONCLUIDO"))
+      ),
+      columns: { id: true },
+    });
+    confere = !!atendimento;
+  }
+  if (!confere) return naoConfere;
+
+  if (pedidoUsado) {
+    await db.update(passwordResets).set({ usedAt: new Date() }).where(eq(passwordResets.id, pedidoUsado));
+  }
+  // Senha nova: as sessões antigas caem e a trava de tentativas zera.
+  await db
+    .update(users)
+    .set({
+      passwordHash: await hashPassword(senha),
+      tokenVersion: rawSql`${users.tokenVersion} + 1`,
+      failedLogins: 0,
+      lockedUntil: null,
+    })
+    .where(eq(users.id, user.id));
+  const conta = await db.query.users.findFirst({ where: eq(users.id, user.id) });
+  cookies().set(
+    SESSION_COOKIE,
+    await signSession({ id: user.id, name: user.name, role: "CLIENT", v: conta?.tokenVersion ?? 0 }),
+    sessionCookieOptions
+  );
+  redirect("/cliente?senha=nova");
 }
