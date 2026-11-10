@@ -13,6 +13,7 @@ import { AvisosPush } from "@/components/AvisosPush";
 import { MeusAparelhos } from "@/components/MeusAparelhos";
 import { chavePublicaPush, meusAparelhos } from "@/lib/push";
 import { labelAgo } from "@/lib/time";
+import { MeuEmail } from "./MeuEmail";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,7 @@ export default async function Conta() {
             <UserRound className="h-5 w-5 text-electric" />
             <h1 className="font-display text-xl text-white">Minha conta</h1>
           </div>
-          <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-3">
+          <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
             <div>
               <dt className="label text-steel-400">Nome</dt>
               <dd className="mt-1 text-white">{user.name}</dd>
@@ -67,11 +68,8 @@ export default async function Conta() {
               <dt className="label text-steel-400">WhatsApp</dt>
               <dd className="mt-1 text-white">{formatPhone(user.phone)}</dd>
             </div>
-            <div>
-              <dt className="label text-steel-400">E-mail</dt>
-              <dd className="mt-1 text-white">{user.email ?? "—"}</dd>
-            </div>
           </dl>
+          <MeuEmail atual={user.email ?? null} />
         </div>
 
         <div className="glass mt-5 rounded-3xl p-7">

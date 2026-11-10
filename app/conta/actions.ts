@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { pushSubscriptions } from "@/db/schema";
+import { pushSubscriptions, users } from "@/db/schema";
+import { normalizarEmail } from "@/lib/email";
 import { requireRole } from "@/lib/auth";
 import { hitRateLimit } from "@/lib/rate-limit";
 import { enviarPush } from "@/lib/push";
@@ -50,5 +51,22 @@ export async function esquecerAparelho(id: number): Promise<{ ok: true } | { ok:
   if (res.affectedRows === 0) return { ok: false, error: "Esse aparelho já não está na lista." };
   revalidatePath("/conta");
   revalidatePath("/admin/notificacoes");
+  return { ok: true };
+}
+
+
+/** O cliente cadastra (ou troca) o e-mail: é por ele que recebe o link de nova senha. */
+export async function salvarMeuEmail(valor: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const session = await requireRole(["CLIENT", "BARBER", "ADMIN"]);
+  const freio = await hitRateLimit(`email:conta:${session.id}`, 10, 60 * 60_000);
+  if (!freio.ok) return { ok: false, error: "Muitas trocas seguidas. Tente mais tarde." };
+  const email = normalizarEmail(valor);
+  if (email === false) return { ok: false, error: "E-mail inválido. Confira o endereço." };
+  if (email) {
+    const outro = await db.query.users.findFirst({ where: eq(users.email, email), columns: { id: true } });
+    if (outro && outro.id !== session.id) return { ok: false, error: "Esse e-mail já está em outra conta." };
+  }
+  await db.update(users).set({ email }).where(eq(users.id, session.id));
+  revalidatePath("/conta");
   return { ok: true };
 }

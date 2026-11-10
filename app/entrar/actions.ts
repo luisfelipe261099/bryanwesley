@@ -7,7 +7,8 @@ import { redirect } from "next/navigation";
 import { and, desc, eq, gt, isNotNull, isNull, like, lt, lte, or, sql as rawSql } from "drizzle-orm";
 import { randomInt } from "node:crypto";
 import { markSent, queueFreeText } from "@/lib/notifications";
-import { gastarLinkDeSenha, linkDeSenhaValido, registrarPedidoDeSenha } from "@/lib/senha-link";
+import { gastarLinkDeSenha, gerarLinkDeSenha, linkDeSenhaValido, registrarPedidoDeSenha } from "@/lib/senha-link";
+import { emailConfigurado, emailDeNovaSenha, enviarEmail, normalizarEmail } from "@/lib/email";
 import { avisarPedidoDeSenha } from "@/lib/avisos";
 import { isWhatsappConfigured, sendWhatsapp } from "@/lib/providers/whatsapp";
 import { whatsappEnviando } from "@/lib/whatsapp-status";
@@ -218,6 +219,16 @@ export async function signup(
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
+  // E-mail é opcional (serve para receber o link de nova senha).
+  const emailNovo = normalizarEmail(String(formData.get("email") ?? ""));
+  if (emailNovo === false) return { error: "E-mail inválido. Confira o endereço (ou deixe em branco)." };
+  if (emailNovo) {
+    const dono = await db.query.users.findFirst({ where: eq(users.email, emailNovo), columns: { id: true, phone: true } });
+    if (dono && dono.phone !== normalizePhone(parsed.data.phone)) {
+      return { error: "Esse e-mail já está em outra conta. Use outro ou deixe em branco." };
+    }
+  }
+
   // Freio por rede: sem ele um script cadastrava milhares de números (cada
   // um custa um bcrypt) e ficava com a conta de quem ainda não tem uma.
   const freioRede = await hitRateLimit(`cadastro:ip:${ipDaRequisicao()}`, 15, 60 * 60_000);
@@ -346,6 +357,9 @@ export async function signup(
     userId = id;
   }
 
+  if (emailNovo) {
+    await db.update(users).set({ email: emailNovo }).where(eq(users.id, userId)).catch(() => null);
+  }
   const conta = await db.query.users.findFirst({ where: eq(users.id, userId) });
   const token = await signSession({
     id: userId,
@@ -667,4 +681,41 @@ export async function definirSenhaPeloLink(_prev: NovaSenhaState, formData: Form
     sessionCookieOptions
   );
   redirect(conta.role === "CLIENT" ? "/cliente?senha=nova" : homeFor(conta.role));
+}
+
+// ───────────────────── Nova senha por e-mail ─────────────────────
+
+/**
+ * Manda o link de nova senha para o e-mail da conta (informada pelo
+ * e-mail ou pelo WhatsApp). Automático: a barbearia não precisa fazer
+ * nada. A resposta é a mesma tenha a conta e-mail ou não.
+ */
+export async function receberLinkPorEmail(identificador: string): Promise<{ ok: boolean; mensagem: string }> {
+  if (!emailConfigurado()) {
+    return { ok: false, mensagem: "O envio por e-mail ainda não está ligado. Peça o link à barbearia." };
+  }
+  const id = identificador.trim();
+  const fone = normalizePhone(id);
+  const ehEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(id);
+  if (!ehEmail && fone.length < 10) return { ok: false, mensagem: "Informe seu e-mail ou WhatsApp com DDD." };
+  const [porRede, porConta] = await Promise.all([
+    hitRateLimit(`senha:email:ip:${ipDaRequisicao()}`, 10, 60 * 60_000),
+    hitRateLimit(`senha:email:id:${ehEmail ? id.toLowerCase() : fone}`, 3, 60 * 60_000),
+  ]);
+  if (!porRede.ok || !porConta.ok) return { ok: false, mensagem: "Muitos pedidos seguidos. Aguarde um pouco." };
+
+  const generica = {
+    ok: true,
+    mensagem:
+      "Se essa conta tiver e-mail cadastrado, o link chega em instantes (olhe também o spam). Sem e-mail? Peça o link à barbearia.",
+  };
+  const user = await db.query.users.findFirst({
+    where: ehEmail ? eq(users.email, id.toLowerCase()) : eq(users.phone, fone),
+  });
+  if (!user || !user.active || !user.email) return generica;
+  const link = await gerarLinkDeSenha(user.id);
+  if (!link) return generica;
+  const m = emailDeNovaSenha(user.name, link.url);
+  await enviarEmail({ para: user.email, assunto: m.assunto, texto: m.texto, html: m.html });
+  return generica;
 }

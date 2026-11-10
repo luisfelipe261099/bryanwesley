@@ -122,6 +122,7 @@ function Cabecalho({
   const [nome, setNome] = useState(cliente.name);
   const [fone, setFone] = useState(cliente.phonePending ? "" : cliente.phone);
   const [cpf, setCpf] = useState(formatarCpf(cliente.cpf ?? ""));
+  const [email, setEmail] = useState(cliente.email ?? "");
 
   const [trocandoSenha, setTrocandoSenha] = useState(!!pedidoSenha);
   const [senha, setSenha] = useState("");
@@ -149,6 +150,7 @@ function Cabecalho({
         name: nome,
         phone: fone,
         cpf,
+        email,
       });
       setMsg(notify(res, "Cadastro atualizado."));
       if (res.ok) setEditando(false);
@@ -266,6 +268,13 @@ function Cabecalho({
             placeholder="(41) 99999-0000"
             value={fone}
             onChange={(e) => setFone(e.target.value)}
+          />
+          <TextInput
+            label="E-mail (link de nova senha)"
+            type="email"
+            placeholder="cliente@email.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
           />
           <TextInput
             label="CPF (para cobrança online)"

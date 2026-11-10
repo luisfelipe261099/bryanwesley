@@ -7,6 +7,7 @@ import { Reveal } from "@/components/Reveal";
 import { getSession } from "@/lib/auth";
 import { LoginForm } from "./LoginForm";
 import { whatsappEnviando } from "@/lib/whatsapp-status";
+import { emailConfigurado } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,7 @@ export default async function Entrar({
           <LoginForm
             proximo={proximo}
             whatsapp={await whatsappEnviando()}
+            email={emailConfigurado()}
             erroInicial={
               searchParams.erro ? ERROS[searchParams.erro] : undefined
             }

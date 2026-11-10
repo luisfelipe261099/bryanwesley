@@ -57,6 +57,7 @@ import { whatsappEnviando } from "@/lib/whatsapp-status";
 import { formatBRL } from "@/lib/money";
 import { publicBaseUrl } from "@/lib/qr";
 import { gerarLinkDeSenha } from "@/lib/senha-link";
+import { normalizarEmail } from "@/lib/email";
 import { wahaConfigurado, wahaConectar, wahaCodigoDePareamento } from "@/lib/providers/waha";
 import { retomarAtendente } from "@/lib/whatsapp-bot";
 import {
@@ -1041,6 +1042,7 @@ export async function updateClient(input: {
   phone: string;
   /** CPF para a cobrança online (Asaas). Vazio apaga; ausente não mexe. */
   cpf?: string;
+  email?: string;
 }): Promise<Result> {
   try {
     await admin();
@@ -1078,7 +1080,17 @@ export async function updateClient(input: {
       cpf = d || null;
     }
 
-    await db.update(users).set({ name, phone, cpf }).where(eq(users.id, input.userId));
+    let email = atual.email;
+    if (input.email !== undefined) {
+      const e = normalizarEmail(input.email);
+      if (e === false) return { ok: false, error: "E-mail inválido. Confira o endereço." };
+      if (e) {
+        const outro = await db.query.users.findFirst({ where: eq(users.email, e), columns: { id: true } });
+        if (outro && outro.id !== input.userId) return { ok: false, error: "Esse e-mail já está em outra conta." };
+      }
+      email = e;
+    }
+    await db.update(users).set({ name, phone, cpf, email }).where(eq(users.id, input.userId));
     if (phone !== atual.phone) {
       // O número novo vale também para os próximos horários e para os
       // lembretes já na fila: senão eles continuavam indo para o antigo, e
