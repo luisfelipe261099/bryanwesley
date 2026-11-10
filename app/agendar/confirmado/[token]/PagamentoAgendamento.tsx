@@ -27,7 +27,10 @@ export function PagamentoAgendamento({
   daCasa,
   mensalista = false,
   formaPaga = null,
+  pagarAte = null,
 }: {
+  /** Marcado para outro dia: até quando o cliente tem para pagar (HH:MM). */
+  pagarAte?: string | null;
   /** Como foi pago (DINHEIRO, PIX_BALCAO, CARTAO_BALCAO, PIX…). */
   formaPaga?: string | null;
   /** Cliente com plano: no salão é só Pix ou cartão à vista, sem dinheiro. */
@@ -189,7 +192,7 @@ export function PagamentoAgendamento({
           <CreditCard className="h-4 w-4" /> Cartão
         </button>
       </div>
-      {metodo !== "BALCAO" && (
+      {metodo !== "BALCAO" && !(pagarAte && !daCasa) && (
         <button
           type="button"
           onClick={naBarbearia}

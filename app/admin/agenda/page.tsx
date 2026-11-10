@@ -1,3 +1,4 @@
+import { liberarHorariosSemPagamento } from "@/lib/payments";
 // A agenda do dono: a lista dos agendamentos.
 //
 // Esta rota era a tela de CONFIGURAÇÃO (dados da barbearia, regras e
@@ -130,6 +131,7 @@ export default async function AdminAgenda({
   const ultimaPagina = Math.max(1, Math.ceil(total / POR_PAGINA));
   const atual = Math.min(pagina, ultimaPagina);
 
+  await liberarHorariosSemPagamento().catch((e) => console.error("Liberar horários:", e));
   const linhas = await agendaDoPeriodo({
     ...filtroBase,
     recorte,

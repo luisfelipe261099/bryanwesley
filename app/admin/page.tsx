@@ -1,3 +1,4 @@
+import { liberarHorariosSemPagamento } from "@/lib/payments";
 import Link from "next/link";
 import {
   DollarSign,
@@ -61,6 +62,7 @@ export default async function AdminDashboard({
   const dateKey = today;
   const barberFilter = null;
 
+  await liberarHorariosSemPagamento().catch((e) => console.error("Liberar horários:", e));
   const [kpi, agendaDia, semana, equipe, settings, pedidos, chavePush, tutorial, novidadeTurno] = await Promise.all([
     adminOverview(),
     appointmentsOfDay(dateKey, barberFilter),

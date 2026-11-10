@@ -12,7 +12,7 @@
 // A trava é um compare-and-swap em settings.last_dispatch_at: só quem
 // conseguir avançar o carimbo executa; o resto pula.
 // ───────────────────────────────────────────────────────────
-import { cobrarMensalidadesAutomaticas } from "./payments";
+import { cobrarMensalidadesAutomaticas, liberarHorariosSemPagamento } from "./payments";
 import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { notifications, settings } from "@/db/schema";
@@ -245,6 +245,7 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
   // Mensalidades que vencem nos próximos dias: o Pix sai sozinho (uma vez
   // por dia; quem já tem cobrança aberta é pulado).
   await cobrarMensalidadesAutomaticas().catch((e) => console.error("Cobrança automática:", e));
+  await liberarHorariosSemPagamento({ forcar: true }).catch((e) => console.error("Liberar horários:", e));
   // Semana do fixo que não coube: o admin fica sabendo no celular.
   const semVaga = horariosFixos.conflitos.filter((c) => !c.lojaFechada && !c.foraDoPlano);
   if (semVaga.length) await avisarFixoEmConflito(semVaga);

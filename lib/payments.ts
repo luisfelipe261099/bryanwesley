@@ -18,6 +18,7 @@ import {
 } from "@/db/schema";
 import { avisarMensalidade, avisarPagamento, avisarPagamentoDoHorario, avisarPagamentoEmPlanoCancelado } from "./avisos";
 import { cpfValido, soDigitosCpf } from "./cpf";
+import { cancelPendingNotifications } from "./notifications";
 import {
   apagarCobranca,
   cancelarAssinaturaAsaas,
@@ -845,4 +846,75 @@ export async function registrarPagamentoNoBalcao(
   });
   await db.update(appointments).set({ paymentMethod: "BALCAO" }).where(eq(appointments.id, appt.id));
   return { ok: true };
+}
+
+
+// ───────────────────── Agendado para outro dia: paga antes ─────────────────────
+
+/** Minutos que o cliente tem para pagar um horário marcado para outro dia. */
+export const MINUTOS_PARA_PAGAR = 30;
+
+/** O cliente precisa pagar pelo app para garantir este dia? */
+export function exigePagamentoAntecipado(dateKey: string) {
+  return isCobrancaOnline() && dateKey > shopToday();
+}
+
+let ultimaVarredura = 0;
+
+/**
+ * Libera os horários marcados para outro dia que não foram pagos no prazo.
+ * Antes de soltar, confere no Asaas (o aviso pode ter atrasado) e só solta
+ * se a cobrança em aberto sair de verdade — Pix pago na hora H fica.
+ * Barata quando não há nada vencido; roda ao abrir a agenda e ao agendar.
+ */
+export async function liberarHorariosSemPagamento(opts: { forcar?: boolean } = {}) {
+  if (!opts.forcar && Date.now() - ultimaVarredura < 60_000) return 0;
+  ultimaVarredura = Date.now();
+  const vencidos = await db
+    .select()
+    .from(appointments)
+    .where(
+      and(
+        isNotNull(appointments.payBy),
+        lte(appointments.payBy, new Date()),
+        inArray(appointments.status, ["PENDENTE", "CONFIRMADO"])
+      )
+    )
+    .limit(50);
+  let liberados = 0;
+  for (const appt of vencidos) {
+    try {
+      const doHorario = await db.select().from(payments).where(eq(payments.appointmentId, appt.id));
+      let pago = doHorario.some((p) => p.status === "PAGO");
+      let todasSairam = true;
+      for (const p of doHorario.filter((x) => x.status === "PENDENTE")) {
+        if (pago) break;
+        const conferido = await conferirPagamento(p).catch(() => p);
+        if (conferido.status === "PAGO") {
+          pago = true;
+          break;
+        }
+        if (!(await descartarCobranca(conferido).catch(() => false))) todasSairam = false;
+      }
+      if (pago) {
+        await db.update(appointments).set({ payBy: null }).where(eq(appointments.id, appt.id));
+        continue;
+      }
+      if (!todasSairam) continue; // Asaas fora do ar ou já pago: tenta na próxima
+      const [r] = await db
+        .update(appointments)
+        .set({
+          status: "CANCELADO",
+          notes: [appt.notes, "Liberado: não foi pago no prazo."].filter(Boolean).join(" · "),
+        })
+        .where(and(eq(appointments.id, appt.id), eq(appointments.status, appt.status)));
+      if (r.affectedRows === 1) {
+        liberados++;
+        await cancelPendingNotifications(appt.id).catch(() => {});
+      }
+    } catch (e) {
+      console.error("Liberar horário sem pagamento falhou:", appt.id, e);
+    }
+  }
+  return liberados;
 }

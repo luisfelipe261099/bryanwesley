@@ -1,3 +1,4 @@
+import { liberarHorariosSemPagamento } from "@/lib/payments";
 import { aReceber, devendo, rotuloPagamento } from "@/lib/rotulo-pagamento";
 import Link from "next/link";
 import {
@@ -103,6 +104,7 @@ export default async function BarbeiroPanel({
       ? searchParams.dia
       : today;
 
+  await liberarHorariosSemPagamento().catch((e) => console.error("Liberar horários:", e));
   const [agenda, bloqueios, mes, hoje, chavePush, tutorial, pctAtual] = await Promise.all([
     appointmentsOfDay(dateKey, barber.id),
     // Bloqueios do dia (almoço, folga, manutenção): o barbeiro via o

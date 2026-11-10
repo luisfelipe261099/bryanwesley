@@ -184,8 +184,20 @@ export default async function Confirmado({
             </div>
           </div>
 
+          {!cancelado && appt.kind === "AVULSO" && appt.totalCents > 0 && appt.payBy && pagamento?.status !== "PAGO" && (
+            <p className="mt-5 rounded-2xl border-2 border-amber-400/50 bg-amber-400/10 p-4 text-left text-sm text-amber-100">
+              <b>Pague até {formatShopTime(appt.payBy)}</b> para garantir o horário. Sem o pagamento, ele é
+              liberado para outra pessoa.
+            </p>
+          )}
+          {cancelado && appt.payBy && (appt.notes ?? "").includes("não foi pago no prazo") && (
+            <p className="mt-5 rounded-2xl border border-red-400/40 bg-red-500/10 p-4 text-left text-sm text-red-100">
+              Este horário foi liberado porque o pagamento não foi feito no prazo. Se ainda quiser, agende de novo.
+            </p>
+          )}
           {!cancelado && appt.kind === "AVULSO" && appt.totalCents > 0 && (
             <PagamentoAgendamento
+              pagarAte={appt.payBy && pagamento?.status !== "PAGO" ? formatShopTime(appt.payBy) : null}
               token={params.token}
               totalCents={appt.totalCents}
               metodo={appt.paymentMethod ?? null}

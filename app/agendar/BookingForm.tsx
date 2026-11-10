@@ -53,7 +53,10 @@ export function BookingForm({
   regras = [],
   cobrancaOnline = false,
   noiteMensalista = null,
+  hoje = null,
 }: {
+  /** Dia de hoje na barbearia: para outro dia, o cliente paga antes. */
+  hoje?: string | null;
   /** Minuto do dia a partir do qual o plano não cobre (mensalista à noite). */
   noiteMensalista?: number | null;
   /** Pix e cartão pelo Asaas estão ligados. */
@@ -202,6 +205,11 @@ export function BookingForm({
 
   // Passo do pagamento: só quando há o que pagar (fora do plano).
   const cobra = chosen.length > 0 && totalCents > 0;
+  // Para outro dia, o horário só fica garantido com o pagamento pelo app.
+  const pagaAntes = !daCasa && cobrancaOnline && !!dateKey && !!hoje && dateKey > hoje;
+  useEffect(() => {
+    if (pagaAntes && pagamento === "BALCAO") setPagamento(null);
+  }, [pagaAntes, pagamento]);
   const online = pagamento === "PIX" || pagamento === "CARTAO";
   // O CPF salvo vale só para o próprio cliente logado, com o WhatsApp dele.
   const cpfSalvoServe = !daCasa && !!viewer?.temCpf && !outroFoneDoViewer();
@@ -534,7 +542,13 @@ export function BookingForm({
             <StepTitle n={4} title="Pagamento" />
             {cobrancaOnline ? (
               <>
-                <div className="mt-4 grid gap-2.5 sm:grid-cols-3">
+                {pagaAntes && (
+                  <p className="mt-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3.5 py-2.5 text-sm text-amber-100">
+                    Para agendar para outro dia, o pagamento é feito agora, pelo app: o horário fica garantido
+                    quando o pagamento cai (você tem 30 minutos). Para hoje, dá para pagar na barbearia.
+                  </p>
+                )}
+                <div className={`mt-4 grid gap-2.5 ${pagaAntes ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
                   {(
                     [
                       { v: "PIX", rotulo: "Pix", desc: "Paga agora pelo app", Icon: QrCode },
@@ -547,7 +561,7 @@ export function BookingForm({
                         Icon: Banknote,
                       },
                     ] as const
-                  ).map(({ v, rotulo, desc, Icon }) => {
+                  ).filter(({ v }) => !(pagaAntes && v === "BALCAO")).map(({ v, rotulo, desc, Icon }) => {
                     const on = pagamento === v;
                     return (
                       <button

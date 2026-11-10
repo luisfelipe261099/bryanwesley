@@ -277,6 +277,9 @@ export const appointments = mysqlTable(
     // acabado). Cancelado, o extra volta para o saldo sozinho.
     extraCredit: boolean("extra_credit").notNull().default(false),
     checkedInAt: ts("checked_in_at"),
+    // Agendado pelo site para outro dia: sem pagamento até aqui, o horário
+    // é liberado (para hoje, pode pagar na barbearia e fica null).
+    payBy: ts("pay_by"),
     // Horário fixo que gerou este agendamento (null para avulso). Com o
     // vínculo, uma ocorrência cancelada continua cancelada: a próxima
     // materialização vê que a data já foi tratada e não a recria.

@@ -13,7 +13,14 @@ import type { Slot } from "@/lib/schedule";
 import { and, eq, gt, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { appointments, users } from "@/db/schema";
-import { chargeAppointment, isCobrancaOnline } from "@/lib/payments";
+import {
+  chargeAppointment,
+  exigePagamentoAntecipado,
+  isCobrancaOnline,
+  liberarHorariosSemPagamento,
+  MINUTOS_PARA_PAGAR,
+} from "@/lib/payments";
+import { cancelPendingNotifications } from "@/lib/notifications";
 import { cpfValido } from "@/lib/cpf";
 
 /** "2026-10-47" passa na máscara e virava outro dia lá na frente. */
@@ -48,6 +55,8 @@ export async function fetchAvailability(params: {
   // Equipe logada está fazendo encaixe: enxerga também os horários que a
   // antecedência mínima esconde do cliente.
   if (!diaDeVerdade(params.dateKey)) return { slots: [], closed: true };
+  // Horário de outro dia que não foi pago no prazo volta a aparecer livre.
+  await liberarHorariosSemPagamento().catch((e) => console.error("Liberar horários:", e));
   const session = await getSession();
   const daCasa = session?.role === "ADMIN" || session?.role === "BARBER";
 
@@ -89,6 +98,8 @@ const bookingSchema = z.object({
   cpf: z.string().trim().max(20).optional(),
 });
 
+const AVISO_ANTECIPADO = `Para agendar para outro dia, pague agora com Pix ou cartão: o horário fica garantido com o pagamento (prazo de ${MINUTOS_PARA_PAGAR} minutos). Pagar na barbearia vale só para hoje.`;
+
 export type BookingResult =
   | { ok: true; code: string; id: number; token: string; avisoPagamento?: string }
   | { ok: false; error: string; precisaCpf?: boolean };
@@ -103,6 +114,14 @@ export async function submitBooking(
 
   const session = await getSession();
   const daCasa = session?.role === "ADMIN" || session?.role === "BARBER";
+
+  // Para outro dia, quem marca pelo site paga antes (Pix ou cartão): o
+  // horário só fica garantido com o pagamento. Para hoje, pode pagar na
+  // barbearia.
+  const antecipado = !daCasa && exigePagamentoAntecipado(parsed.data.dateKey);
+  if (antecipado && parsed.data.pagamento === "BALCAO") {
+    return { ok: false, error: AVISO_ANTECIPADO };
+  }
 
   // Pix ou cartão: o CPF é conferido antes de reservar, para o horário não
   // ficar marcado com uma cobrança que não dá para gerar.
@@ -182,6 +201,7 @@ export async function submitBooking(
   }
 
   try {
+    await liberarHorariosSemPagamento().catch((e) => console.error("Liberar horários:", e));
     const appt = await createBooking({
       ...parsed.data,
       userId: session?.role === "CLIENT" ? session.id : null,
@@ -192,10 +212,20 @@ export async function submitBooking(
     });
     // Só cobra o que não é do plano. Na barbearia: fica anotado e pronto.
     let avisoPagamento: string | undefined;
+    if (antecipado && appt.totalCents > 0 && !online) {
+      // A tela achou que o plano cobria, mas há valor a pagar: sem Pix ou
+      // cartão escolhido, o horário de outro dia não fica.
+      await db.update(appointments).set({ status: "CANCELADO" }).where(eq(appointments.id, appt.id));
+      await cancelPendingNotifications(appt.id).catch(() => {});
+      return { ok: false, error: AVISO_ANTECIPADO };
+    }
     if (appt.totalCents > 0 && parsed.data.pagamento) {
       await db
         .update(appointments)
-        .set({ paymentMethod: online ? parsed.data.pagamento : "BALCAO" })
+        .set({
+          paymentMethod: online ? parsed.data.pagamento : "BALCAO",
+          payBy: antecipado ? new Date(Date.now() + MINUTOS_PARA_PAGAR * 60_000) : null,
+        })
         .where(eq(appointments.id, appt.id));
       if (online) {
         // Falhou (Asaas fora do ar)? O horário fica e a tela da

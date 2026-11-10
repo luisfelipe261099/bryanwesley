@@ -69,8 +69,16 @@ export async function pagarNaBarbearia(token: string): Promise<{ ok: boolean; er
   if (!appt) return { ok: false, error: "Agendamento não encontrado." };
   const p = await pagamentoDoAgendamento(appt.id);
   if (p?.status === "PAGO") return { ok: false, error: "Esse horário já está pago." };
+  // Marcado para outro dia: só fica com o pagamento pelo app.
+  if (appt.payBy) {
+    const session = await getSession();
+    if (session?.role !== "ADMIN" && session?.role !== "BARBER") {
+      return { ok: false, error: "Para outro dia, o horário fica garantido com o pagamento pelo app (Pix ou cartão)." };
+    }
+  }
   await cancelarCobrancasDoAgendamento(appt.id);
-  await db.update(appointments).set({ paymentMethod: "BALCAO" }).where(eq(appointments.id, appt.id));
+  // A equipe liberou pagar na hora: o prazo deixa de valer.
+  await db.update(appointments).set({ paymentMethod: "BALCAO", payBy: null }).where(eq(appointments.id, appt.id));
   revalidatePath(`/agendar/confirmado/${token}`);
   revalidatePath("/barbeiro");
   revalidatePath("/admin/agenda");

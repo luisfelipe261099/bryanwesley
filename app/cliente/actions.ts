@@ -11,6 +11,7 @@ import {
   plans,
   planRequests,
   planServices,
+  payments,
 } from "@/db/schema";
 import { cookies } from "next/headers";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
@@ -29,6 +30,7 @@ import {
   cancelarCobrancasDoPlano,
   chargeSubscription,
   encerrarCartaoRecorrente,
+  exigePagamentoAntecipado,
   isCobrancaOnline,
 } from "@/lib/payments";
 import { materializeRecurring, cancelFutureOccurrences, ocorrenciasFuturas } from "@/lib/recurring";
@@ -423,6 +425,21 @@ export async function rescheduleMyAppointment(input: {
       ok: false,
       error: "Faltam menos de 2h. Fale com a barbearia pelo WhatsApp.",
     };
+  }
+
+  // Não pago e indo para outro dia: vale a mesma regra de agendar — paga
+  // antes pelo app. Senão marcava hoje "na barbearia" e empurrava.
+  if (session.role !== "ADMIN" && appt.kind === "AVULSO" && appt.totalCents > 0 && exigePagamentoAntecipado(input.dateKey)) {
+    const pago = await db.query.payments.findFirst({
+      where: and(eq(payments.appointmentId, appt.id), eq(payments.status, "PAGO")),
+      columns: { id: true },
+    });
+    if (!pago) {
+      return {
+        ok: false,
+        error: "Para levar o horário para outro dia, pague antes pelo app (Pix ou cartão), na tela do agendamento.",
+      };
+    }
   }
 
   try {

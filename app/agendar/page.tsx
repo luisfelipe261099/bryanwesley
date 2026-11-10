@@ -15,6 +15,7 @@ import { atendimentosDoPlanoNoMes, saldoDeExtras, usoDoPlanoNoMes } from "@/lib/
 import { formatPhone, normalizePhone } from "@/lib/phone";
 import { BookingForm } from "./BookingForm";
 import { isCobrancaOnline } from "@/lib/payments";
+import { shopToday } from "@/lib/time";
 
 // A agenda muda a todo instante — nada de cache.
 export const dynamic = "force-dynamic";
@@ -154,6 +155,7 @@ export default async function Agendar({
             extrasSaldo={extrasSaldo}
             barberPadrao={daCasa ? session?.barberId ?? null : null}
             daCasa={daCasa}
+            hoje={shopToday()}
             viewer={viewer}
             prefill={prefill}
             minAdvanceHours={settings.minAdvanceHours}
