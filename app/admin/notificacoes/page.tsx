@@ -120,7 +120,8 @@ export default async function AdminNotificacoes() {
           kind: n.kind,
           channel: n.channel,
           status: n.status,
-          body: n.body,
+          // O código de nova senha não fica à vista no painel.
+          body: n.body.replace(/(nova senha é )\d{6}/, "$1••••••"),
           error: n.error,
           attempts: n.attempts,
           quando: `${labelDayMonth(

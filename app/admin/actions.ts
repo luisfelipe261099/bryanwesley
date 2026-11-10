@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, gt, inArray, like, lt, sql as rawSql } from "drizzle-orm";
+import { and, eq, gt, inArray, like, lt, ne, sql as rawSql } from "drizzle-orm";
 import { z } from "@/lib/zod-pt";
 import { db } from "@/db/client";
 import {
@@ -46,8 +46,7 @@ import {
 } from "@/lib/notifications";
 import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
 import { claimDispatchSlot, runDispatch, despacharPush } from "@/lib/dispatch";
-import { chargeSubscription, encerrarCartaoRecorrente } from "@/lib/payments";
-import { saldoDeExtras } from "@/lib/appointments";
+import { cancelarCobrancasDoPlano, chargeSubscription, encerrarCartaoRecorrente } from "@/lib/payments";
 import { cpfValido, soDigitosCpf } from "@/lib/cpf";
 import { shopTimeToUtc, parseDateKey, utcToShopParts } from "@/lib/time";
 import { normalizePhone, isValidPhone, nextPlaceholderPhone, isPlaceholderPhone } from "@/lib/phone";
@@ -1225,9 +1224,11 @@ export async function subscribeClient(input: {
     // apagava meses já pagos do anual, ou dava meses de graça. Pagou o
     // novo ciclo agora? É o "Registrar renovação" que estende.
     const mantemVencimento = !!tinhaPlano && tinhaPlano.renewsAt.getTime() > Date.now();
-    // A assinatura antiga sai: o cartão recorrente dela também (no plano
-    // novo o membro escolhe de novo como pagar).
-    await encerrarCartaoRecorrente(input.userId);
+    // A assinatura antiga sai: o cartão recorrente e as mensalidades em
+    // aberto dela também (no plano novo o membro escolhe como pagar).
+    const parou = await encerrarCartaoRecorrente(input.userId);
+    if (!parou.ok) return { ok: false, error: parou.error };
+    await cancelarCobrancasDoPlano(input.userId);
     const renewsAt = mantemVencimento ? tinhaPlano!.renewsAt : nextRenewal(new Date(), input.cycle);
 
     // Encerra o que estiver em aberto — ativa OU vencida. Só a ativa era
@@ -1283,6 +1284,9 @@ export async function renewSubscription(userId: number): Promise<Result> {
       orderBy: (s, { desc }) => [desc(s.startedAt)],
     });
     if (!current) return { ok: false, error: "Esse cliente não tem assinatura." };
+    // Pago no balcão: a mensalidade em aberto (Pix automático) sai, senão o
+    // membro pagaria de novo pelo app.
+    await cancelarCobrancasDoPlano(userId);
     await db
       .update(subscriptions)
       .set({
@@ -1357,8 +1361,12 @@ export async function cancelSubscription(userId: number): Promise<Result> {
     if (alvos.length === 0) {
       return { ok: false, error: "Esse cliente não tem plano em aberto." };
     }
-    // Cartão recorrente: o Asaas para de cobrar.
-    await encerrarCartaoRecorrente(userId);
+    // Cartão recorrente: o Asaas para de cobrar — sem confirmação, não
+    // cancela (senão o cartão seguiria sendo cobrado). Mensalidade em
+    // aberto também sai.
+    const parou = await encerrarCartaoRecorrente(userId);
+    if (!parou.ok) return { ok: false, error: parou.error };
+    await cancelarCobrancasDoPlano(userId);
     await db
       .update(subscriptions)
       .set({ status: "CANCELADA", canceledAt: new Date() })
@@ -1932,13 +1940,23 @@ export async function ajustarExtras(userId: number, quantidade: number): Promise
     }
     const u = await db.query.users.findFirst({ where: eq(users.id, userId) });
     if (!u) return { ok: false, error: "Cliente não encontrado." };
-    const saldo = await saldoDeExtras(userId);
-    const usados = u.extraVisits - saldo;
-    const novo = Math.max(usados, u.extraVisits + quantidade);
-    if (novo === u.extraVisits) {
+    // Usados de verdade (contagem crua): o saldo mostrado nunca fica
+    // negativo e escondia um uso a mais.
+    const [{ n }] = await db
+      .select({ n: rawSql<number>`count(*)` })
+      .from(appointments)
+      .where(and(eq(appointments.clientUserId, userId), eq(appointments.extraCredit, true), ne(appointments.status, "CANCELADO")));
+    const usados = Number(n);
+    // Soma no banco (dois cliques ao mesmo tempo não perdem um) e, ao
+    // tirar, nunca abaixo do que já foi usado.
+    const [upd] = await db
+      .update(users)
+      .set({ extraVisits: rawSql`greatest(${users.extraVisits} + ${quantidade}, ${usados})` })
+      .where(and(eq(users.id, userId), quantidade < 0 ? rawSql`${users.extraVisits} > ${usados}` : undefined));
+    if (upd.affectedRows === 0) {
       return { ok: false, error: "Não há extras sobrando para tirar." };
     }
-    await db.update(users).set({ extraVisits: novo }).where(eq(users.id, userId));
+    const novo = (await db.query.users.findFirst({ where: eq(users.id, userId), columns: { extraVisits: true } }))?.extraVisits ?? 0;
     revalidatePath("/admin/clube");
     revalidatePath(`/admin/clientes/${userId}`);
     revalidatePath("/cliente");

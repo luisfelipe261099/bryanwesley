@@ -51,6 +51,10 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ ok: true });
   }
+  if (assinaturaAsaas && paymentId && evento === "PAYMENT_DELETED") {
+    await cancelPayment({ orderNsu, paymentId });
+    return NextResponse.json({ ok: true });
+  }
   // Cobrança sem a nossa referência (feita direto no painel do Asaas).
   if (!orderNsu) return NextResponse.json({ ok: true, ignorado: "sem referência" });
 

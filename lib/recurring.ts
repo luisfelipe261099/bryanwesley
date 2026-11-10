@@ -15,7 +15,7 @@ import {
   subscriptions,
   users,
 } from "@/db/schema";
-import { createBooking, BookingError } from "./appointments";
+import { createBooking, BookingError, ForaDoPlanoError } from "./appointments";
 import { cancelPendingNotifications } from "./notifications";
 import { getSettings } from "./schedule";
 import {
@@ -70,7 +70,7 @@ export function occurrencesFor(
 export type MaterializeReport = {
   criados: number;
   jaExistiam: number;
-  conflitos: { dateKey: string; motivo: string; lojaFechada?: boolean; slotId?: number; userId?: number }[];
+  conflitos: { dateKey: string; motivo: string; lojaFechada?: boolean; foraDoPlano?: boolean; slotId?: number; userId?: number }[];
 };
 
 /**
@@ -193,6 +193,8 @@ export async function materializeRecurring(
           dateKey,
           motivo:
             e instanceof BookingError ? e.message : "Falha ao criar o horário",
+          // Regra do plano, não falta de vaga: o admin não precisa de aviso.
+          foraDoPlano: e instanceof ForaDoPlanoError,
           slotId: slot.id,
           userId: slot.userId,
         });

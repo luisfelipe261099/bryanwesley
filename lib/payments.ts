@@ -4,7 +4,7 @@
 // baixa só acontece depois que a própria API do Asaas confirma.
 // Sem ASAAS_API_KEY o módulo fica inerte e a ativação segue manual.
 // ───────────────────────────────────────────────────────────
-import { and, desc, eq, inArray, isNotNull, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, sql as rawSql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointmentServices,
@@ -16,7 +16,7 @@ import {
   users,
   type Payment,
 } from "@/db/schema";
-import { avisarMensalidade, avisarPagamento, avisarPagamentoDoHorario } from "./avisos";
+import { avisarMensalidade, avisarPagamento, avisarPagamentoDoHorario, avisarPagamentoEmPlanoCancelado } from "./avisos";
 import { cpfValido, soDigitosCpf } from "./cpf";
 import {
   apagarCobranca,
@@ -66,6 +66,16 @@ export async function chargeSubscription(
   } = {}
 ): Promise<ChargeResult> {
   const tipo = opts.tipo ?? "PIX";
+  // Quem estava no cartão automático e vai pagar no Pix: o cartão para de
+  // ser cobrado antes, senão pagaria duas vezes o mesmo mês.
+  const comCartao = await db.query.subscriptions.findFirst({
+    where: and(eq(subscriptions.userId, userId), isNotNull(subscriptions.asaasSubscriptionId)),
+    columns: { id: true },
+  });
+  if (comCartao) {
+    const parou = await encerrarCartaoRecorrente(userId);
+    if (!parou.ok) return { ok: false, error: parou.error };
+  }
   if (!isCobrancaOnline()) {
     return { ok: false, error: "Cobrança online não configurada (ASAAS_API_KEY ausente)." };
   }
@@ -218,9 +228,11 @@ export async function settlePayment(input: { orderNsu: string; paymentId?: strin
   }
   const receiptUrl = reciboConfiavel(c.transactionReceiptUrl);
 
-  // Condicional ao PENDENTE: o provedor pode entregar o mesmo webhook duas
-  // vezes ao mesmo tempo; só a chamada que der a baixa aplica o efeito,
-  // senão a assinatura seria estendida dois ciclos.
+  // Condicional ao estado lido: o provedor pode entregar o mesmo webhook
+  // duas vezes ao mesmo tempo; só a chamada que der a baixa aplica o
+  // efeito, senão a assinatura seria estendida dois ciclos. CANCELADO
+  // também dá baixa: o cliente pagou o Pix e logo trocou de forma — a API
+  // acabou de confirmar que o dinheiro entrou, então ele não pode sumir.
   const [upd] = await db
     .update(payments)
     .set({
@@ -229,14 +241,18 @@ export async function settlePayment(input: { orderNsu: string; paymentId?: strin
       transactionNsu: input.paymentId,
       receiptUrl,
     })
-    .where(and(eq(payments.id, payment.id), eq(payments.status, "PENDENTE")));
+    .where(and(eq(payments.id, payment.id), eq(payments.status, payment.status)));
   if (upd.affectedRows === 0) return { ok: true as const, already: true };
 
   if (payment.kind === "ASSINATURA" && payment.subscriptionId) {
     const sub = await db.query.subscriptions.findFirst({
       where: eq(subscriptions.id, payment.subscriptionId),
     });
-    if (sub) {
+    if (sub && sub.status === "CANCELADA") {
+      // Plano já encerrado (cancelado ou trocado por outro): o pagamento
+      // fica registrado, mas não ressuscita o plano velho. O admin decide.
+      await avisarPagamentoEmPlanoCancelado(sub.userId, Math.round(c.value * 100));
+    } else if (sub) {
       // Vale o que foi cobrado, não o que está na assinatura agora: quem
       // pagou 12 meses tem que ganhar 12 meses, mesmo que a linha tenha
       // sido mexida no meio do caminho.
@@ -285,7 +301,13 @@ export async function settlePayment(input: { orderNsu: string; paymentId?: strin
 
 /** Cobrança apagada no Asaas: some da lista de pendentes. */
 export async function cancelPayment(input: { orderNsu: string; paymentId?: string }) {
-  const payment = await db.query.payments.findFirst({ where: eq(payments.orderNsu, input.orderNsu) });
+  // Cobrança da assinatura do cartão: a referência é a da assinatura, então
+  // o registro é achado pelo id da cobrança no Asaas.
+  const payment =
+    (await db.query.payments.findFirst({ where: eq(payments.orderNsu, input.orderNsu) })) ??
+    (input.paymentId
+      ? await db.query.payments.findFirst({ where: eq(payments.transactionNsu, input.paymentId) })
+      : undefined);
   if (!payment || payment.status !== "PENDENTE") return;
   if (payment.transactionNsu && payment.transactionNsu !== input.paymentId) return;
   await db
@@ -413,7 +435,13 @@ export async function chargeAppointment(
   await db.update(appointments).set({ paymentMethod: metodo }).where(eq(appointments.id, appt.id));
 
   // A troca de forma deixa a fatura anterior para trás: apaga lá também.
-  for (const velha of atuais.filter((p) => p.status === "PENDENTE")) {
+  // Relido depois de gravar: dois toques ao mesmo tempo (duas abas) criam
+  // duas faturas, e só a mais nova fica.
+  const outras = await db
+    .select()
+    .from(payments)
+    .where(and(eq(payments.appointmentId, appt.id), eq(payments.status, "PENDENTE")));
+  for (const velha of outras.filter((p) => p.orderNsu !== orderNsu)) {
     await descartarCobranca(velha);
   }
 
@@ -421,19 +449,40 @@ export async function chargeAppointment(
 }
 
 /** Apaga no Asaas uma cobrança pendente e a marca como cancelada aqui. */
-async function descartarCobranca(p: Payment) {
-  if (p.status !== "PENDENTE") return;
+async function descartarCobranca(p: Payment): Promise<boolean> {
+  if (p.status !== "PENDENTE") return false;
   if (p.transactionNsu) {
     const r = await apagarCobranca(p.transactionNsu);
-    // Paga no meio do caminho: não cancela, deixa a baixa acontecer.
+    // O Asaas recusa apagar cobrança já paga (e pode estar fora do ar):
+    // aí ela fica pendente aqui, e a baixa acontece quando o aviso chegar.
     if (!r.ok && r.status !== 404) {
       console.error("Asaas: não deu para apagar a cobrança", p.orderNsu, r.error);
+      return false;
     }
   }
   await db
     .update(payments)
     .set({ status: "CANCELADO" })
     .where(and(eq(payments.id, p.id), eq(payments.status, "PENDENTE")));
+  return true;
+}
+
+/**
+ * Plano encerrado, trocado ou pago no balcão: as mensalidades em aberto
+ * saem (senão o membro pagaria a fatura velha e o plano antigo voltaria).
+ */
+export async function cancelarCobrancasDoPlano(userId: number) {
+  const pendentes = await db
+    .select()
+    .from(payments)
+    .where(and(eq(payments.userId, userId), eq(payments.kind, "ASSINATURA"), eq(payments.status, "PENDENTE")));
+  for (const p of pendentes) {
+    try {
+      await descartarCobranca(p);
+    } catch (e) {
+      console.error("Cancelar mensalidade em aberto falhou:", e);
+    }
+  }
 }
 
 /** Horário cancelado ou trocado para "na barbearia": a fatura aberta sai. */
@@ -511,7 +560,21 @@ export async function cobrarMensalidadesAutomaticas(opts: { forcar?: boolean; li
     .select({ sub: subscriptions, user: users })
     .from(subscriptions)
     .innerJoin(users, eq(users.id, subscriptions.userId))
-    .where(and(inArray(subscriptions.status, ["ATIVA", "INADIMPLENTE"]), lte(subscriptions.renewsAt, ate)))
+    .where(
+      and(
+        inArray(subscriptions.status, ["ATIVA", "INADIMPLENTE"]),
+        lte(subscriptions.renewsAt, ate),
+        // Vencido há mais de 10 dias não é mais cobrado sozinho: virou
+        // caso do balcão (senão o ex-membro recebia Pix para sempre).
+        gte(subscriptions.renewsAt, new Date(Date.now() - 10 * 86400_000)),
+        isNull(subscriptions.canceledAt),
+        isNull(subscriptions.asaasSubscriptionId),
+        // Pedido de plano abandonado (nunca pagou) não é mensalista.
+        rawSql`exists (select 1 from ${payments} where ${payments.subscriptionId} = ${subscriptions.id} and ${payments.status} = 'PAGO')`,
+        rawSql`not exists (select 1 from ${payments} where ${payments.subscriptionId} = ${subscriptions.id} and ${payments.kind} = 'ASSINATURA' and ${payments.status} = 'PENDENTE')`
+      )
+    )
+    .orderBy(subscriptions.renewsAt)
     .limit(opts.limite ?? 40);
 
   for (const { sub, user } of candidatas) {
@@ -610,7 +673,8 @@ export async function assinarNoCartao(
   // Troca de plano ou de ciclo: a assinatura antiga do cartão sai antes,
   // para o cartão não ser cobrado duas vezes.
   if (sub.asaasSubscriptionId) {
-    await cancelarAssinaturaAsaas(sub.asaasSubscriptionId).catch(() => null);
+    const parou = await encerrarCartaoRecorrente(userId);
+    if (!parou.ok) return { ok: false, error: parou.error };
   }
 
   // Primeira cobrança: hoje para quem está entrando ou vencido; no
@@ -674,40 +738,62 @@ export async function settleCobrancaRecorrente(input: { paymentId: string; asaas
   if (!sub) return { ok: false as const, error: "Assinatura do Asaas desconhecida." };
   let linha = await db.query.payments.findFirst({ where: eq(payments.transactionNsu, input.paymentId) });
   if (!linha) {
-    const plan = await db.query.plans.findFirst({ where: eq(plans.id, sub.planId) });
-    if (!plan) return { ok: false as const, error: "Plano não encontrado." };
-    const meses = sub.cycle === "ANUAL" ? 12 : 1;
-    const orderNsu = nsu();
-    await db.insert(payments).values({
-      orderNsu,
-      userId: sub.userId,
-      subscriptionId: sub.id,
-      kind: "ASSINATURA",
-      cycle: sub.cycle,
-      planId: plan.id,
-      amountCents: (sub.cycle === "ANUAL" ? plan.annualPriceCents : plan.priceCents) * meses,
-      description: `${plan.name} · ${sub.cycle.toLowerCase()} · cartão automático`,
-      provider: "asaas",
-      transactionNsu: input.paymentId,
-      slug: "CREDIT_CARD_RECORRENTE",
-    });
+    // O valor é o que o Asaas cobrou do cartão (a assinatura guarda o preço
+    // de quando foi criada): o preço do plano pode ter mudado depois.
+    const c = await consultarCobranca(input.paymentId);
+    if (!c.ok) return { ok: false as const, error: c.error, temporario: true };
+    // Referência fixa por cobrança: dois avisos ao mesmo tempo esbarram no
+    // índice único em vez de criar dois registros (e dois ciclos).
+    const orderNsu = `AS-${input.paymentId}`.slice(0, 40);
+    await db
+      .insert(payments)
+      .values({
+        orderNsu,
+        userId: sub.userId,
+        subscriptionId: sub.id,
+        kind: "ASSINATURA",
+        cycle: sub.cycle,
+        planId: sub.planId,
+        amountCents: Math.round(c.data.value * 100),
+        description: `Mensalidade · ${sub.cycle.toLowerCase()} · cartão automático`,
+        provider: "asaas",
+        transactionNsu: input.paymentId,
+        slug: "CREDIT_CARD_RECORRENTE",
+      })
+      .onDuplicateKeyUpdate({ set: { orderNsu: rawSql`${payments.orderNsu}` } });
     linha = await db.query.payments.findFirst({ where: eq(payments.orderNsu, orderNsu) });
   }
   return settlePayment({ orderNsu: linha!.orderNsu, paymentId: input.paymentId });
 }
 
-/** Plano cancelado: o cartão para de ser cobrado no Asaas. */
-export async function encerrarCartaoRecorrente(userId: number) {
+/**
+ * Plano cancelado: o cartão para de ser cobrado no Asaas. Se o Asaas não
+ * confirmar (fora do ar), devolve erro — quem chama não encerra o plano
+ * sem isso, senão o cartão seguiria sendo cobrado.
+ */
+export async function encerrarCartaoRecorrente(userId: number): Promise<{ ok: true } | { ok: false; error: string }> {
   const subs = await db
     .select()
     .from(subscriptions)
     .where(and(eq(subscriptions.userId, userId), isNotNull(subscriptions.asaasSubscriptionId)));
   for (const s of subs) {
     const r = await cancelarAssinaturaAsaas(s.asaasSubscriptionId!).catch(() => null);
-    if (r && !r.ok && r.status !== 404) {
-      console.error("Asaas: não deu para encerrar a assinatura do cartão", s.asaasSubscriptionId, r.error);
-      continue;
+    if (!r || (!r.ok && r.status !== 404)) {
+      console.error("Asaas: não deu para encerrar a assinatura do cartão", s.asaasSubscriptionId, r && !r.ok ? r.error : "sem resposta");
+      return {
+        ok: false,
+        error: "Não deu para parar a cobrança do cartão no Asaas agora. Tente de novo em instantes.",
+      };
     }
     await db.update(subscriptions).set({ asaasSubscriptionId: null }).where(eq(subscriptions.id, s.id));
+    // A primeira fatura do cartão que ficou em aberto sai daqui também.
+    const abertas = await db
+      .select()
+      .from(payments)
+      .where(and(eq(payments.subscriptionId, s.id), eq(payments.status, "PENDENTE"), eq(payments.slug, "CREDIT_CARD_RECORRENTE")));
+    for (const p of abertas) {
+      await db.update(payments).set({ status: "CANCELADO" }).where(and(eq(payments.id, p.id), eq(payments.status, "PENDENTE")));
+    }
   }
+  return { ok: true };
 }

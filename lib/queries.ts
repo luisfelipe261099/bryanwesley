@@ -6,7 +6,7 @@
 // joins explícitos ou uma segunda consulta por lote — portável.
 // ───────────────────────────────────────────────────────────
 import {
-  and, asc, desc, eq, gte, isNull, like, lt, or, inArray, sql, sum, count,
+  and, asc, desc, eq, gt, gte, isNull, like, lt, or, inArray, sql, sum, count,
 } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
@@ -156,7 +156,7 @@ export async function attachDetails(
       ? db
           .select({ userId: subscriptions.userId })
           .from(subscriptions)
-          .where(and(inArray(subscriptions.userId, clientes), eq(subscriptions.status, "ATIVA")))
+          .where(and(inArray(subscriptions.userId, clientes), eq(subscriptions.status, "ATIVA"), gt(subscriptions.renewsAt, new Date())))
       : Promise.resolve([] as { userId: number }[]),
   ]);
   const mensalistas = new Set(ativos.map((a) => a.userId));

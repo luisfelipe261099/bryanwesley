@@ -74,7 +74,7 @@ function dataCurta(d: Date) {
 export default async function ClienteDashboard({
   searchParams,
 }: {
-  searchParams: { assinatura?: string; pagamento?: string; tutorial?: string };
+  searchParams: { assinatura?: string; pagamento?: string; tutorial?: string; senha?: string };
 }) {
   const session = await requireRole(["CLIENT", "ADMIN"]);
 
@@ -217,6 +217,11 @@ export default async function ClienteDashboard({
           forcar={searchParams.tutorial === "1"}
         />
 
+        {searchParams.senha === "nova" && (
+          <div className="mt-6 rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-4 text-sm text-emerald-100">
+            Senha nova salva. Da próxima vez, entre com ela.
+          </div>
+        )}
         {searchParams.assinatura === "pedida" && (
           <Reveal delay={0.02}>
             <div className="mt-6 flex items-start gap-3 rounded-2xl border border-neon/30 bg-neon/[0.07] px-4 py-4 text-sm text-neon">

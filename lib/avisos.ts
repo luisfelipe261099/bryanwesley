@@ -295,6 +295,26 @@ export async function avisarPagamento(p: { userId: number; planId: number }): Pr
   }
 }
 
+/** Pagamento caiu num plano já cancelado: o admin decide (reativar ou estornar). */
+export async function avisarPagamentoEmPlanoCancelado(userId: number, valorCents: number): Promise<ResultadoPush> {
+  try {
+    const u = await db.query.users.findFirst({ where: eq(users.id, userId) });
+    const valor = (valorCents / 100).toFixed(2).replace(".", ",");
+    return await enviarPush(
+      await idsDosAdmins(),
+      {
+        titulo: "Pagamento de plano cancelado",
+        corpo: `${u?.name ?? "Um cliente"} pagou R$ ${valor} de um plano que estava cancelado. Reative o plano ou estorne no Asaas.`,
+        url: "/admin/clube",
+      },
+      { prazoMs: PRAZO_NA_ACAO_MS }
+    );
+  } catch (e) {
+    console.error("Aviso de pagamento em plano cancelado falhou:", e);
+    return { ...ZERO };
+  }
+}
+
 /** A mensalidade foi gerada (Pix): o membro paga pelo app antes de vencer. */
 export async function avisarMensalidade(userId: number, valorCents: number, vencimento: string): Promise<ResultadoPush> {
   try {

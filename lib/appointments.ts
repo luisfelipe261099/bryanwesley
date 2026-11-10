@@ -66,6 +66,18 @@ export class BookingError extends Error {
   }
 }
 
+/**
+ * Semana do horário fixo que o plano não cobre (limite do mês atingido ou
+ * horário de noite): não é reservada — nem gasta extra do membro, nem sai
+ * cobrada sem ele saber.
+ */
+export class ForaDoPlanoError extends BookingError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ForaDoPlanoError";
+  }
+}
+
 export type CreateBookingInput = {
   serviceIds: number[];
   dateKey: string;
@@ -179,6 +191,9 @@ export async function atendimentosDoPlanoNoMes(userId: number, dateKey: string, 
         eq(appointments.clientUserId, userId),
         eq(appointmentServices.priceCents, 0),
         eq(appointments.extraCredit, false),
+        // Só serviço do plano conta: um serviço de preço zero fora do plano
+        // não pode gastar um dos atendimentos do mês.
+        rawSql`${appointmentServices.serviceId} in (select ps.service_id from plan_services ps join subscriptions s on s.plan_id = ps.plan_id where s.user_id = ${userId} and s.status = 'ATIVA')`,
         ne(appointments.status, "CANCELADO"),
         gte(appointments.startsAt, inicio),
         lt(appointments.startsAt, fim),
@@ -186,6 +201,41 @@ export async function atendimentosDoPlanoNoMes(userId: number, dateKey: string, 
       )
     );
   return Number(r?.n ?? 0);
+}
+
+/**
+ * Saiu um atendimento do plano do mês (cancelado ou remarcado para outro
+ * mês) e o membro tinha usado extra nesse mês: o extra volta, porque
+ * agora o limite do mês tem vaga.
+ */
+export async function devolverExtraDoMes(userId: number, dateKey: string) {
+  try {
+    const sub = await db.query.subscriptions.findFirst({
+      where: and(eq(subscriptions.userId, userId), eq(subscriptions.status, "ATIVA")),
+    });
+    if (!sub) return;
+    const plano = await db.query.plans.findFirst({ columns: { monthlyLimit: true }, where: eq(plans.id, sub.planId) });
+    if (plano?.monthlyLimit == null) return;
+    if ((await atendimentosDoPlanoNoMes(userId, dateKey)) >= plano.monthlyLimit) return;
+    const { inicio, fim } = limitesDoMes(dateKey);
+    const [comExtra] = await db
+      .select({ id: appointments.id })
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.clientUserId, userId),
+          eq(appointments.extraCredit, true),
+          ne(appointments.status, "CANCELADO"),
+          gte(appointments.startsAt, inicio),
+          lt(appointments.startsAt, fim)
+        )
+      )
+      .orderBy(appointments.startsAt)
+      .limit(1);
+    if (comExtra) await db.update(appointments).set({ extraCredit: false }).where(eq(appointments.id, comExtra.id));
+  } catch (e) {
+    console.error("Devolver extra do mês falhou:", e);
+  }
 }
 
 /** Atendimentos extras que ainda restam: liberados menos os já usados. */
@@ -369,6 +419,11 @@ export async function createBooking(input: CreateBookingInput) {
   }
   const allCovered =
     !!subscription && chosen.every((s) => coveredIds.has(s.id));
+  if (input.fromRecurring && (!allCovered || usaExtra)) {
+    throw new ForaDoPlanoError(
+      "O plano não cobre esta semana (limite de atendimentos do mês ou horário da noite)."
+    );
+  }
 
   // O teto existe para conter abuso da agenda pública. O balcão (admin e
   // barbeiro) não passa por ele — o cliente que pede para deixar marcado
@@ -497,6 +552,21 @@ export async function createBooking(input: CreateBookingInput) {
       await tx.execute(
         rawSql`SELECT 1 FROM booking_locks WHERE barber_id = ${barberId} AND date_key = ${input.dateKey} FOR UPDATE`
       );
+
+      // Membro: trava o cadastro dele e reconfere o limite do mês e os
+      // extras. Duas marcações ao mesmo tempo (duas abas, outro barbeiro ou
+      // o horário fixo rodando) liam o mesmo saldo e passavam as duas.
+      if (subscription && ownerId) {
+        await tx.execute(rawSql`SELECT id FROM users WHERE id = ${ownerId} FOR UPDATE`);
+        const [h2, m2] = input.time.split(":").map(Number);
+        const agora = await coberturaDoPlano(ownerId, subscription.planId, input.dateKey, chosen.map((x) => x.id), ignorados, h2 * 60 + m2);
+        const mudou =
+          agora.usaExtra !== usaExtra ||
+          chosen.some((x) => agora.cobertos.has(x.id) !== coveredIds.has(x.id));
+        if (mudou) {
+          throw new BookingError("Seu plano acabou de mudar (outro horário foi marcado agora). Tente de novo.");
+        }
+      }
 
       // Reconfere o horário já dentro da trava — quem entrou antes ganhou.
       // FOR UPDATE é obrigatório aqui: no TiDB (transação pessimista) um
@@ -709,12 +779,19 @@ export async function rescheduleBooking(input: {
   }
 
   await cancelPendingNotifications(appt.id);
+  // Remarcado para outro mês: o mês de antes pode ter ganhado vaga.
+  if (appt.clientUserId && !appt.extraCredit) {
+    await devolverExtraDoMes(appt.clientUserId, utcToShopParts(appt.startsAt).dateKey);
+  }
 
   // O pagamento (pago ou em aberto) acompanha o horário novo, e a forma
   // escolhida também: quem pagou o Pix não pode aparecer devendo.
   try {
+    // Valor mudou (ex.: saiu da noite e agora o plano cobre): a fatura em
+    // aberto do valor antigo sai antes de mudar de horário.
+    if (novo.totalCents !== appt.totalCents) await cancelarCobrancasDoAgendamento(appt.id);
     await db.update(payments).set({ appointmentId: novo.id }).where(eq(payments.appointmentId, appt.id));
-    if (appt.paymentMethod) {
+    if (appt.paymentMethod && novo.totalCents > 0) {
       await db.update(appointments).set({ paymentMethod: appt.paymentMethod }).where(eq(appointments.id, novo.id));
     }
   } catch (e) {
@@ -1067,6 +1144,10 @@ export async function transitionAppointment(
     // Fatura de Pix/cartão ainda em aberto não fica cobrando um horário
     // que não vai acontecer. O que já foi pago o dono estorna no Asaas.
     await cancelarCobrancasDoAgendamento(updated.id);
+    // Era do plano e o membro tinha usado extra no mês: o extra volta.
+    if (next === "CANCELADO" && updated.clientUserId && !updated.extraCredit) {
+      await devolverExtraDoMes(updated.clientUserId, utcToShopParts(updated.startsAt).dateKey);
+    }
     if (next === "CANCELADO") {
       try {
         await queueNotification({

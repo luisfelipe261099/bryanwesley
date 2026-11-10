@@ -35,6 +35,10 @@ async function cpfConfiavel(clientPhone: string) {
 export async function statusDoPagamento(token: string): Promise<{ pago: boolean }> {
   const appt = await horario(token);
   if (!appt) return { pago: false };
+  // Cada conferência consulta o Asaas: uma aba esquecida aberta não pode
+  // gastar a cota da API que o webhook também usa.
+  const freio = await hitRateLimit(`pagto:status:${appt.id}`, 60, 10 * 60_000);
+  if (!freio.ok) return { pago: false };
   const p = await pagamentoDoAgendamento(appt.id);
   if (!p) return { pago: false };
   const atual = await conferirPagamento(p);

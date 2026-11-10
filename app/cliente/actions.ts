@@ -24,7 +24,13 @@ import {
 } from "@/lib/appointments";
 import { avisarPedidoDePlano } from "@/lib/avisos";
 import { hitRateLimit } from "@/lib/rate-limit";
-import { assinarNoCartao, chargeSubscription, encerrarCartaoRecorrente, isCobrancaOnline } from "@/lib/payments";
+import {
+  assinarNoCartao,
+  cancelarCobrancasDoPlano,
+  chargeSubscription,
+  encerrarCartaoRecorrente,
+  isCobrancaOnline,
+} from "@/lib/payments";
 import { materializeRecurring, cancelFutureOccurrences, ocorrenciasFuturas } from "@/lib/recurring";
 import { getSettings } from "@/lib/schedule";
 import { shopToday, minutesToHHMM, utcToShopParts } from "@/lib/time";
@@ -609,7 +615,9 @@ export async function cancelMyPlan(): Promise<ActionResult> {
 
   if (sub.status === "INADIMPLENTE") {
     // Vencida e não paga: encerra na hora, não há ciclo pago a respeitar.
-    await encerrarCartaoRecorrente(session.id);
+    const parou = await encerrarCartaoRecorrente(session.id);
+    if (!parou.ok) return { ok: false, error: parou.error };
+    await cancelarCobrancasDoPlano(session.id);
     await db
       .update(subscriptions)
       .set({ status: "CANCELADA", canceledAt: new Date() })
@@ -623,8 +631,11 @@ export async function cancelMyPlan(): Promise<ActionResult> {
   if (sub.canceledAt) {
     return { ok: false, error: "Seu cancelamento já está agendado." };
   }
-  // Cancelou: o cartão não é mais cobrado no próximo ciclo.
-  await encerrarCartaoRecorrente(session.id);
+  // Cancelou: o cartão não é mais cobrado no próximo ciclo, e a
+  // mensalidade em aberto (Pix) sai.
+  const parou = await encerrarCartaoRecorrente(session.id);
+  if (!parou.ok) return { ok: false, error: parou.error };
+  await cancelarCobrancasDoPlano(session.id);
   await db
     .update(subscriptions)
     .set({ canceledAt: new Date() })

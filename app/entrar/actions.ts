@@ -4,9 +4,10 @@ import { removerInscricao } from "@/lib/push";
 
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { and, eq, gt, isNotNull, isNull, lt, lte, or, sql as rawSql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, like, lt, lte, or, sql as rawSql } from "drizzle-orm";
 import { randomInt } from "node:crypto";
-import { queueFreeText } from "@/lib/notifications";
+import { markSent, queueFreeText } from "@/lib/notifications";
+import { isWhatsappConfigured, sendWhatsapp } from "@/lib/providers/whatsapp";
 import { whatsappEnviando } from "@/lib/whatsapp-status";
 import { z } from "@/lib/zod-pt";
 import { db } from "@/db/client";
@@ -376,14 +377,31 @@ export async function logout(formData?: FormData) {
 // ───────────────────────── Esqueci minha senha ─────────────────────────
 //
 // O cliente cria uma senha nova sozinho, provando que é ele de um destes
-// jeitos: o código de 6 números mandado no WhatsApp da barbearia (quando
-// ele está conectado) ou o código de um atendimento em que esteve na
-// barbearia (check-in feito ou atendimento concluído) — esse ninguém
-// fabrica marcando horário no nome de outra pessoa. Conta da equipe não
-// passa por aqui: o administrador redefine no painel.
+// jeitos:
+// - o código de 6 números mandado no WhatsApp da barbearia (quando ele
+//   está conectado), válido por 15 minutos e 5 tentativas;
+// - o código de um atendimento recente (até 60 dias) em que esteve na
+//   barbearia (check-in feito ou concluído). Cada atendimento serve uma
+//   vez só, e conta de mensalista não aceita esse caminho — plano vale
+//   dinheiro, então lá só o WhatsApp ou o balcão.
+// Conta da equipe não passa por aqui: o administrador redefine no painel.
+// Senha trocada: o dono recebe aviso no WhatsApp e no celular.
 
 const MINUTOS_CODIGO = 15;
 const TENTATIVAS_CODIGO = 5;
+const DIAS_CODIGO_ATENDIMENTO = 60;
+
+/** Manda já (provedor direto) e cai para a fila se não der. */
+async function enviarWhatsappAgora(phone: string, body: string) {
+  const fila = await queueFreeText({ phone, body });
+  if (!fila || !isWhatsappConfigured()) return; // a ponte busca a fila sozinha, em segundos
+  try {
+    const r = await sendWhatsapp(phone, body);
+    if (r.sent) await markSent(fila.id);
+  } catch {
+    /* fica na fila para a próxima varredura */
+  }
+}
 
 export async function pedirCodigoNoWhatsapp(telefone: string): Promise<{ ok: boolean; mensagem: string }> {
   if (!isValidPhone(telefone)) return { ok: false, mensagem: "Informe o WhatsApp com DDD." };
@@ -407,21 +425,19 @@ export async function pedirCodigoNoWhatsapp(telefone: string): Promise<{ ok: boo
   const user = await db.query.users.findFirst({ where: eq(users.phone, phone) });
   if (!user || user.role !== "CLIENT" || !user.active) return generica;
 
+  // Pedidos anteriores ainda válidos continuam valendo: um terceiro que
+  // pede código no número de alguém não derruba o código que o dono já
+  // recebeu (no máximo 3 por hora, pelo freio acima).
   const codigo = String(randomInt(0, 1_000_000)).padStart(6, "0");
-  // O pedido novo vale; os anteriores em aberto deixam de valer.
-  await db
-    .update(passwordResets)
-    .set({ usedAt: new Date() })
-    .where(and(eq(passwordResets.userId, user.id), isNull(passwordResets.usedAt)));
   await db.insert(passwordResets).values({
     userId: user.id,
     codeHash: await hashPassword(codigo),
     expiresAt: new Date(Date.now() + MINUTOS_CODIGO * 60_000),
   });
-  await queueFreeText({
+  await enviarWhatsappAgora(
     phone,
-    body: `Bryan Wesley Barbearia: seu código para criar uma nova senha é ${codigo}. Vale por ${MINUTOS_CODIGO} minutos. Se não foi você, ignore esta mensagem.`,
-  });
+    `Bryan Wesley Barbearia: seu código para criar uma nova senha é ${codigo}. Vale por ${MINUTOS_CODIGO} minutos. Se não foi você, ignore esta mensagem.`
+  );
   return generica;
 }
 
@@ -447,69 +463,109 @@ export async function redefinirMinhaSenha(_prev: NovaSenhaState, formData: FormD
   const phone = normalizePhone(parsed.data.phone);
   const codigo = parsed.data.codigo.toUpperCase().replace(/\s/g, "");
 
+  // Freios: por rede, toda tentativa; por telefone, só as erradas — assim
+  // um terceiro chutando códigos não tranca o dono por muito tempo, e o
+  // dono que acerta de primeira nunca esbarra.
   const ip = ipDaRequisicao();
-  const [porRede, porFone] = await Promise.all([
-    hitRateLimit(`senha:tentativa:ip:${ip}`, 20, JANELA_LOGIN_MS),
-    hitRateLimit(`senha:tentativa:fone:${phone}`, 8, 60 * 60_000),
-  ]);
-  if (!porRede.ok || !porFone.ok) {
+  const chaveFalha = `senha:falha:fone:${phone}`;
+  const porRede = await hitRateLimit(`senha:tentativa:ip:${ip}`, 20, JANELA_LOGIN_MS);
+  if (!porRede.ok || (await rateLimitEsgotado(chaveFalha, 8, 60 * 60_000))) {
     return { error: "Muitas tentativas. Aguarde um pouco ou peça ajuda na barbearia." };
   }
 
   const naoConfere = {
     error:
-      "Código não confere. Use o código que chegou no WhatsApp ou o de um atendimento em que você esteve na barbearia.",
+      "Código não confere. Use o código que chegou no WhatsApp ou o de um atendimento recente em que você esteve na barbearia.",
+  };
+  const falhou = async () => {
+    await hitRateLimit(chaveFalha, 8, 60 * 60_000).catch(() => {});
+    return naoConfere;
   };
   const user = await db.query.users.findFirst({ where: eq(users.phone, phone) });
-  if (!user || !user.active) return naoConfere;
-  if (user.role !== "CLIENT") {
-    return { error: "Conta da equipe: a senha é redefinida pelo administrador, no painel." };
-  }
+  // Conta da equipe, inativa ou inexistente: a mesma resposta (não revela
+  // de quem é o número).
+  if (!user || !user.active || user.role !== "CLIENT") return falhou();
 
-  let pedidoUsado: number | null = null;
   let confere = false;
 
-  // 1) Código de 6 números do WhatsApp.
+  // 1) Código de 6 números do WhatsApp. A tentativa é contada antes de
+  // conferir e o código é gasto com condição: pedidos em paralelo não
+  // passam das 5 tentativas nem usam o mesmo código duas vezes.
   if (/^\d{6}$/.test(codigo)) {
-    const pedido = await db.query.passwordResets.findFirst({
-      where: and(
-        eq(passwordResets.userId, user.id),
-        isNull(passwordResets.usedAt),
-        gt(passwordResets.expiresAt, new Date()),
-        lt(passwordResets.attempts, TENTATIVAS_CODIGO)
-      ),
-      orderBy: (r, { desc }) => [desc(r.id)],
-    });
-    if (pedido) {
+    const pedidos = await db
+      .select()
+      .from(passwordResets)
+      .where(
+        and(
+          eq(passwordResets.userId, user.id),
+          isNull(passwordResets.usedAt),
+          gt(passwordResets.expiresAt, new Date()),
+          lt(passwordResets.attempts, TENTATIVAS_CODIGO),
+          like(passwordResets.codeHash, "$2%")
+        )
+      )
+      .orderBy(desc(passwordResets.id))
+      .limit(3);
+    for (const pedido of pedidos) {
+      const [conta] = await db
+        .update(passwordResets)
+        .set({ attempts: rawSql`${passwordResets.attempts} + 1` })
+        .where(and(eq(passwordResets.id, pedido.id), lt(passwordResets.attempts, TENTATIVAS_CODIGO), isNull(passwordResets.usedAt)));
+      if (conta.affectedRows === 0) continue;
       if (await verifyPassword(codigo, pedido.codeHash)) {
-        confere = true;
-        pedidoUsado = pedido.id;
-      } else {
-        await db
+        const [gasto] = await db
           .update(passwordResets)
-          .set({ attempts: rawSql`${passwordResets.attempts} + 1` })
-          .where(eq(passwordResets.id, pedido.id));
+          .set({ usedAt: new Date() })
+          .where(and(eq(passwordResets.id, pedido.id), isNull(passwordResets.usedAt)));
+        confere = gasto.affectedRows === 1;
+        break;
       }
     }
   }
 
-  // 2) Código de um atendimento em que a pessoa esteve na barbearia.
+  // 2) Código de um atendimento recente em que a pessoa esteve na barbearia.
   if (!confere) {
+    const plano = await db.query.subscriptions.findFirst({
+      where: and(eq(subscriptions.userId, user.id), eq(subscriptions.status, "ATIVA")),
+      columns: { id: true },
+    });
     const atendimento = await db.query.appointments.findFirst({
       where: and(
         eq(appointments.clientPhone, phone),
         eq(appointments.code, codigo),
+        gt(appointments.startsAt, new Date(Date.now() - DIAS_CODIGO_ATENDIMENTO * 86400_000)),
         or(isNotNull(appointments.checkedInAt), eq(appointments.status, "CONCLUIDO"))
       ),
       columns: { id: true },
     });
-    confere = !!atendimento;
+    if (atendimento && plano) {
+      // Mensalista: plano vale dinheiro, o código do atendimento não basta.
+      await hitRateLimit(chaveFalha, 8, 60 * 60_000).catch(() => {});
+      return {
+        error:
+          "Sua conta tem plano ativo: use o código que chega no WhatsApp (botão acima) ou peça na barbearia para redefinir.",
+      };
+    }
+    if (atendimento) {
+      // Cada atendimento serve uma vez só para trocar a senha.
+      const marca = `atendimento:${atendimento.id}`;
+      const jaUsado = await db.query.passwordResets.findFirst({
+        where: and(eq(passwordResets.userId, user.id), eq(passwordResets.codeHash, marca)),
+        columns: { id: true },
+      });
+      if (!jaUsado) {
+        await db.insert(passwordResets).values({
+          userId: user.id,
+          codeHash: marca,
+          expiresAt: new Date(),
+          usedAt: new Date(),
+        });
+        confere = true;
+      }
+    }
   }
-  if (!confere) return naoConfere;
+  if (!confere) return falhou();
 
-  if (pedidoUsado) {
-    await db.update(passwordResets).set({ usedAt: new Date() }).where(eq(passwordResets.id, pedidoUsado));
-  }
   // Senha nova: as sessões antigas caem e a trava de tentativas zera.
   await db
     .update(users)
@@ -520,6 +576,17 @@ export async function redefinirMinhaSenha(_prev: NovaSenhaState, formData: FormD
       lockedUntil: null,
     })
     .where(eq(users.id, user.id));
+  // O dono fica sabendo: se não foi ele, procura a barbearia na hora.
+  try {
+    if (await whatsappEnviando()) {
+      await enviarWhatsappAgora(
+        phone,
+        "Bryan Wesley Barbearia: a senha da sua conta acabou de ser trocada. Se não foi você, fale com a barbearia agora."
+      );
+    }
+  } catch {
+    /* o aviso não pode impedir a troca */
+  }
   const conta = await db.query.users.findFirst({ where: eq(users.id, user.id) });
   cookies().set(
     SESSION_COOKIE,

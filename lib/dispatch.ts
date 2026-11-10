@@ -246,7 +246,7 @@ export async function runDispatch(limit = 50): Promise<DispatchReport> {
   // por dia; quem já tem cobrança aberta é pulado).
   await cobrarMensalidadesAutomaticas().catch((e) => console.error("Cobrança automática:", e));
   // Semana do fixo que não coube: o admin fica sabendo no celular.
-  const semVaga = horariosFixos.conflitos.filter((c) => !c.lojaFechada);
+  const semVaga = horariosFixos.conflitos.filter((c) => !c.lojaFechada && !c.foraDoPlano);
   if (semVaga.length) await avisarFixoEmConflito(semVaga);
 
   // Janelas de freio já vencidas não servem para nada e a tabela cresceria

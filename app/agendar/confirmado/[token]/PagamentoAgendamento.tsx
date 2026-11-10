@@ -50,12 +50,16 @@ export function PagamentoAgendamento({
   const [escolhendo, setEscolhendo] = useState(false);
 
   const aguardando = status === "PENDENTE" && (metodo === "PIX" || metodo === "CARTAO");
+  // Confere sozinha por 15 minutos; depois, só quando o cliente pedir.
+  const [conferindo, setConferindo] = useState(true);
+  const [verificando, startVerificar] = useTransition();
 
   // Enquanto a fatura está aberta, confere a cada 4 s (e ao voltar da aba
   // do cartão). Para quando cair.
   useEffect(() => {
-    if (!aguardando) return;
+    if (!aguardando || !conferindo) return;
     let parar = false;
+    const fim = window.setTimeout(() => setConferindo(false), 15 * 60_000);
     const conferir = async () => {
       try {
         const r = await statusDoPagamento(token);
@@ -69,10 +73,11 @@ export function PagamentoAgendamento({
     document.addEventListener("visibilitychange", aoVoltar);
     return () => {
       parar = true;
+      window.clearTimeout(fim);
       window.clearInterval(t);
       document.removeEventListener("visibilitychange", aoVoltar);
     };
-  }, [aguardando, token, router]);
+  }, [aguardando, conferindo, token, router]);
 
   if (totalCents <= 0) return null;
 
@@ -242,10 +247,28 @@ export function PagamentoAgendamento({
             </a>
           )
         )}
-        <p className="mt-3 flex items-center justify-center gap-2 text-xs text-steel-400">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          Aguardando o pagamento… esta tela atualiza sozinha.
-        </p>
+        {conferindo ? (
+          <p className="mt-3 flex items-center justify-center gap-2 text-xs text-steel-400">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Aguardando o pagamento… esta tela atualiza sozinha.
+          </p>
+        ) : (
+          <button
+            type="button"
+            disabled={verificando}
+            onClick={() =>
+              startVerificar(async () => {
+                const r = await statusDoPagamento(token).catch(() => ({ pago: false }));
+                if (r.pago) router.refresh();
+                else setConferindo(true);
+              })
+            }
+            className="label mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/12 px-4 py-3 text-steel-200 disabled:opacity-50"
+          >
+            {verificando && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            Já paguei, verificar
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setEscolhendo(true)}

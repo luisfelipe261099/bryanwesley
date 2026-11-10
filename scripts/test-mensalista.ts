@@ -11,7 +11,7 @@ import { getAvailability, getSettings } from "../lib/schedule";
 import { attachDetails } from "../lib/queries";
 import { rotuloPagamento } from "../lib/rotulo-pagamento";
 import { addDays, shopToday, utcToShopParts, weekdayOf } from "../lib/time";
-import { eq, inArray, like } from "drizzle-orm";
+import { and, eq, inArray, like } from "drizzle-orm";
 
 let p = 0, f = 0;
 const ok = (l: string, c: boolean, e = "") =>
@@ -98,33 +98,37 @@ async function main() {
     const sub = (await db.select().from(subscriptions).where(eq(subscriptions.userId, u.id)))[0];
     const vence = new Date(Date.now() + 2 * 86400_000);
     await db.update(subscriptions).set({ renewsAt: vence }).where(eq(subscriptions.id, sub.id));
+    const r0 = await pay.cobrarMensalidadesAutomaticas({ forcar: true });
+    ok("pedido de plano que nunca foi pago não é cobrado sozinho", r0.geradas === 0);
+    // Já pagou antes: é mensalista de verdade.
+    await db.insert(payments).values({ orderNsu: `TESTE-${sub.id}`, userId: u.id, subscriptionId: sub.id, kind: "ASSINATURA", amountCents: gold.priceCents, description: "mês anterior", status: "PAGO", paidAt: new Date() });
     const r1 = await pay.cobrarMensalidadesAutomaticas({ forcar: true });
     const cob = chamadas.find((c) => c.caminho === "/payments" && c.metodo === "POST");
     ok("vence em 2 dias: gera a mensalidade sozinha", r1.geradas >= 1);
     ok("no Pix, com o valor do plano e vencendo no dia", cob?.corpo?.billingType === "PIX" && cob?.corpo?.value === gold.priceCents / 100 && cob?.corpo?.dueDate === utcToShopParts(vence).dateKey);
-    const linhas = await db.select().from(payments).where(eq(payments.subscriptionId, sub.id));
-    ok("fica pendente, ligada à assinatura", linhas.length === 1 && linhas[0].status === "PENDENTE" && linhas[0].kind === "ASSINATURA");
+    const linhas = (await db.select().from(payments).where(eq(payments.subscriptionId, sub.id))).filter((x) => x.status === "PENDENTE");
+    ok("fica pendente, ligada à assinatura", linhas.length === 1 && linhas[0].kind === "ASSINATURA");
     await pay.cobrarMensalidadesAutomaticas({ forcar: true });
-    ok("rodar de novo não duplica", (await db.select().from(payments).where(eq(payments.subscriptionId, sub.id))).length === 1);
+    ok("rodar de novo não duplica", (await db.select().from(payments).where(eq(payments.subscriptionId, sub.id))).filter((x) => x.status === "PENDENTE").length === 1);
 
-    await db.delete(payments).where(eq(payments.subscriptionId, sub.id));
+    await db.delete(payments).where(and(eq(payments.subscriptionId, sub.id), eq(payments.status, "PENDENTE")));
     await db.update(subscriptions).set({ canceledAt: new Date() }).where(eq(subscriptions.id, sub.id));
     await pay.cobrarMensalidadesAutomaticas({ forcar: true });
-    ok("quem pediu para sair não é cobrado", (await db.select().from(payments).where(eq(payments.subscriptionId, sub.id))).length === 0);
+    ok("quem pediu para sair não é cobrado", (await db.select().from(payments).where(and(eq(payments.subscriptionId, sub.id), eq(payments.status, "PENDENTE")))).length === 0);
 
     await db.update(subscriptions).set({ canceledAt: null, renewsAt: new Date(Date.now() + 10 * 86400_000) }).where(eq(subscriptions.id, sub.id));
     await pay.cobrarMensalidadesAutomaticas({ forcar: true });
-    ok("vence daqui a 10 dias: ainda não cobra", (await db.select().from(payments).where(eq(payments.subscriptionId, sub.id))).length === 0);
+    ok("vence daqui a 10 dias: ainda não cobra", (await db.select().from(payments).where(and(eq(payments.subscriptionId, sub.id), eq(payments.status, "PENDENTE")))).length === 0);
 
     await db.update(subscriptions).set({ renewsAt: vence }).where(eq(subscriptions.id, sub.id));
     await db.update(users).set({ cpf: null }).where(eq(users.id, u.id));
     const r2 = await pay.cobrarMensalidadesAutomaticas({ forcar: true });
-    ok("sem CPF não gera (o Asaas exige)", r2.semCpf >= 1 && (await db.select().from(payments).where(eq(payments.subscriptionId, sub.id))).length === 0);
+    ok("sem CPF não gera (o Asaas exige)", r2.semCpf >= 1 && (await db.select().from(payments).where(and(eq(payments.subscriptionId, sub.id), eq(payments.status, "PENDENTE")))).length === 0);
 
     await db.update(users).set({ cpf: "52998224725" }).where(eq(users.id, u.id));
     await db.update(settingsTable).set({ autoCharge: false }).where(eq(settingsTable.id, 1));
     await pay.cobrarMensalidadesAutomaticas({ forcar: true });
-    ok("cobrança automática desligada: não cobra", (await db.select().from(payments).where(eq(payments.subscriptionId, sub.id))).length === 0);
+    ok("cobrança automática desligada: não cobra", (await db.select().from(payments).where(and(eq(payments.subscriptionId, sub.id), eq(payments.status, "PENDENTE")))).length === 0);
   } finally {
     await db.update(settingsTable).set({ memberNightFrom: cfgAntes.memberNightFrom, autoCharge: cfgAntes.autoCharge }).where(eq(settingsTable.id, 1));
     await limpar();

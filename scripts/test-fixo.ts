@@ -165,8 +165,19 @@ async function main() {
         )
       );
     ok("nenhuma futura continua ativa", ativas.length === 0, String(ativas.length));
-    const rel = await materializeRecurring();
-    ok("e a varredura não as recria", rel.criados === 0, `criados=${rel.criados}`);
+    const canceladas = await db
+      .select({ startsAt: appointments.startsAt })
+      .from(appointments)
+      .where(and(eq(appointments.recurringSlotId, slot.id), eq(appointments.status, "CANCELADO")));
+    await materializeRecurring();
+    // A semana que antes ficou de fora (limite do mês) pode entrar agora;
+    // o que não pode é uma semana cancelada voltar.
+    const ativasDepois = await db
+      .select({ startsAt: appointments.startsAt })
+      .from(appointments)
+      .where(and(eq(appointments.recurringSlotId, slot.id), inArray(appointments.status, ["PENDENTE", "CONFIRMADO"])));
+    const voltou = ativasDepois.filter((a) => canceladas.some((c) => c.startsAt.getTime() === a.startsAt.getTime()));
+    ok("e a varredura não as recria", voltou.length === 0, `voltaram=${voltou.length}`);
   }
 
   console.log("\n7. Transição concorrente: só uma vence, comissão coerente");

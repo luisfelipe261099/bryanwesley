@@ -82,7 +82,17 @@ export function LerQr({ onLer, onFechar }: { onLer: (l: LeituraQr) => void; onFe
           detector = null;
         }
       }
-      const jsQR = detector ? null : (await import("jsqr")).default;
+      let jsQR: typeof import("jsqr").default | null = null;
+      if (!detector) {
+        try {
+          jsQR = (await import("jsqr")).default;
+        } catch {
+          // Internet oscilou e o leitor não carregou: avisa em vez de ficar
+          // com a câmera aberta sem ler nada.
+          if (!parar) setErro("Não deu para abrir o leitor de QR. Tente de novo ou digite o código.");
+          return;
+        }
+      }
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
@@ -124,7 +134,9 @@ export function LerQr({ onLer, onFechar }: { onLer: (l: LeituraQr) => void; onFe
       ler();
     }
 
-    iniciar();
+    iniciar().catch(() => {
+      if (!parar) setErro("Não deu para abrir a câmera agora. Tente de novo ou digite o código.");
+    });
     return () => {
       parar = true;
       window.clearTimeout(quadro);

@@ -702,14 +702,14 @@ export function BookingForm({
                 {String(noiteMensalista! % 60).padStart(2, "0")}: à noite sai como avulso. Para usar o plano, escolha um horário antes.
               </p>
             )}
-            {!deNoite && estourouLimite && chosen.length > 0 && (
+            {!deNoite && estourouLimite && chosen.some((s) => plan?.covers.some((c) => c.id === s.id)) && (
               <p className="mt-2 text-xs text-amber-200">
                 {semExtras
                   ? `Você já usou os ${limite} atendimentos do plano neste mês: este sai como avulso.`
                   : `Você já usou os ${limite} atendimentos do plano neste mês: este usa 1 dos seus ${extrasSaldo} atendimentos extras.`}
               </p>
             )}
-            {!semExtras && foraDaCota.length > 0 && (
+            {!semExtras && !deNoite && foraDaCota.length > 0 && (
               <p className="mt-2 text-xs text-amber-200">
                 {foraDaCota.map((s) => s.name).join(", ")}: a cota do seu plano neste mês já foi usada — sai como avulso.
               </p>
