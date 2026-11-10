@@ -1210,13 +1210,35 @@ export async function bookForClient(input: {
   }
 }
 
+/**
+ * "Pago até" escolhido pelo admin (AAAA-MM-DD): o plano vale até o fim
+ * desse dia, e a 1ª cobrança do sistema vence nele. Para quem já pagou o
+ * mês por fora e só deve ser cobrado a partir do mês que vem.
+ */
+function fimDoDia(dateKey: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return null;
+  const { year, month, day } = parseDateKey(dateKey);
+  const d = shopTimeToUtc(year, month, day, 23 * 60 + 59);
+  const hoje = Date.now();
+  if (Number.isNaN(d.getTime()) || d.getTime() <= hoje || d.getTime() > hoje + 400 * 86400_000) return null;
+  return d;
+}
+
 export async function subscribeClient(input: {
   userId: number;
   planId: number;
   cycle: "MENSAL" | "ANUAL";
+  /** Primeira cobrança em (AAAA-MM-DD): já pagou até lá por fora. */
+  primeiraCobranca?: string;
+  /** Como cobrar sozinho quando vencer. */
+  forma?: "PIX" | "CARTAO";
 }): Promise<Result> {
   try {
     await admin();
+    const pagoAte = input.primeiraCobranca ? fimDoDia(input.primeiraCobranca) : null;
+    if (input.primeiraCobranca && !pagoAte) {
+      return { ok: false, error: "Escolha uma data de primeira cobrança a partir de amanhã." };
+    }
     const tinhaPlano = await db.query.subscriptions.findFirst({
       where: and(eq(subscriptions.userId, input.userId), eq(subscriptions.status, "ATIVA")),
     });
@@ -1229,7 +1251,7 @@ export async function subscribeClient(input: {
     const parou = await encerrarCartaoRecorrente(input.userId);
     if (!parou.ok) return { ok: false, error: parou.error };
     await cancelarCobrancasDoPlano(input.userId);
-    const renewsAt = mantemVencimento ? tinhaPlano!.renewsAt : nextRenewal(new Date(), input.cycle);
+    const renewsAt = pagoAte ?? (mantemVencimento ? tinhaPlano!.renewsAt : nextRenewal(new Date(), input.cycle));
 
     // Encerra o que estiver em aberto — ativa OU vencida. Só a ativa era
     // encerrada, então trocar o plano de quem estava devendo deixava duas
@@ -1250,6 +1272,7 @@ export async function subscribeClient(input: {
       planId: input.planId,
       cycle: input.cycle,
       renewsAt,
+      billingPref: input.forma ?? null,
     });
     // O pedido que a pessoa fez pelo site fica resolvido junto. Ativar pela
     // ficha (ou trocar pelo Clube) deixava o pedido em "Pedidos de
@@ -1260,6 +1283,15 @@ export async function subscribeClient(input: {
       .where(and(eq(planRequests.userId, input.userId), eq(planRequests.status, "ABERTA")));
     // O cliente que ligou os avisos fica sabendo na hora.
     await avisarPlanoAtivado({ userId: input.userId, planId: input.planId });
+    if (pagoAte) {
+      const venc = utcToShopParts(renewsAt).dateKey;
+      const sem = (await db.query.users.findFirst({ where: eq(users.id, input.userId), columns: { cpf: true } }))?.cpf
+        ? ""
+        : " Atenção: preencha o CPF do cliente (Editar), senão o Asaas não gera a cobrança.";
+      return done(
+        `Plano ativo. Nada é cobrado agora: a 1ª cobrança (${input.forma === "CARTAO" ? "cartão automático" : "Pix"}) vence em ${venc.slice(8, 10)}/${venc.slice(5, 7)} e sai sozinha 3 dias antes.${sem}`
+      );
+    }
     if (mantemVencimento) {
       const venc = utcToShopParts(renewsAt).dateKey;
       return done(
@@ -1968,6 +2000,55 @@ export async function ajustarExtras(userId: number, quantidade: number): Promise
           ? `${quantidade} atendimento(s) extra(s) liberado(s). ${u.name.split(" ")[0]} tem ${restam} sobrando.`
           : `Extras ajustados. Sobram ${restam}.`,
     };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+
+/**
+ * Muda o vencimento ("pago até") e/ou a forma da cobrança automática de
+ * um membro ativo. Não cobra nada na hora: a mensalidade sai sozinha 3
+ * dias antes da data.
+ */
+export async function ajustarCobrancaDoPlano(input: {
+  userId: number;
+  vencimento?: string;
+  forma?: "PIX" | "CARTAO";
+}): Promise<Result> {
+  try {
+    await admin();
+    const sub = await db.query.subscriptions.findFirst({
+      where: and(eq(subscriptions.userId, input.userId), inArray(subscriptions.status, ["ATIVA", "INADIMPLENTE"])),
+      orderBy: (s, { desc }) => [desc(s.startedAt)],
+    });
+    if (!sub) return { ok: false, error: "Esse cliente não tem plano em aberto." };
+    const novoVenc = input.vencimento ? fimDoDia(input.vencimento) : null;
+    if (input.vencimento && !novoVenc) return { ok: false, error: "Escolha uma data a partir de amanhã." };
+    const trocouForma = !!input.forma && input.forma !== (sub.billingPref ?? "PIX");
+    // Data ou forma mudaram: o que estava em aberto ou programado sai, e a
+    // cobrança nova é gerada perto da data certa.
+    if (novoVenc || trocouForma) {
+      if (sub.asaasSubscriptionId) {
+        const parou = await encerrarCartaoRecorrente(input.userId);
+        if (!parou.ok) return { ok: false, error: parou.error };
+      }
+      await cancelarCobrancasDoPlano(input.userId);
+    }
+    await db
+      .update(subscriptions)
+      .set({
+        ...(novoVenc ? { renewsAt: novoVenc, status: "ATIVA" as const } : {}),
+        ...(input.forma ? { billingPref: input.forma } : {}),
+      })
+      .where(eq(subscriptions.id, sub.id));
+    revalidatePath(`/admin/clientes/${input.userId}`);
+    revalidatePath("/admin/clube");
+    revalidatePath("/cliente");
+    const venc = utcToShopParts(novoVenc ?? sub.renewsAt).dateKey;
+    return done(
+      `Pronto. Próxima cobrança (${(input.forma ?? sub.billingPref ?? "PIX") === "CARTAO" ? "cartão automático" : "Pix"}) vence em ${venc.slice(8, 10)}/${venc.slice(5, 7)} e sai sozinha 3 dias antes.`
+    );
   } catch (e) {
     return fail(e);
   }

@@ -316,7 +316,12 @@ export async function avisarPagamentoEmPlanoCancelado(userId: number, valorCents
 }
 
 /** A mensalidade foi gerada (Pix): o membro paga pelo app antes de vencer. */
-export async function avisarMensalidade(userId: number, valorCents: number, vencimento: string): Promise<ResultadoPush> {
+export async function avisarMensalidade(
+  userId: number,
+  valorCents: number,
+  vencimento: string,
+  forma: "PIX" | "CARTAO" = "PIX"
+): Promise<ResultadoPush> {
   try {
     const valor = (valorCents / 100).toFixed(2).replace(".", ",");
     const [, m, d] = vencimento.split("-");
@@ -324,7 +329,10 @@ export async function avisarMensalidade(userId: number, valorCents: number, venc
       [userId],
       {
         titulo: "Mensalidade do Clube",
-        corpo: `Sua mensalidade de R$ ${valor} vence dia ${d}/${m}. O Pix já está no app: é só pagar.`,
+        corpo:
+          forma === "CARTAO"
+            ? `Sua mensalidade de R$ ${valor} vence dia ${d}/${m}. Cadastre o cartão no app: depois ele é cobrado sozinho todo mês.`
+            : `Sua mensalidade de R$ ${valor} vence dia ${d}/${m}. O Pix já está no app: é só pagar.`,
         url: "/cliente",
         tag: `mensalidade-${vencimento}`,
       },

@@ -82,6 +82,9 @@ export default async function FichaDoCliente({
                 saindo:
                   ficha.assinatura.sub.status === "ATIVA" &&
                   Boolean(ficha.assinatura.sub.canceledAt),
+                vencimentoKey: utcToShopParts(ficha.assinatura.sub.renewsAt).dateKey,
+                forma: ficha.assinatura.sub.asaasSubscriptionId || ficha.assinatura.sub.billingPref === "CARTAO" ? "CARTAO" : "PIX",
+                cartaoAtivo: Boolean(ficha.assinatura.sub.asaasSubscriptionId),
               }
             : null
         }

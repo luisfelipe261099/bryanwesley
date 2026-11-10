@@ -569,8 +569,9 @@ export async function cobrarMensalidadesAutomaticas(opts: { forcar?: boolean; li
         gte(subscriptions.renewsAt, new Date(Date.now() - 10 * 86400_000)),
         isNull(subscriptions.canceledAt),
         isNull(subscriptions.asaasSubscriptionId),
-        // Pedido de plano abandonado (nunca pagou) não é mensalista.
-        rawSql`exists (select 1 from ${payments} where ${payments.subscriptionId} = ${subscriptions.id} and ${payments.status} = 'PAGO')`,
+        // Pedido de plano abandonado (nunca pagou, nunca ativado) não é
+        // mensalista. Ativado pelo admin (ATIVA) ou que já pagou, é.
+        rawSql`(${subscriptions.status} = 'ATIVA' or exists (select 1 from ${payments} where ${payments.subscriptionId} = ${subscriptions.id} and ${payments.status} = 'PAGO'))`,
         rawSql`not exists (select 1 from ${payments} where ${payments.subscriptionId} = ${subscriptions.id} and ${payments.kind} = 'ASSINATURA' and ${payments.status} = 'PENDENTE')`
       )
     )
@@ -588,11 +589,16 @@ export async function cobrarMensalidadesAutomaticas(opts: { forcar?: boolean; li
     if (!user.cpf) { r.semCpf++; continue; }
     const venc = utcToShopParts(sub.renewsAt).dateKey;
     try {
-      const c = await chargeSubscription(user.id, sub.cycle, { tipo: "PIX", vencimento: venc });
+      // Preferência do membro (escolhida pelo admin): cartão automático —
+      // a assinatura do cartão nasce agora com a 1ª cobrança no vencimento.
+      const c =
+        sub.billingPref === "CARTAO"
+          ? await assinarNoCartao(user.id, sub.cycle)
+          : await chargeSubscription(user.id, sub.cycle, { tipo: "PIX", vencimento: venc });
       if (!c.ok) { r.falhas++; console.error("Mensalidade automática falhou:", user.id, c.error); continue; }
       r.geradas++;
       const linha = await db.query.payments.findFirst({ where: eq(payments.orderNsu, c.orderNsu) });
-      await avisarMensalidade(user.id, linha?.amountCents ?? 0, venc);
+      await avisarMensalidade(user.id, linha?.amountCents ?? 0, venc, sub.billingPref === "CARTAO" ? "CARTAO" : "PIX");
     } catch (e) {
       r.falhas++;
       console.error("Mensalidade automática falhou:", user.id, e);

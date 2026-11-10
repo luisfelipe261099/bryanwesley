@@ -37,6 +37,7 @@ import {
   liberarFixoDoCliente,
   createSubscriptionCharge,
   renewSubscription,
+  ajustarCobrancaDoPlano,
   resetUserPassword,
   subscribeClient,
   updateClient,
@@ -59,6 +60,11 @@ type Assinatura = {
   renewsAt: string;
   /** Cancelou pelo app: usa até o fim do ciclo e não renova. */
   saindo: boolean;
+  /** Vencimento (AAAA-MM-DD) e como a mensalidade é cobrada sozinha. */
+  vencimentoKey: string;
+  forma: "PIX" | "CARTAO";
+  /** Cartão já cadastrado e sendo cobrado sozinho no Asaas. */
+  cartaoAtivo: boolean;
 } | null;
 
 export function FichaCliente({
@@ -611,6 +617,11 @@ function Plano({
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, start] = useTransition();
   const [cobranca, setCobranca] = useState<string | null>(null);
+  // Já pagou o mês por fora: a 1ª cobrança do sistema só no dia escolhido.
+  const [primeira, setPrimeira] = useState("");
+  const [forma, setForma] = useState<"PIX" | "CARTAO">(assinatura?.forma ?? "PIX");
+  const [ajustando, setAjustando] = useState(false);
+  const [novoVenc, setNovoVenc] = useState(assinatura?.vencimentoKey ?? "");
 
   function ativar() {
     setMsg(null);
@@ -619,10 +630,32 @@ function Plano({
         userId: cliente.id,
         planId: Number(planId),
         cycle,
+        primeiraCobranca: primeira || undefined,
+        forma: cobrancaOnline ? forma : undefined,
       });
       setMsg(notify(res, "Assinatura ativada."));
     });
   }
+
+  function ajustar() {
+    setMsg(null);
+    start(async () => {
+      const res = await ajustarCobrancaDoPlano({
+        userId: cliente.id,
+        vencimento: novoVenc && novoVenc !== assinatura?.vencimentoKey ? novoVenc : undefined,
+        forma,
+      });
+      setMsg(notify(res, "Cobrança ajustada."));
+      if (res.ok) setAjustando(false);
+    });
+  }
+
+  const campoForma = cobrancaOnline && (
+    <SelectInput label="Cobrar sozinho por" value={forma} onChange={(e) => setForma(e.target.value as "PIX" | "CARTAO")}>
+      <option value="PIX">Pix (chega um Pix a cada mês)</option>
+      <option value="CARTAO">Cartão automático (cadastra uma vez)</option>
+    </SelectInput>
+  );
 
   function renovar() {
     // Cada toque soma um ciclo: dois toques davam dois meses de graça.
@@ -708,6 +741,15 @@ function Plano({
               Gerar cobrança
             </button>
           ) : null}
+          {cobrancaOnline && (assinatura.status === "ATIVA" || assinatura.status === "INADIMPLENTE") && (
+            <button
+              type="button"
+              onClick={() => setAjustando((v) => !v)}
+              className="label rounded-full border border-white/12 px-4 py-2.5 text-steel-300 hover:border-electric/45 hover:text-white"
+            >
+              {ajustando ? "Fechar" : "Ajustar cobrança"}
+            </button>
+          )}
           {/* Vencida também se cancela: o cliente avisa no balcão que não
               quer mais, e sem o botão ela ficava para sempre em "vencidos". */}
           {(assinatura.status === "ATIVA" || assinatura.status === "INADIMPLENTE") && (
@@ -719,6 +761,34 @@ function Plano({
             >
               Cancelar plano
             </button>
+          )}
+          {ajustando && (
+            <div className="mt-2 grid w-full gap-3 border-t border-white/8 pt-4 sm:grid-cols-[1fr_1fr_auto]">
+              <TextInput
+                label="Próximo vencimento (pago até)"
+                type="date"
+                value={novoVenc}
+                onChange={(e) => setNovoVenc(e.target.value)}
+                ajuda="A cobrança sai sozinha 3 dias antes. Nada é cobrado agora."
+              />
+              {campoForma}
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={ajustar}
+                  disabled={pending}
+                  className="btn-royal label inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-white disabled:opacity-50"
+                >
+                  {pending && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Salvar
+                </button>
+              </div>
+              {assinatura.cartaoAtivo && (
+                <p className="text-xs text-amber-200 sm:col-span-3">
+                  O cartão já está sendo cobrado sozinho. Mudar a data ou a forma encerra essa cobrança no Asaas; perto da data nova o cliente recebe o aviso para cadastrar o cartão de novo (ou o Pix).
+                </p>
+              )}
+            </div>
           )}
         </div>
       ) : (
@@ -742,6 +812,14 @@ function Plano({
             <option value="MENSAL">Mensal</option>
             <option value="ANUAL">Anual</option>
           </SelectInput>
+          <TextInput
+            label="Primeira cobrança em (opcional)"
+            type="date"
+            value={primeira}
+            onChange={(e) => setPrimeira(e.target.value)}
+            ajuda="Já pagou este mês por fora? Escolha o dia: o plano vale até lá e só então começa a cobrar."
+          />
+          {campoForma}
           <div className="flex items-end">
             <button
               type="button"

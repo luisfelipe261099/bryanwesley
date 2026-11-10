@@ -4,6 +4,7 @@ import "../db/load-env";
 import { db, pool } from "../db/client";
 import { payments, plans, subscriptions, users } from "../db/schema";
 import { eq, like } from "drizzle-orm";
+import { utcToShopParts } from "../lib/time";
 
 let p = 0, f = 0;
 const ok = (l: string, c: boolean, e = "") =>
@@ -118,7 +119,27 @@ async function main() {
     cobs.set(falsa.id, falsa);
     ok("assinatura desconhecida é ignorada com 200", (await aviso("PAYMENT_CONFIRMED", falsa)).status === 200 && (await sub()).renewsAt.getTime() === s3.renewsAt.getTime());
 
-    console.log("3. Pix automático e cancelamento");
+    console.log("3. Ativado pelo admin com 1ª cobrança no cartão no mês que vem");
+    {
+      await db.insert(users).values({ name: "Cartão Futuro", phone: "41970250002", role: "CLIENT", cpf: "52998224725" });
+      const u2 = (await db.select().from(users).where(eq(users.phone, "41970250002")))[0];
+      const venc = new Date(Date.now() + 2 * 86400_000);
+      await db.insert(subscriptions).values({ userId: u2.id, planId: plano.id, cycle: "MENSAL", status: "ATIVA", renewsAt: venc, billingPref: "CARTAO" });
+      const antesSub = chamadas.filter((c) => c.caminho === "/subscriptions" && c.metodo === "POST").length;
+      await db.update(subscriptions).set({ renewsAt: new Date(Date.now() + 20 * 86400_000) }).where(eq(subscriptions.userId, u2.id));
+      await pay.cobrarMensalidadesAutomaticas({ forcar: true });
+      ok("longe do vencimento: nada é criado no Asaas", chamadas.filter((c) => c.caminho === "/subscriptions" && c.metodo === "POST").length === antesSub);
+      await db.update(subscriptions).set({ renewsAt: venc }).where(eq(subscriptions.userId, u2.id));
+      const r = await pay.cobrarMensalidadesAutomaticas({ forcar: true });
+      const nova = chamadas.filter((c) => c.caminho === "/subscriptions" && c.metodo === "POST").at(-1);
+      const s2b = (await db.select().from(subscriptions).where(eq(subscriptions.userId, u2.id)))[0];
+      ok("3 dias antes: abre o cartão automático com 1ª cobrança no dia escolhido", r.geradas >= 1 && !!s2b.asaasSubscriptionId && nova?.corpo?.nextDueDate === utcToShopParts(venc).dateKey);
+      await db.delete(payments).where(eq(payments.userId, u2.id));
+      await db.delete(subscriptions).where(eq(subscriptions.userId, u2.id));
+      await db.delete(users).where(eq(users.id, u2.id));
+    }
+
+    console.log("4. Pix automático e cancelamento");
     await db.update(subscriptions).set({ renewsAt: new Date(Date.now() + 2 * 86400_000) }).where(eq(subscriptions.id, s1.id));
     const auto = await pay.cobrarMensalidadesAutomaticas({ forcar: true });
     ok("o Pix automático pula quem paga no cartão", auto.geradas === 0);

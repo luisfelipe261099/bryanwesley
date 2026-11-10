@@ -98,10 +98,12 @@ async function main() {
     const sub = (await db.select().from(subscriptions).where(eq(subscriptions.userId, u.id)))[0];
     const vence = new Date(Date.now() + 2 * 86400_000);
     await db.update(subscriptions).set({ renewsAt: vence }).where(eq(subscriptions.id, sub.id));
+    // Pedido de plano abandonado: INADIMPLENTE e nunca pagou.
+    await db.update(subscriptions).set({ status: "INADIMPLENTE" }).where(eq(subscriptions.id, sub.id));
     const r0 = await pay.cobrarMensalidadesAutomaticas({ forcar: true });
     ok("pedido de plano que nunca foi pago não é cobrado sozinho", r0.geradas === 0);
-    // Já pagou antes: é mensalista de verdade.
-    await db.insert(payments).values({ orderNsu: `TESTE-${sub.id}`, userId: u.id, subscriptionId: sub.id, kind: "ASSINATURA", amountCents: gold.priceCents, description: "mês anterior", status: "PAGO", paidAt: new Date() });
+    // Ativado pelo admin (sem nunca ter pago online): é mensalista, cobra.
+    await db.update(subscriptions).set({ status: "ATIVA" }).where(eq(subscriptions.id, sub.id));
     const r1 = await pay.cobrarMensalidadesAutomaticas({ forcar: true });
     const cob = chamadas.find((c) => c.caminho === "/payments" && c.metodo === "POST");
     ok("vence em 2 dias: gera a mensalidade sozinha", r1.geradas >= 1);

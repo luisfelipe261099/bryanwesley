@@ -233,6 +233,8 @@ export const subscriptions = mysqlTable(
     canceledAt: ts("canceled_at"),
     // Cartão recorrente: a assinatura no Asaas que cobra o cartão sozinha.
     asaasSubscriptionId: varchar("asaas_subscription_id", { length: 40 }),
+    // Como cobrar a mensalidade sozinho: PIX (padrão) ou CARTAO.
+    billingPref: varchar("billing_pref", { length: 10 }).$type<"PIX" | "CARTAO">(),
   },
   (t) => ({ userIdx: index("subscriptions_user_idx").on(t.userId) })
 );
