@@ -13,10 +13,12 @@ import {
   UserRound,
   MessageCircle,
   FileBarChart,
+  Scissors,
 } from "lucide-react";
 
 const links = [
   { href: "/admin", label: "Visão geral", icon: BarChart3 },
+  { href: "/admin/salao", label: "Salão", icon: Scissors },
   { href: "/admin/agenda", label: "Agenda", icon: CalendarDays },
   { href: "/admin/equipe", label: "Equipe", icon: UserRound },
   { href: "/admin/catalogo", label: "Catálogo", icon: Tags },

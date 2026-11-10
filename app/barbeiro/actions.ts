@@ -222,6 +222,7 @@ async function fazerCheckIn(input: {
 function revalidateAll() {
   revalidatePath("/barbeiro");
   revalidatePath("/admin");
+  revalidatePath("/admin/salao");
   revalidatePath("/cliente");
 }
 

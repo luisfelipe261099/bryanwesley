@@ -93,7 +93,7 @@ export function CobrarAtendimento({
     "label inline-flex items-center justify-center gap-1.5 rounded-full border border-white/15 px-3 py-2 text-steel-100 transition-colors hover:border-electric/50 disabled:opacity-50";
 
   return (
-    <div className="flex w-full max-w-[280px] flex-col gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 p-2.5 text-left">
+    <div data-ocupado className="flex w-full max-w-[280px] flex-col gap-2 rounded-xl border border-emerald-400/30 bg-emerald-400/10 p-2.5 text-left">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-semibold text-emerald-100">Cobrar {formatBRL(totalCents)}</p>
         <button

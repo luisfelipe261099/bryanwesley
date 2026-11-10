@@ -44,7 +44,7 @@ export function AppointmentActions({
 
   if (confirmandoSemPagar) {
     return (
-      <div className="flex flex-col items-end gap-2 rounded-xl border-2 border-red-500/70 bg-red-500/15 p-2.5">
+      <div data-ocupado className="flex flex-col items-end gap-2 rounded-xl border-2 border-red-500/70 bg-red-500/15 p-2.5">
         <p className="max-w-[240px] text-right text-xs font-semibold text-red-100">
           Ainda não foi pago ({formatBRL(naoPagoCents)}). Cobre antes de o cliente sair: toque em Cobrar.
         </p>
@@ -74,7 +74,7 @@ export function AppointmentActions({
 
   if (confirmandoFalta) {
     return (
-      <div className="flex flex-col items-end gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 p-2.5">
+      <div data-ocupado className="flex flex-col items-end gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 p-2.5">
         <p className="max-w-[220px] text-right text-xs text-amber-100">
           O cliente não apareceu? O horário é encerrado.
         </p>
