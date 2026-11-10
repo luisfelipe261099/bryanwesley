@@ -30,7 +30,7 @@ import {
   type Subscription,
   type User,
 } from "@/db/schema";
-import { BLOCKING_STATUSES } from "./schedule";
+import { BLOCKING_STATUSES, getSettings, workingWindows } from "./schedule";
 import { isPlaceholderPhone } from "./phone";
 import {
   shopTimeToUtc,
@@ -39,6 +39,7 @@ import {
   addDays as addDaysKey,
   labelWeekday as weekdayLabel,
   utcToShopParts,
+  weekdayOf,
 } from "./time";
 import { monthStart, nextMonthStart } from "./commissions";
 
@@ -341,13 +342,41 @@ export async function bloqueiosDoPeriodo(
       )
     )
     .orderBy(asc(scheduleBlocks.startsAt));
-  return rows.map((r) => ({
+  const lista = rows.map((r) => ({
     id: r.bloco.id,
     startsAt: r.bloco.startsAt,
     endsAt: r.bloco.endsAt,
     reason: r.bloco.reason,
     barberName: r.barbeiro?.shortName ?? null,
   }));
+
+  // Almoço de cada profissional, nos dias em que ele trabalha: aparece na
+  // agenda como os bloqueios (id negativo: não é um bloqueio de verdade).
+  const equipe = await db
+    .select({ id: barbers.id, shortName: barbers.shortName, lunchStart: barbers.lunchStart, lunchEnd: barbers.lunchEnd })
+    .from(barbers)
+    .where(and(eq(barbers.active, true), barberId ? eq(barbers.id, barberId) : undefined));
+  const comAlmoco = equipe.filter((b) => b.lunchStart != null && b.lunchEnd != null && b.lunchEnd > b.lunchStart);
+  if (comAlmoco.length) {
+    const cfg = await getSettings();
+    let dia = utcToShopParts(de).dateKey;
+    const ultimo = utcToShopParts(new Date(ate.getTime() - 1)).dateKey;
+    for (let n = 0; dia <= ultimo && n < 62; n++, dia = addDaysKey(dia, 1)) {
+      const wd = weekdayOf(dia);
+      if (cfg.closedWeekdays.includes(wd)) continue;
+      const janelas = await workingWindows(comAlmoco.map((b) => b.id), wd, cfg);
+      const { year, month, day } = parseDateKey(dia);
+      for (const b of comAlmoco) {
+        if (!janelas.get(b.id)) continue; // folga
+        const startsAt = shopTimeToUtc(year, month, day, b.lunchStart!);
+        const endsAt = shopTimeToUtc(year, month, day, b.lunchEnd!);
+        if (endsAt <= de || startsAt >= ate) continue;
+        lista.push({ id: -(b.id * 100000 + n), startsAt, endsAt, reason: "Almoço", barberName: b.shortName });
+      }
+    }
+    lista.sort((x, y) => x.startsAt.getTime() - y.startsAt.getTime());
+  }
+  return lista;
 }
 
 /**

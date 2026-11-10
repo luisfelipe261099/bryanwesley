@@ -2092,3 +2092,47 @@ export async function gerarLinkNovaSenha(userId: number): Promise<
     return { ok: false, error: f.ok ? "Erro" : f.error };
   }
 }
+
+/**
+ * Horário de almoço de um profissional (minutos do dia). Vale todo dia de
+ * trabalho dele: a agenda não oferece esse intervalo para ninguém marcar.
+ * Os dois nulos tiram o almoço.
+ */
+export async function setBarberLunch(input: {
+  barberId: number;
+  inicio: number | null;
+  fim: number | null;
+}): Promise<Result> {
+  try {
+    await admin();
+    const semAlmoco = input.inicio === null || input.fim === null;
+    if (!semAlmoco) {
+      if (
+        !Number.isInteger(input.inicio) || !Number.isInteger(input.fim) ||
+        input.inicio! < 0 || input.fim! > 24 * 60 || input.fim! <= input.inicio!
+      ) {
+        return { ok: false, error: "O fim do almoço precisa ser depois do início." };
+      }
+      if (input.fim! - input.inicio! > 4 * 60) {
+        return { ok: false, error: "Almoço de no máximo 4 horas. Para mais, use folga ou bloqueio." };
+      }
+    }
+    await db
+      .update(barbers)
+      .set({ lunchStart: semAlmoco ? null : input.inicio, lunchEnd: semAlmoco ? null : input.fim })
+      .where(eq(barbers.id, input.barberId));
+    revalidatePath("/admin/equipe");
+    revalidatePath("/admin/agenda");
+    revalidatePath("/barbeiro");
+    if (semAlmoco) return done("Almoço removido.");
+    // Quem já estava marcado no horário do almoço continua: o dono decide.
+    const fora = await marcadosFora(input.barberId, (_d, ini, fim) => ini < input.fim! && fim > input.inicio!).catch(() => 0);
+    return done(
+      `Almoço salvo: a agenda bloqueia esse horário todo dia de trabalho.${
+        fora > 0 ? ` Atenção: ${fora} atendimento(s) já marcado(s) no horário do almoço continuam de pé — remarque pela Agenda se precisar.` : ""
+      }`
+    );
+  } catch (e) {
+    return fail(e);
+  }
+}

@@ -118,6 +118,9 @@ export const barbers = mysqlTable(
     commissionPct: int("commission_pct").notNull().default(40),
     // Meta de comissão do mês, mostrada na barra do painel do barbeiro.
     monthlyGoalCents: int("monthly_goal_cents").notNull().default(700000),
+    // Almoço (minutos do dia): bloqueado na agenda todo dia de trabalho.
+    lunchStart: int("lunch_start"),
+    lunchEnd: int("lunch_end"),
     active: boolean("active").notNull().default(true),
     sortOrder: int("sort_order").notNull().default(0),
   },

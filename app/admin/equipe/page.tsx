@@ -25,9 +25,8 @@ export default async function AdminEquipe() {
       <div>
         <h1 className="font-display text-3xl text-white sm:text-4xl">Equipe</h1>
         <p className="mt-1.5 text-sm text-steel-400">
-          Quem atende na barbearia: login, comissão, meta do mês e os dias de
-          folga de cada um. Barbeiro novo entra em &ldquo;Cadastrar
-          barbeiro&rdquo;, logo depois dos cartões.
+          Toque na pessoa para ver e editar: dados, jornada, almoço, comissão e
+          acesso.
         </p>
       </div>
       <EquipeManager
@@ -48,6 +47,8 @@ export default async function AdminEquipe() {
           baseCents: p.baseCents,
           barberCents: p.barberCents,
           atendimentos: p.atendimentos,
+          lunchStart: p.barber.lunchStart ?? null,
+          lunchEnd: p.barber.lunchEnd ?? null,
           hours: hours
             .filter((h) => h.barberId === p.barber.id)
             .map((h) => ({

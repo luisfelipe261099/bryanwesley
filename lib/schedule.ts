@@ -106,7 +106,7 @@ async function busyIntervals(
   const dayStart = shopTimeToUtc(year, month, day, 0);
   const dayEnd = shopTimeToUtc(year, month, day, 24 * 60);
 
-  const [appts, blocks] = await Promise.all([
+  const [appts, blocks, almocos] = await Promise.all([
     db
       .select({
         barberId: appointments.barberId,
@@ -136,6 +136,12 @@ async function busyIntervals(
           gte(scheduleBlocks.endsAt, dayStart)
         )
       ),
+    barberIds.length
+      ? db
+          .select({ id: barbers.id, lunchStart: barbers.lunchStart, lunchEnd: barbers.lunchEnd })
+          .from(barbers)
+          .where(inArray(barbers.id, barberIds))
+      : Promise.resolve([] as { id: number; lunchStart: number | null; lunchEnd: number | null }[]),
   ]);
 
   const byBarber = new Map<number, Busy[]>();
@@ -145,6 +151,14 @@ async function busyIntervals(
     byBarber
       .get(a.barberId)
       ?.push({ start: a.startsAt.getTime(), end: a.endsAt.getTime() });
+  }
+  // Almoço de cada um: ocupa a agenda dele todo dia, como um horário marcado.
+  for (const a of almocos) {
+    if (a.lunchStart == null || a.lunchEnd == null || a.lunchEnd <= a.lunchStart) continue;
+    byBarber.get(a.id)?.push({
+      start: shopTimeToUtc(year, month, day, a.lunchStart).getTime(),
+      end: shopTimeToUtc(year, month, day, a.lunchEnd).getTime(),
+    });
   }
   // Bloqueio sem barbeiro vale para a loja inteira.
   for (const b of blocks) {
@@ -237,9 +251,15 @@ export async function capacidadeDoDia(
   for (const [id, j] of janelas) {
     if (!j) continue;
     // Minutos livres da janela depois de tirar os bloqueios dele e os da loja.
+    const prof = pool.find((p) => p.id === id);
+    const almoco =
+      prof?.lunchStart != null && prof.lunchEnd != null && prof.lunchEnd > prof.lunchStart
+        ? [{ a: Math.max(j.open, prof.lunchStart), b: Math.min(j.close, prof.lunchEnd) }]
+        : [];
     const cortes = bloqueios
       .filter((b) => b.barberId === null || b.barberId === id)
       .map((b) => ({ a: Math.max(j.open, emMinutos(b.startsAt)), b: Math.min(j.close, emMinutos(b.endsAt)) }))
+      .concat(almoco)
       .filter((c) => c.b > c.a)
       .sort((x, y) => x.a - y.a);
     let bloqueado = 0;

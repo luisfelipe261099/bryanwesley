@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { KeyRound, Loader2, Plus, Save, Target, UserPlus, X } from "lucide-react";
+import { useEffect, useState, useTransition } from "react";
+import { ChevronDown, Coffee, KeyRound, Loader2, Plus, Save, Target, UserPlus, X } from "lucide-react";
 import {
   Card,
   notify,
@@ -20,6 +20,7 @@ import {
   upsertCommissionTier,
   removeCommissionTier,
   setBarberHours,
+  setBarberLunch,
 } from "../actions";
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
@@ -41,6 +42,9 @@ type BarberRow = {
   barberCents: number;
   atendimentos: number;
   hours: { weekday: number; openMinute: number; closeMinute: number }[];
+  /** Almoço (minutos do dia), bloqueado na agenda. */
+  lunchStart: number | null;
+  lunchEnd: number | null;
 };
 
 function hhmm(m: number) {
@@ -71,12 +75,14 @@ export function EquipeManager({
   }[];
 }) {
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       {team.map((b) => (
         <BarberCard key={b.id} barber={b} meu={b.userId === euUserId} />
       ))}
       <NewBarber comissaoPadrao={comissaoPadrao} />
-      <Tiers tiers={tiers} team={team} />
+      <div className="pt-4">
+        <Tiers tiers={tiers} team={team} />
+      </div>
     </div>
   );
 }
@@ -88,6 +94,31 @@ function BarberCard({ barber, meu }: { barber: BarberRow; meu: boolean }) {
   );
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, start] = useTransition();
+  // Fechado por padrão: a página mostra a equipe numa lista curta, e só a
+  // pessoa tocada abre os detalhes.
+  // Lembrado na aba: salvar recarrega os dados da página e o cartão era
+  // recriado fechado, bem na hora em que a pessoa conferia o que salvou.
+  const chave = `equipe-aberto-${barber.id}`;
+  const [aberto, setAbertoBruto] = useState(false);
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(chave) === "1") setAbertoBruto(true);
+    } catch {
+      /* sem armazenamento */
+    }
+  }, [chave]);
+  const setAberto = (f: (v: boolean) => boolean) =>
+    setAbertoBruto((v) => {
+      const n = f(v);
+      try {
+        if (n) sessionStorage.setItem(chave, "1");
+        else sessionStorage.removeItem(chave);
+      } catch {
+        /* sem armazenamento: só não lembra */
+      }
+      return n;
+    });
+  const folgas = barber.hours.filter((h) => h.closeMinute <= h.openMinute).map((h) => WEEKDAYS[h.weekday]);
 
   function save() {
     setMsg(null);
@@ -124,125 +155,200 @@ function BarberCard({ barber, meu }: { barber: BarberRow; meu: boolean }) {
   }
 
   return (
-    <Card
-      title={barber.active ? barber.name : `${barber.name} · desativado`}
-      desc={
-        barber.active
-          ? `${barber.atendimentos} atendimento(s) no mês`
-          : "Não aparece para os clientes. Ligue \u201cAtivo na agenda\u201d e salve para trazer de volta."
-      }
-    >
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <TextInput
-          label="Nome completo"
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-        />
-        <TextInput
-          label="WhatsApp"
-          inputMode="tel"
-          value={form.phone}
-          onChange={(e) => setForm({ ...form, phone: e.target.value })}
-        />
-        <TextInput
-          label="E-mail (login)"
-          type="email"
-          value={form.email}
-          onChange={(e) => setForm({ ...form, email: e.target.value })}
-        />
-      </div>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <TextInput
-          label="Nome curto"
-          value={form.shortName}
-          onChange={(e) => setForm({ ...form, shortName: e.target.value })}
-        />
-        <TextInput
-          label="Cargo"
-          value={form.title}
-          onChange={(e) => setForm({ ...form, title: e.target.value })}
-        />
-        <TextInput
-          label="Comissão base (%)"
-          type="number"
-          min={0}
-          max={100}
-          value={form.commissionPct}
-          onChange={(e) =>
-            setForm({ ...form, commissionPct: Number(e.target.value) })
-          }
-        />
-        <TextInput
-          label="Meta de comissão no mês (R$)"
-          inputMode="decimal"
-          value={goal}
-          onChange={(e) => setGoal(e.target.value)}
-        />
-      </div>
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        {/* No próprio cartão as duas chaves ficam travadas: o servidor
-            recusa (o dono ficaria trancado para fora), mas só depois de
-            um aviso de "não dá para desfazer" que assustava à toa. */}
-        <Toggle
-          checked={form.active}
-          onChange={(v) => setForm({ ...form, active: v })}
-          disabled={meu}
-          label="Ativo na agenda"
-          hint={
-            meu
-              ? "É a sua conta: só outro administrador pode desativá-la"
-              : form.active
-                ? "Aparece para os clientes e tem acesso ao sistema"
-                : "Ao salvar: perde o acesso e os horários futuros são cancelados"
-          }
-        />
-        <Toggle
-          checked={form.isAdmin}
-          onChange={(v) => setForm({ ...form, isAdmin: v })}
-          disabled={meu}
-          label="Também é administrador"
-          hint={meu ? "É a sua conta: você continua administrador" : "Dá acesso ao painel de gestão"}
-        />
-      </div>
-
-      <div className="mt-4 grid gap-3 rounded-2xl border border-white/8 bg-white/[0.02] p-4 sm:grid-cols-2">
-        <div className="sm:col-span-2">
-          <p className="text-sm font-semibold text-white">Resultado do mês</p>
-        </div>
-        <p className="text-sm text-steel-300">
-          Gerou{" "}
-          <span className="font-semibold text-white">
-            {formatBRL(form.baseCents)}
-          </span>
-        </p>
-        <p className="text-sm text-steel-300">
-          Comissão{" "}
-          <span className="font-semibold text-electric">
-            {formatBRL(form.barberCents)}
-          </span>
-        </p>
-      </div>
-
-      <BarberHours barberId={barber.id} hours={barber.hours} />
-
-      <ResetSenha userId={barber.userId} nome={barber.shortName} />
-
+    <div className={`glass overflow-hidden rounded-3xl ${barber.active ? "" : "opacity-70"}`}>
       <button
         type="button"
-        onClick={save}
-        disabled={pending}
-        className="btn-royal label mt-4 inline-flex items-center gap-2 rounded-full px-5 py-3 text-white disabled:opacity-50"
+        onClick={() => setAberto((v) => !v)}
+        aria-expanded={aberto}
+        className="flex w-full items-center gap-3 p-4 text-left sm:p-5"
       >
-        {pending ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <Save className="h-4 w-4" />
-        )}
-        Salvar
+        <span className="grid h-11 w-11 flex-none place-items-center rounded-full bg-royal-grad font-display text-lg text-white">
+          {barber.name.charAt(0)}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-semibold text-white">
+            {barber.shortName}
+            <span className="font-normal text-steel-400"> · {barber.title}</span>
+          </span>
+          <span className="mt-1 flex flex-wrap gap-1.5">
+            {!barber.active && <Pill cls="bg-white/8 text-steel-300">Desativado</Pill>}
+            {barber.isAdmin && <Pill cls="bg-electric/10 text-electric">Admin</Pill>}
+            <Pill cls={barber.lunchStart != null ? "bg-amber-400/10 text-amber-200" : "bg-white/5 text-steel-400"}>
+              {barber.lunchStart != null && barber.lunchEnd != null
+                ? `Almoço ${hhmm(barber.lunchStart)}–${hhmm(barber.lunchEnd)}`
+                : "Sem almoço"}
+            </Pill>
+            {folgas.length > 0 && <Pill cls="bg-white/5 text-steel-300">Folga {folgas.join(", ")}</Pill>}
+            <Pill cls="bg-white/5 text-steel-300">{barber.atendimentos} no mês</Pill>
+          </span>
+        </span>
+        <ChevronDown className={`h-5 w-5 flex-none text-steel-400 transition-transform ${aberto ? "rotate-180" : ""}`} />
       </button>
+
+      {aberto && (
+        <div className="space-y-4 border-t border-white/8 p-4 sm:p-5">
+          <Secao titulo="Dados">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <TextInput label="Nome completo" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <TextInput label="Nome curto" value={form.shortName} onChange={(e) => setForm({ ...form, shortName: e.target.value })} />
+              <TextInput label="Cargo" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+              <TextInput label="WhatsApp" inputMode="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+              <TextInput label="E-mail (login)" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            </div>
+          </Secao>
+
+          <Secao titulo="Jornada e almoço">
+            <Almoco barberId={barber.id} inicio={barber.lunchStart} fim={barber.lunchEnd} />
+            <BarberHours barberId={barber.id} hours={barber.hours} />
+          </Secao>
+
+          <Secao titulo="Comissão">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <TextInput
+                label="Comissão base (%)"
+                type="number"
+                min={0}
+                max={100}
+                value={form.commissionPct}
+                onChange={(e) => setForm({ ...form, commissionPct: Number(e.target.value) })}
+              />
+              <TextInput label="Meta de comissão no mês (R$)" inputMode="decimal" value={goal} onChange={(e) => setGoal(e.target.value)} />
+            </div>
+            <p className="mt-3 text-sm text-steel-300">
+              Este mês: gerou <span className="font-semibold text-white">{formatBRL(form.baseCents)}</span> · comissão{" "}
+              <span className="font-semibold text-electric">{formatBRL(form.barberCents)}</span>
+            </p>
+          </Secao>
+
+          <Secao titulo="Acesso">
+            {/* No próprio cartão as duas chaves ficam travadas: o servidor
+                recusa (o dono ficaria trancado para fora). */}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Toggle
+                checked={form.active}
+                onChange={(v) => setForm({ ...form, active: v })}
+                disabled={meu}
+                label="Ativo na agenda"
+                hint={
+                  meu
+                    ? "É a sua conta: só outro administrador pode desativá-la"
+                    : form.active
+                      ? "Aparece para os clientes e tem acesso ao sistema"
+                      : "Ao salvar: perde o acesso e os horários futuros são cancelados"
+                }
+              />
+              <Toggle
+                checked={form.isAdmin}
+                onChange={(v) => setForm({ ...form, isAdmin: v })}
+                disabled={meu}
+                label="Também é administrador"
+                hint={meu ? "É a sua conta: você continua administrador" : "Dá acesso ao painel de gestão"}
+              />
+            </div>
+            <ResetSenha userId={barber.userId} nome={barber.shortName} />
+          </Secao>
+
+          <div>
+            <button
+              type="button"
+              onClick={save}
+              disabled={pending}
+              className="btn-royal label inline-flex items-center gap-2 rounded-full px-5 py-3 text-white disabled:opacity-50"
+            >
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Salvar dados, comissão e acesso
+            </button>
+            <p className="mt-1.5 text-xs text-steel-400">Jornada e almoço salvam no próprio botão deles.</p>
+            <Feedback msg={msg} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Pill({ cls, children }: { cls: string; children: React.ReactNode }) {
+  return <span className={`label rounded-full px-2.5 py-1 text-[10px] ${cls}`}>{children}</span>;
+}
+
+function Secao({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-white/8 bg-white/[0.02] p-4">
+      <p className="label mb-3 text-steel-300">{titulo}</p>
+      {children}
+    </section>
+  );
+}
+
+/** Almoço: bloqueado na agenda todo dia de trabalho da pessoa. */
+function Almoco({ barberId, inicio, fim }: { barberId: number; inicio: number | null; fim: number | null }) {
+  const [ini, setIni] = useState(inicio != null ? hhmm(inicio) : "");
+  const [ate, setAte] = useState(fim != null ? hhmm(fim) : "");
+  const [msg, setMsg] = useState<Msg>(null);
+  const [pending, start] = useTransition();
+
+  function salvar(remover = false) {
+    setMsg(null);
+    start(async () => {
+      const res = await setBarberLunch({
+        barberId,
+        inicio: remover || !ini ? null : toMin(ini),
+        fim: remover || !ate ? null : toMin(ate),
+      });
+      setMsg(notify(res, "Salvo."));
+      if (res.ok && remover) {
+        setIni("");
+        setAte("");
+      }
+    });
+  }
+
+  return (
+    <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.04] p-3">
+      <p className="flex items-center gap-1.5 text-sm font-semibold text-white">
+        <Coffee className="h-4 w-4 text-amber-200" /> Almoço
+      </p>
+      <p className="mt-1 text-xs text-steel-400">
+        Todo dia de trabalho, esse horário fica bloqueado: ninguém consegue marcar (nem pelo site, nem encaixe).
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input
+          type="time"
+          aria-label="Início do almoço"
+          value={ini}
+          onChange={(e) => setIni(e.target.value)}
+          className="rounded-lg border border-white/10 bg-surface-2 px-3 py-2 text-sm text-white [color-scheme:dark] focus:border-electric/60"
+        />
+        <span className="text-steel-400">às</span>
+        <input
+          type="time"
+          aria-label="Fim do almoço"
+          value={ate}
+          onChange={(e) => setAte(e.target.value)}
+          className="rounded-lg border border-white/10 bg-surface-2 px-3 py-2 text-sm text-white [color-scheme:dark] focus:border-electric/60"
+        />
+        <button
+          type="button"
+          onClick={() => salvar()}
+          disabled={pending || !ini || !ate}
+          className="btn-royal label inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-white disabled:opacity-40"
+        >
+          {pending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+          Salvar almoço
+        </button>
+        {inicio != null && (
+          <button
+            type="button"
+            onClick={() => salvar(true)}
+            disabled={pending}
+            className="label rounded-full px-3 py-2 text-steel-400 hover:text-white disabled:opacity-50"
+          >
+            Sem almoço
+          </button>
+        )}
+      </div>
       <Feedback msg={msg} />
-    </Card>
+    </div>
   );
 }
 
@@ -339,6 +445,7 @@ function BarberHours({
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, start] = useTransition();
   const map = new Map(hours.map((h) => [h.weekday, h]));
+  const [editando, setEditando] = useState(false);
 
   function save(weekday: number, open: string, close: string, clear = false, folga = false) {
     setMsg(null);
@@ -355,11 +462,40 @@ function BarberHours({
   }
 
   return (
-    <div className="mt-4 rounded-2xl border border-white/8 bg-white/[0.02] p-4">
-      <p className="text-sm font-semibold text-white">Jornada própria</p>
-      <p className="mt-1 text-xs text-steel-400">
-        Dia em branco segue o horário da loja. Preencha só os dias em que ele
-        entra ou sai em outro horário, e toque em <strong className="text-steel-200">Folga</strong> no dia em que não trabalha.
+    <div className="mt-4">
+      <p className="text-sm font-semibold text-white">Jornada da semana</p>
+      {/* Resumo: a semana inteira em uma olhada. */}
+      <div className="mt-2 grid grid-cols-4 gap-1.5 sm:grid-cols-7">
+        {WEEKDAYS.map((d, i) => {
+          const linha = map.get(i);
+          const folga = !!linha && linha.closeMinute <= linha.openMinute;
+          return (
+            <div
+              key={d}
+              className={`rounded-lg px-2 py-1.5 text-center ${
+                folga ? "bg-amber-400/10 text-amber-200" : linha ? "bg-electric/10 text-electric" : "bg-white/5 text-steel-300"
+              }`}
+            >
+              <span className="label block text-[10px]">{d}</span>
+              <span className="block text-[11px]">
+                {folga ? "Folga" : linha ? `${hhmm(linha.openMinute)}–${hhmm(linha.closeMinute)}` : "Loja"}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        onClick={() => setEditando((v) => !v)}
+        className="label mt-2 text-electric underline-offset-4 hover:underline"
+      >
+        {editando ? "Fechar edição" : "Editar jornada"}
+      </button>
+      {editando && (
+      <>
+      <p className="mt-2 text-xs text-steel-400">
+        &ldquo;Loja&rdquo; segue o horário da loja. Preencha só os dias em que entra ou sai em outro horário e toque em{" "}
+        <strong className="text-steel-200">Folga</strong> no dia em que não trabalha.
       </p>
       <div className="mt-3 space-y-2">
         {WEEKDAYS.map((d, i) => {
@@ -431,6 +567,8 @@ function BarberHours({
           );
         })}
       </div>
+      </>
+      )}
       <Feedback msg={msg} />
     </div>
   );
@@ -578,6 +716,7 @@ function Tiers({
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, start] = useTransition();
   const [f, setF] = useState({ barberId: "", meta: "", pct: 60, label: "" });
+  const [aberto, setAberto] = useState(false);
 
   function add() {
     setMsg(null);
@@ -592,6 +731,25 @@ function Tiers({
       setMsg(notify(res, "Salvo."));
       if (res.ok) setF({ ...f, meta: "", label: "" });
     });
+  }
+
+  if (!aberto) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAberto(true)}
+        className="glass flex w-full items-center gap-3 rounded-3xl p-4 text-left sm:p-5"
+      >
+        <Target className="h-5 w-5 flex-none text-electric" />
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold text-white">Faixas de meta</span>
+          <span className="text-xs text-steel-400">
+            {tiers.length ? `${tiers.length} faixa(s) cadastrada(s)` : "Nenhuma faixa: vale a comissão base de cada um"}
+          </span>
+        </span>
+        <ChevronDown className="h-5 w-5 flex-none text-steel-400" />
+      </button>
+    );
   }
 
   return (
