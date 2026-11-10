@@ -92,6 +92,8 @@ export type AsaasPayment = {
   invoiceUrl?: string | null;
   transactionReceiptUrl?: string | null;
   deleted?: boolean;
+  /** Cobrança gerada por uma assinatura do Asaas (cartão recorrente). */
+  subscription?: string | null;
 };
 
 /**
@@ -126,6 +128,41 @@ export function pixDaCobranca(id: string) {
 /** Apaga uma cobrança ainda não paga (o cliente desistiu ou trocou a forma). */
 export function apagarCobranca(id: string) {
   return chamar<{ deleted: boolean }>("DELETE", `/payments/${encodeURIComponent(id)}`);
+}
+
+export type AsaasSubscription = { id: string; status?: string };
+
+/**
+ * Assinatura no cartão: o cliente informa o cartão na primeira fatura e o
+ * Asaas cobra sozinho a cada ciclo, à vista (assinatura não parcela).
+ */
+export function criarAssinaturaCartao(input: {
+  cliente: string;
+  valorCents: number;
+  ciclo: "MONTHLY" | "YEARLY";
+  primeiroVencimento: string; // AAAA-MM-DD
+  descricao: string;
+  referencia: string;
+}) {
+  return chamar<AsaasSubscription>("POST", "/subscriptions", {
+    customer: input.cliente,
+    billingType: "CREDIT_CARD",
+    value: Number((input.valorCents / 100).toFixed(2)),
+    nextDueDate: input.primeiroVencimento,
+    cycle: input.ciclo,
+    description: input.descricao.slice(0, 500),
+    externalReference: input.referencia,
+  });
+}
+
+/** Cobranças de uma assinatura (a mais recente primeiro, na prática a 1ª). */
+export function cobrancasDaAssinatura(id: string) {
+  return chamar<{ data: AsaasPayment[] }>("GET", `/subscriptions/${encodeURIComponent(id)}/payments?limit=10`);
+}
+
+/** Encerra a assinatura no Asaas: o cartão não é mais cobrado. */
+export function cancelarAssinaturaAsaas(id: string) {
+  return chamar<{ deleted: boolean }>("DELETE", `/subscriptions/${encodeURIComponent(id)}`);
 }
 
 export function consultarCobranca(id: string) {

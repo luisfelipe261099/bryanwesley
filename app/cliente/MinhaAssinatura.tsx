@@ -52,7 +52,7 @@ export function PagarPlano({ rotulo = "Pagar com Pix" }: { rotulo?: string }) {
       </Acao>
       <Acao className="border border-electric/40 bg-electric/10 text-electric" onRun={pagar("CARTAO")}>
         <CreditCard className="h-3.5 w-3.5" />
-        Cartão à vista
+        Cartão (automático)
       </Acao>
     </span>
   );

@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { cancelPayment, settlePayment } from "@/lib/payments";
+import { cancelPayment, settleCobrancaRecorrente, settlePayment } from "@/lib/payments";
 
 export const dynamic = "force-dynamic";
 // Confere a cobrança na API do Asaas e avisa no celular: mais que o padrão.
@@ -24,7 +24,10 @@ export async function POST(req: Request) {
   if (!tokenConfere(req.headers.get("asaas-access-token"))) {
     return NextResponse.json({ error: "não autorizado" }, { status: 401 });
   }
-  let body: { event?: string; payment?: { id?: string; externalReference?: string | null } };
+  let body: {
+    event?: string;
+    payment?: { id?: string; externalReference?: string | null; subscription?: string | null };
+  };
   try {
     body = await req.json();
   } catch {
@@ -34,6 +37,20 @@ export async function POST(req: Request) {
   const evento = String(body.event ?? "");
   const paymentId = body.payment?.id ? String(body.payment.id) : undefined;
   const orderNsu = body.payment?.externalReference ? String(body.payment.externalReference) : "";
+
+  // Cobrança da assinatura do cartão (a do mês seguinte nasce lá sem
+  // registro aqui): baixa pela assinatura, conferida na API.
+  const assinaturaAsaas = body.payment?.subscription ? String(body.payment.subscription) : "";
+  if (assinaturaAsaas && paymentId && (evento === "PAYMENT_RECEIVED" || evento === "PAYMENT_CONFIRMED")) {
+    const res = await settleCobrancaRecorrente({ paymentId, asaasSubscriptionId: assinaturaAsaas });
+    if (!res.ok) {
+      console.error("Webhook Asaas (cartão recorrente) não deu baixa:", evento, paymentId, res.error);
+      if ("temporario" in res && res.temporario) {
+        return NextResponse.json({ error: res.error }, { status: 503 });
+      }
+    }
+    return NextResponse.json({ ok: true });
+  }
   // Cobrança sem a nossa referência (feita direto no painel do Asaas).
   if (!orderNsu) return NextResponse.json({ ok: true, ignorado: "sem referência" });
 

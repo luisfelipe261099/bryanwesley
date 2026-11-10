@@ -1131,6 +1131,7 @@ export async function listSubscribers(f: FiltroAssinantes = {}) {
     renewsAt: r.sub.renewsAt,
     canceledAt: r.sub.canceledAt,
     limiteMensal: r.plan.monthlyLimit ?? null,
+    cartaoAutomatico: !!r.sub.asaasSubscriptionId,
     extrasLiberados: r.user.extraVisits,
   }));
 }

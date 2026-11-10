@@ -231,6 +231,8 @@ export const subscriptions = mysqlTable(
     startedAt: tsNow("started_at"),
     renewsAt: ts("renews_at").notNull(),
     canceledAt: ts("canceled_at"),
+    // Cartão recorrente: a assinatura no Asaas que cobra o cartão sozinha.
+    asaasSubscriptionId: varchar("asaas_subscription_id", { length: 40 }),
   },
   (t) => ({ userIdx: index("subscriptions_user_idx").on(t.userId) })
 );

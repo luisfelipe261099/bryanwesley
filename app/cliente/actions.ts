@@ -24,7 +24,7 @@ import {
 } from "@/lib/appointments";
 import { avisarPedidoDePlano } from "@/lib/avisos";
 import { hitRateLimit } from "@/lib/rate-limit";
-import { chargeSubscription, isCobrancaOnline } from "@/lib/payments";
+import { assinarNoCartao, chargeSubscription, encerrarCartaoRecorrente, isCobrancaOnline } from "@/lib/payments";
 import { materializeRecurring, cancelFutureOccurrences, ocorrenciasFuturas } from "@/lib/recurring";
 import { getSettings } from "@/lib/schedule";
 import { shopToday, minutesToHHMM, utcToShopParts } from "@/lib/time";
@@ -452,6 +452,8 @@ export async function requestPlan(input: {
   cycle: "MENSAL" | "ANUAL";
   /** CPF de quem assina: o Asaas não gera cobrança sem ele. */
   cpf?: string;
+  /** Pix (cada mês um Pix) ou cartão de crédito cobrado sozinho todo mês. */
+  metodo?: "PIX" | "CARTAO";
 }): Promise<SubscribeResult> {
   const session = await requireRole(["CLIENT", "ADMIN"]);
 
@@ -528,7 +530,10 @@ export async function requestPlan(input: {
       }).$returningId();
       novaId = id;
     }
-    const charge = await chargeSubscription(session.id, input.cycle, { cpf: input.cpf });
+    const charge =
+      input.metodo === "CARTAO"
+        ? await assinarNoCartao(session.id, input.cycle, { cpf: input.cpf })
+        : await chargeSubscription(session.id, input.cycle, { cpf: input.cpf, tipo: "PIX" });
     if (charge.ok) {
       revalidatePath("/cliente");
       return { ok: true, mode: "pagamento", url: charge.url };
@@ -604,6 +609,7 @@ export async function cancelMyPlan(): Promise<ActionResult> {
 
   if (sub.status === "INADIMPLENTE") {
     // Vencida e não paga: encerra na hora, não há ciclo pago a respeitar.
+    await encerrarCartaoRecorrente(session.id);
     await db
       .update(subscriptions)
       .set({ status: "CANCELADA", canceledAt: new Date() })
@@ -617,6 +623,8 @@ export async function cancelMyPlan(): Promise<ActionResult> {
   if (sub.canceledAt) {
     return { ok: false, error: "Seu cancelamento já está agendado." };
   }
+  // Cancelou: o cartão não é mais cobrado no próximo ciclo.
+  await encerrarCartaoRecorrente(session.id);
   await db
     .update(subscriptions)
     .set({ canceledAt: new Date() })
@@ -676,11 +684,12 @@ export async function payMyPlan(
       error: "Pagamento online ainda não está ligado. Acerte na barbearia.",
     };
   }
-  const charge = await chargeSubscription(session.id, sub.cycle, {
-    cpf: input.cpf,
-    // Mensalista: só Pix ou cartão à vista.
-    tipo: input.metodo === "CARTAO" ? "CREDIT_CARD" : "PIX",
-  });
+  // Mensalista: Pix, ou cartão de crédito cobrado sozinho todo mês
+  // (assinatura do Asaas, à vista — não parcela).
+  const charge =
+    input.metodo === "CARTAO"
+      ? await assinarNoCartao(session.id, sub.cycle, { cpf: input.cpf })
+      : await chargeSubscription(session.id, sub.cycle, { cpf: input.cpf, tipo: "PIX" });
   if (!charge.ok) return { ok: false, error: charge.error, precisaCpf: charge.precisaCpf };
   revalidatePath("/cliente");
   return { ok: true, mode: "pagamento", url: charge.url };

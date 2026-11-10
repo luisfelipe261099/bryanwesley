@@ -53,6 +53,8 @@ type Assinante = {
   /** Extras liberados pelo admin que ainda sobram. */
   extrasSaldo: number;
   extrasLiberados: number;
+  /** Paga no cartão recorrente do Asaas (cobrado sozinho). */
+  cartaoAutomatico: boolean;
 };
 
 type Resumo = {
@@ -502,6 +504,11 @@ function LinhaAssinante({
                 {assinante.limiteMensal !== null
                   ? `${Math.min(assinante.usadosNoMes, assinante.limiteMensal)} de ${assinante.limiteMensal} no mês`
                   : `${assinante.usadosNoMes} no mês`}
+              </span>
+            )}
+            {assinante.cartaoAutomatico && (
+              <span className="label rounded-full bg-electric/10 px-2.5 py-1.5 text-electric" title="Cobrado sozinho no cartão a cada ciclo">
+                Cartão automático
               </span>
             )}
             {assinante.extrasSaldo > 0 && (

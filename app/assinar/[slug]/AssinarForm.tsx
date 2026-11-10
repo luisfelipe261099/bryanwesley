@@ -29,6 +29,7 @@ export function AssinarForm({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [cpf, setCpf] = useState(formatarCpf(cpfAtual));
+  const [metodo, setMetodo] = useState<"CARTAO" | "PIX">("CARTAO");
   const router = useRouter();
 
   const unit = cycle === "ANUAL" ? annualCents : priceCents;
@@ -42,7 +43,7 @@ export function AssinarForm({
     }
     start(async () => {
       try {
-        const res = await requestPlan({ planId, cycle, cpf: cobrancaOnline ? cpf : undefined });
+        const res = await requestPlan({ planId, cycle, cpf: cobrancaOnline ? cpf : undefined, metodo });
         if (!res.ok) {
           setError(res.error);
           return;
@@ -115,7 +116,38 @@ export function AssinarForm({
       </ul>
 
       {cobrancaOnline && (
-        <label className="mt-6 block border-t border-white/8 pt-5">
+        <div className="mt-6 border-t border-white/8 pt-5">
+          <span className="label mb-2 block text-steel-400">Como pagar</span>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {(
+              [
+                {
+                  v: "CARTAO",
+                  titulo: "Cartão de crédito",
+                  desc: cycle === "ANUAL" ? "Cobrado sozinho todo ano, à vista" : "Cobrado sozinho todo mês, à vista",
+                },
+                { v: "PIX", titulo: "Pix", desc: "A cada ciclo chega um Pix para pagar" },
+              ] as const
+            ).map((o) => (
+              <button
+                key={o.v}
+                type="button"
+                aria-pressed={metodo === o.v}
+                onClick={() => setMetodo(o.v)}
+                className={`rounded-2xl border p-3.5 text-left transition-colors ${
+                  metodo === o.v ? "border-electric/60 bg-electric/[0.07]" : "border-white/10 hover:border-white/25"
+                }`}
+              >
+                <span className="block font-semibold text-white">{o.titulo}</span>
+                <span className="mt-0.5 block text-xs text-steel-400">{o.desc}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {cobrancaOnline && (
+        <label className="mt-5 block">
           <span className="label mb-2 block text-steel-400">CPF de quem vai usar o plano</span>
           <input
             inputMode="numeric"
@@ -126,7 +158,10 @@ export function AssinarForm({
             className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none placeholder:text-steel-400/60 focus:border-electric/60"
           />
           <span className="mt-1.5 block text-xs text-steel-400">
-            O pagamento é feito pelo Asaas, com Pix, boleto ou cartão. O CPF é pedido por ele para emitir a cobrança.
+            {metodo === "CARTAO"
+              ? "Você informa o cartão uma vez na página segura do Asaas e ele é cobrado sozinho a cada ciclo. Cancelou o plano, para de cobrar."
+              : "O Pix é gerado pelo Asaas a cada ciclo."}{" "}
+            O CPF é pedido pelo Asaas para emitir a cobrança.
           </span>
         </label>
       )}

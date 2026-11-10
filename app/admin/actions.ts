@@ -46,7 +46,7 @@ import {
 } from "@/lib/notifications";
 import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
 import { claimDispatchSlot, runDispatch, despacharPush } from "@/lib/dispatch";
-import { chargeSubscription } from "@/lib/payments";
+import { chargeSubscription, encerrarCartaoRecorrente } from "@/lib/payments";
 import { saldoDeExtras } from "@/lib/appointments";
 import { cpfValido, soDigitosCpf } from "@/lib/cpf";
 import { shopTimeToUtc, parseDateKey, utcToShopParts } from "@/lib/time";
@@ -1225,6 +1225,9 @@ export async function subscribeClient(input: {
     // apagava meses já pagos do anual, ou dava meses de graça. Pagou o
     // novo ciclo agora? É o "Registrar renovação" que estende.
     const mantemVencimento = !!tinhaPlano && tinhaPlano.renewsAt.getTime() > Date.now();
+    // A assinatura antiga sai: o cartão recorrente dela também (no plano
+    // novo o membro escolhe de novo como pagar).
+    await encerrarCartaoRecorrente(input.userId);
     const renewsAt = mantemVencimento ? tinhaPlano!.renewsAt : nextRenewal(new Date(), input.cycle);
 
     // Encerra o que estiver em aberto — ativa OU vencida. Só a ativa era
@@ -1354,6 +1357,8 @@ export async function cancelSubscription(userId: number): Promise<Result> {
     if (alvos.length === 0) {
       return { ok: false, error: "Esse cliente não tem plano em aberto." };
     }
+    // Cartão recorrente: o Asaas para de cobrar.
+    await encerrarCartaoRecorrente(userId);
     await db
       .update(subscriptions)
       .set({ status: "CANCELADA", canceledAt: new Date() })

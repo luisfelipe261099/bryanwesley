@@ -4,7 +4,7 @@
 // baixa só acontece depois que a própria API do Asaas confirma.
 // Sem ASAAS_API_KEY o módulo fica inerte e a ativação segue manual.
 // ───────────────────────────────────────────────────────────
-import { and, desc, eq, inArray, lte } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, lte } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointmentServices,
@@ -20,6 +20,9 @@ import { avisarMensalidade, avisarPagamento, avisarPagamentoDoHorario } from "./
 import { cpfValido, soDigitosCpf } from "./cpf";
 import {
   apagarCobranca,
+  cancelarAssinaturaAsaas,
+  cobrancasDaAssinatura,
+  criarAssinaturaCartao,
   cobrancaPaga,
   consultarCobranca,
   criarCobranca,
@@ -199,7 +202,14 @@ export async function settlePayment(input: { orderNsu: string; paymentId?: strin
   const check = await consultarCobranca(input.paymentId);
   if (!check.ok) return { ok: false as const, error: check.error, temporario: true };
   const c = check.data;
-  if (c.deleted || !cobrancaPaga(c.status) || c.externalReference !== payment.orderNsu) {
+  // Cobrança gerada pela assinatura do cartão: a referência é a da
+  // assinatura; vale se a assinatura do Asaas é a deste plano.
+  let daAssinatura = false;
+  if (c.subscription && payment.subscriptionId) {
+    const nossa = await db.query.subscriptions.findFirst({ where: eq(subscriptions.id, payment.subscriptionId) });
+    daAssinatura = !!nossa?.asaasSubscriptionId && nossa.asaasSubscriptionId === c.subscription;
+  }
+  if (c.deleted || !cobrancaPaga(c.status) || (c.externalReference !== payment.orderNsu && !daAssinatura)) {
     return { ok: false as const, error: "Pagamento não confirmado." };
   }
   if (Math.round(c.value * 100) < payment.amountCents) {
@@ -505,8 +515,9 @@ export async function cobrarMensalidadesAutomaticas(opts: { forcar?: boolean; li
     .limit(opts.limite ?? 40);
 
   for (const { sub, user } of candidatas) {
-    // Pediu para sair no fim do ciclo: não se cobra o próximo.
-    if (sub.canceledAt) { r.puladas++; continue; }
+    // Pediu para sair no fim do ciclo: não se cobra o próximo. No cartão
+    // recorrente quem cobra é o próprio Asaas.
+    if (sub.canceledAt || sub.asaasSubscriptionId) { r.puladas++; continue; }
     const aberta = await db.query.payments.findFirst({
       where: and(eq(payments.subscriptionId, sub.id), eq(payments.kind, "ASSINATURA"), eq(payments.status, "PENDENTE")),
     });
@@ -525,4 +536,178 @@ export async function cobrarMensalidadesAutomaticas(opts: { forcar?: boolean; li
     }
   }
   return r;
+}
+
+
+// ───────────────────── Plano no cartão, cobrado sozinho ─────────────────────
+
+/**
+ * Mensalidade no cartão de crédito recorrente: cria (ou recria) a
+ * assinatura no Asaas. O membro informa o cartão na primeira fatura e,
+ * dali em diante, o Asaas cobra o cartão sozinho a cada ciclo, à vista.
+ * Cada cobrança paga chega pelo webhook e renova o plano aqui.
+ */
+export async function assinarNoCartao(
+  userId: number,
+  cycle: "MENSAL" | "ANUAL",
+  opts: { cpf?: string } = {}
+): Promise<ChargeResult> {
+  if (!isCobrancaOnline()) {
+    return { ok: false, error: "Cobrança online não configurada (ASAAS_API_KEY ausente)." };
+  }
+  const sub = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.userId, userId),
+    orderBy: (s, { desc }) => [desc(s.startedAt)],
+  });
+  if (!sub) return { ok: false, error: "Cliente sem assinatura." };
+  if (sub.status === "CANCELADA") {
+    return { ok: false, error: "Esse plano está cancelado. Ative de novo antes de gerar a cobrança." };
+  }
+  const [plan, user] = await Promise.all([
+    db.query.plans.findFirst({ where: eq(plans.id, sub.planId) }),
+    db.query.users.findFirst({ where: eq(users.id, userId) }),
+  ]);
+  if (!plan || !user) return { ok: false, error: "Plano ou cliente não encontrado." };
+
+  const meses = cycle === "ANUAL" ? 12 : 1;
+  const valor = (cycle === "ANUAL" ? plan.annualPriceCents : plan.priceCents) * meses;
+
+  // Já tem a assinatura do cartão com a primeira fatura em aberto: a mesma.
+  if (sub.asaasSubscriptionId) {
+    const aberta = await db.query.payments.findFirst({
+      where: and(
+        eq(payments.subscriptionId, sub.id),
+        eq(payments.status, "PENDENTE"),
+        eq(payments.slug, "CREDIT_CARD_RECORRENTE")
+      ),
+      orderBy: (p, { desc }) => [desc(p.id)],
+    });
+    if (aberta?.checkoutUrl && aberta.amountCents === valor && aberta.cycle === cycle) {
+      return { ok: true, url: aberta.checkoutUrl, orderNsu: aberta.orderNsu };
+    }
+  }
+
+  let cpf = user.cpf;
+  if (opts.cpf) {
+    if (!cpfValido(opts.cpf)) return { ok: false, error: "CPF inválido. Confira os números.", precisaCpf: true };
+    cpf = soDigitosCpf(opts.cpf);
+  }
+  if (!cpf) return { ok: false, precisaCpf: true, error: "Para pagar online, informe o CPF de quem é o plano." };
+
+  const cliente = await salvarCliente({
+    asaasId: user.asaasCustomerId,
+    nome: user.name,
+    cpf,
+    telefone: user.phone,
+    email: user.email,
+    referencia: `usuario-${user.id}`,
+  });
+  if (!cliente.ok) return { ok: false, error: cliente.error };
+  if (cliente.data.id !== user.asaasCustomerId || cpf !== user.cpf) {
+    await db.update(users).set({ asaasCustomerId: cliente.data.id, cpf }).where(eq(users.id, user.id));
+  }
+
+  // Troca de plano ou de ciclo: a assinatura antiga do cartão sai antes,
+  // para o cartão não ser cobrado duas vezes.
+  if (sub.asaasSubscriptionId) {
+    await cancelarAssinaturaAsaas(sub.asaasSubscriptionId).catch(() => null);
+  }
+
+  // Primeira cobrança: hoje para quem está entrando ou vencido; no
+  // vencimento para quem está em dia (pode pagar antes, se quiser).
+  const hoje = shopToday();
+  const venc = sub.status === "ATIVA" && sub.renewsAt > new Date() ? utcToShopParts(sub.renewsAt).dateKey : hoje;
+  const descricao = `${plan.name} — ${cycle === "ANUAL" ? "anual" : "mensal"}, cartão automático`;
+  const criada = await criarAssinaturaCartao({
+    cliente: cliente.data.id,
+    valorCents: valor,
+    ciclo: cycle === "ANUAL" ? "YEARLY" : "MONTHLY",
+    primeiroVencimento: venc > hoje ? venc : hoje,
+    descricao: `Clube VIP Bryan Wesley · ${descricao}`,
+    referencia: `assinatura-${sub.id}`,
+  });
+  if (!criada.ok) return { ok: false, error: criada.error };
+  await db.update(subscriptions).set({ asaasSubscriptionId: criada.data.id }).where(eq(subscriptions.id, sub.id));
+
+  // A primeira fatura nasce junto com a assinatura.
+  const lista = await cobrancasDaAssinatura(criada.data.id);
+  const primeira = lista.ok ? lista.data.data?.find((p) => p.invoiceUrl && !cobrancaPaga(p.status)) : undefined;
+  if (!primeira?.invoiceUrl) {
+    return { ok: false, error: "O Asaas criou a assinatura mas não devolveu a fatura. Tente de novo em instantes." };
+  }
+
+  // Faturas antigas em aberto (Pix, cartão avulso) saem: senão o membro
+  // poderia pagar duas vezes o mesmo mês.
+  const velhas = await db
+    .select()
+    .from(payments)
+    .where(and(eq(payments.subscriptionId, sub.id), eq(payments.status, "PENDENTE")));
+  for (const v of velhas) await descartarCobranca(v);
+
+  const orderNsu = nsu();
+  await db.insert(payments).values({
+    orderNsu,
+    userId,
+    subscriptionId: sub.id,
+    kind: "ASSINATURA",
+    cycle,
+    planId: plan.id,
+    amountCents: valor,
+    description: `${plan.name} · ${cycle.toLowerCase()} · cartão automático`,
+    provider: "asaas",
+    checkoutUrl: primeira.invoiceUrl,
+    transactionNsu: primeira.id,
+    slug: "CREDIT_CARD_RECORRENTE",
+  });
+  return { ok: true, url: primeira.invoiceUrl, orderNsu };
+}
+
+/**
+ * Cobrança da assinatura do cartão avisada pelo webhook. A do mês seguinte
+ * nasce no Asaas sem registro aqui: o registro é criado na hora, a partir
+ * da assinatura, e a baixa segue o caminho de sempre (conferida na API).
+ */
+export async function settleCobrancaRecorrente(input: { paymentId: string; asaasSubscriptionId: string }) {
+  const sub = await db.query.subscriptions.findFirst({
+    where: eq(subscriptions.asaasSubscriptionId, input.asaasSubscriptionId),
+  });
+  if (!sub) return { ok: false as const, error: "Assinatura do Asaas desconhecida." };
+  let linha = await db.query.payments.findFirst({ where: eq(payments.transactionNsu, input.paymentId) });
+  if (!linha) {
+    const plan = await db.query.plans.findFirst({ where: eq(plans.id, sub.planId) });
+    if (!plan) return { ok: false as const, error: "Plano não encontrado." };
+    const meses = sub.cycle === "ANUAL" ? 12 : 1;
+    const orderNsu = nsu();
+    await db.insert(payments).values({
+      orderNsu,
+      userId: sub.userId,
+      subscriptionId: sub.id,
+      kind: "ASSINATURA",
+      cycle: sub.cycle,
+      planId: plan.id,
+      amountCents: (sub.cycle === "ANUAL" ? plan.annualPriceCents : plan.priceCents) * meses,
+      description: `${plan.name} · ${sub.cycle.toLowerCase()} · cartão automático`,
+      provider: "asaas",
+      transactionNsu: input.paymentId,
+      slug: "CREDIT_CARD_RECORRENTE",
+    });
+    linha = await db.query.payments.findFirst({ where: eq(payments.orderNsu, orderNsu) });
+  }
+  return settlePayment({ orderNsu: linha!.orderNsu, paymentId: input.paymentId });
+}
+
+/** Plano cancelado: o cartão para de ser cobrado no Asaas. */
+export async function encerrarCartaoRecorrente(userId: number) {
+  const subs = await db
+    .select()
+    .from(subscriptions)
+    .where(and(eq(subscriptions.userId, userId), isNotNull(subscriptions.asaasSubscriptionId)));
+  for (const s of subs) {
+    const r = await cancelarAssinaturaAsaas(s.asaasSubscriptionId!).catch(() => null);
+    if (r && !r.ok && r.status !== 404) {
+      console.error("Asaas: não deu para encerrar a assinatura do cartão", s.asaasSubscriptionId, r.error);
+      continue;
+    }
+    await db.update(subscriptions).set({ asaasSubscriptionId: null }).where(eq(subscriptions.id, s.id));
+  }
 }

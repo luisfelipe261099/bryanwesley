@@ -342,6 +342,11 @@ export default async function ClienteDashboard({
                     </div>
                   </div>
 
+                  {subscription.asaasSubscriptionId && !mensalidadeAberta && (
+                    <p className="relative mt-5 rounded-2xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
+                      Pagamento automático no cartão: a mensalidade é cobrada sozinha a cada ciclo.
+                    </p>
+                  )}
                   {mensalidadeAberta && isCobrancaOnline() && (
                     <div className="relative mt-5 rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4">
                       <p className="text-sm font-semibold text-amber-100">
