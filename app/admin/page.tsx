@@ -28,6 +28,7 @@ import {
 } from "@/lib/time";
 import { shopFrom } from "@/lib/shop";
 import { openPlanRequests } from "@/lib/queries";
+import { pedidosDeSenhaAbertos } from "@/lib/senha-link";
 import { appointmentStatus as statusStyles } from "@/lib/status";
 import { ApptControls } from "./AgendaHoje";
 import { PlanRequests } from "./PlanRequests";
@@ -68,6 +69,8 @@ export default async function AdminDashboard({
     tutorialPendente(session.id, "admin"),
     tutorialPendente(session.id, "preco-turno"),
   ]);
+  // Clientes que pediram senha nova: o admin manda o link pelo WhatsApp.
+  const pedidosSenha = await pedidosDeSenhaAbertos();
   const agenda = agendaDia;
 
   const info = shopFrom(settings);
@@ -360,6 +363,26 @@ export default async function AdminDashboard({
             <PlanRequests requests={pedidos} />
           </div>
         </Reveal>
+      )}
+
+      {pedidosSenha.length > 0 && (
+        <div className="glass mt-5 rounded-3xl p-6">
+          <p className="label text-amber-200">Pedidos de nova senha</p>
+          <p className="mt-1 text-sm text-steel-400">Abra a ficha e toque em “Mandar link de nova senha no WhatsApp”.</p>
+          <ul className="mt-4 space-y-2">
+            {pedidosSenha.map((p) => (
+              <li key={p.id}>
+                <a
+                  href={`/admin/clientes/${p.userId}`}
+                  className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-white/[0.02] px-4 py-3 text-sm text-white hover:border-electric/40"
+                >
+                  <span>{p.name}</span>
+                  <span className="label text-electric">Mandar link →</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {/* Equipe */}

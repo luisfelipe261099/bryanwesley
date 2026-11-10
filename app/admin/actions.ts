@@ -56,6 +56,7 @@ import { avisarPlanoAtivado } from "@/lib/avisos";
 import { whatsappEnviando } from "@/lib/whatsapp-status";
 import { formatBRL } from "@/lib/money";
 import { publicBaseUrl } from "@/lib/qr";
+import { gerarLinkDeSenha } from "@/lib/senha-link";
 import { wahaConfigurado, wahaConectar, wahaCodigoDePareamento } from "@/lib/providers/waha";
 import { retomarAtendente } from "@/lib/whatsapp-bot";
 import {
@@ -2051,5 +2052,31 @@ export async function ajustarCobrancaDoPlano(input: {
     );
   } catch (e) {
     return fail(e);
+  }
+}
+
+
+/**
+ * Link para o cliente criar a senha nova (vale 24 h, uma vez só). O admin
+ * manda pelo WhatsApp da barbearia.
+ */
+export async function gerarLinkNovaSenha(userId: number): Promise<
+  { ok: true; url: string; whatsapp: string | null } | { ok: false; error: string }
+> {
+  try {
+    await admin();
+    const r = await gerarLinkDeSenha(userId);
+    if (!r) return { ok: false, error: "Cliente não encontrado ou desativado." };
+    revalidatePath("/admin");
+    revalidatePath(`/admin/clientes/${userId}`);
+    const fone = normalizePhone(r.phone);
+    const whatsapp =
+      fone.length >= 10 && !isPlaceholderPhone(fone)
+        ? `https://wa.me/55${fone}?text=${encodeURIComponent(r.texto)}`
+        : null;
+    return { ok: true, url: r.url, whatsapp };
+  } catch (e) {
+    const f = fail(e);
+    return { ok: false, error: f.ok ? "Erro" : f.error };
   }
 }

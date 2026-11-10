@@ -1,3 +1,4 @@
+import { temPedidoDeSenha } from "@/lib/senha-link";
 import { carregarRegras } from "@/lib/precos-server";
 import { isCobrancaOnline } from "@/lib/payments";
 import Link from "next/link";
@@ -46,6 +47,7 @@ export default async function FichaDoCliente({
   if (!Number.isInteger(id) || id <= 0) notFound();
 
   const ficha = await clientDetail(id);
+  const pedidoSenha = ficha ? await temPedidoDeSenha(id) : null;
   if (!ficha) notFound();
 
   const [services, team, plans, settings, regras] = await Promise.all([
@@ -69,6 +71,7 @@ export default async function FichaDoCliente({
 
       <FichaCliente
         cobrancaOnline={isCobrancaOnline()}
+        pedidoSenha={pedidoSenha ? labelDayMonth(utcToShopParts(pedidoSenha).dateKey) : null}
         cliente={ficha.cliente}
         assinatura={
           ficha.assinatura

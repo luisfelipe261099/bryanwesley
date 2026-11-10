@@ -7,6 +7,7 @@ import { AlertCircle, ArrowLeft, ArrowRight, CalendarPlus, CheckCircle2, KeyRoun
 import {
   login,
   pedirCodigoNoWhatsapp,
+  pedirNovaSenhaNaBarbearia,
   redefinirMinhaSenha,
   signup,
   type AuthState,
@@ -19,9 +20,12 @@ type Tab = "entrar" | "criar" | "esqueci";
 export function LoginForm({
   proximo,
   erroInicial,
+  whatsapp = false,
 }: {
   proximo: string;
   erroInicial?: string;
+  /** O WhatsApp da barbearia manda mensagens sozinho (código de senha). */
+  whatsapp?: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("entrar");
 
@@ -46,7 +50,7 @@ export function LoginForm({
       {tab === "entrar" ? (
         <SignInForm proximo={proximo} onEsqueci={() => setTab("esqueci")} />
       ) : tab === "esqueci" ? (
-        <EsqueciForm onVoltar={() => setTab("entrar")} />
+        <EsqueciForm onVoltar={() => setTab("entrar")} whatsapp={whatsapp} />
       ) : (
         <SignUpForm proximo={proximo} />
       )}
@@ -163,11 +167,23 @@ function SignUpForm({ proximo }: { proximo: string }) {
  * Senha nova sem depender do balcão: o cliente prova que é ele com o
  * código que chega no WhatsApp ou com o de um atendimento seu.
  */
-function EsqueciForm({ onVoltar }: { onVoltar: () => void }) {
+function EsqueciForm({ onVoltar, whatsapp }: { onVoltar: () => void; whatsapp: boolean }) {
   const [state, action] = useFormState<NovaSenhaState, FormData>(redefinirMinhaSenha, undefined);
   const [fone, setFone] = useState("");
   const [aviso, setAviso] = useState<{ ok: boolean; texto: string } | null>(null);
   const [pedindo, startPedido] = useTransition();
+
+  const [pedido, setPedido] = useState<{ ok: boolean; texto: string } | null>(null);
+  const [pedindoLink, startLink] = useTransition();
+  const [comCodigo, setComCodigo] = useState(false);
+
+  function pedirNaBarbearia() {
+    setPedido(null);
+    startLink(async () => {
+      const r = await pedirNovaSenhaNaBarbearia(fone);
+      setPedido({ ok: r.ok, texto: r.mensagem });
+    });
+  }
 
   function pedirCodigo() {
     setAviso(null);
@@ -182,7 +198,7 @@ function EsqueciForm({ onVoltar }: { onVoltar: () => void }) {
       <div>
         <h2 className="font-display text-xl text-white">Criar uma nova senha</h2>
         <p className="mt-1 text-sm text-steel-400">
-          Informe seu WhatsApp e um código que prove que é você.
+          Informe seu WhatsApp. A barbearia te manda um link para criar a senha nova.
         </p>
       </div>
       <label className="block">
@@ -200,6 +216,36 @@ function EsqueciForm({ onVoltar }: { onVoltar: () => void }) {
       </label>
       <button
         type="button"
+        onClick={pedirNaBarbearia}
+        disabled={pedindoLink || fone.replace(/\D/g, "").length < 10}
+        className="btn-royal label inline-flex w-full items-center justify-center gap-2 rounded-full py-3.5 text-white disabled:opacity-40"
+      >
+        {pedindoLink ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+        Pedir link à barbearia
+      </button>
+      {pedido && (
+        <p
+          className={`flex items-start gap-2 rounded-xl border px-3.5 py-3 text-sm ${
+            pedido.ok ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-amber-400/30 bg-amber-400/10 text-amber-200"
+          }`}
+        >
+          {pedido.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none" /> : <AlertCircle className="mt-0.5 h-4 w-4 flex-none" />}
+          {pedido.texto}
+        </p>
+      )}
+      {!comCodigo ? (
+        <button
+          type="button"
+          onClick={() => setComCodigo(true)}
+          className="mx-auto block text-center text-sm text-electric underline-offset-4 hover:underline"
+        >
+          {whatsapp ? "Tenho um código (WhatsApp ou de atendimento)" : "Já fui atendido e tenho o código do atendimento"}
+        </button>
+      ) : (
+        <>
+      {whatsapp && (
+      <button
+        type="button"
         onClick={pedirCodigo}
         disabled={pedindo || fone.replace(/\D/g, "").length < 10}
         className="label inline-flex w-full items-center justify-center gap-2 rounded-full border border-electric/40 bg-electric/10 py-3 text-electric disabled:opacity-40"
@@ -207,6 +253,7 @@ function EsqueciForm({ onVoltar }: { onVoltar: () => void }) {
         {pedindo ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
         Receber código no WhatsApp
       </button>
+      )}
       {aviso && (
         <p
           className={`flex items-start gap-2 rounded-xl border px-3.5 py-3 text-sm ${
@@ -224,18 +271,20 @@ function EsqueciForm({ onVoltar }: { onVoltar: () => void }) {
           required
           maxLength={8}
           autoComplete="one-time-code"
-          placeholder="Ex.: 482913 ou K7QM2P"
+          placeholder={whatsapp ? "Ex.: 482913 ou K7QM2P" : "Ex.: K7QM2P"}
           className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3.5 font-display uppercase tracking-[0.2em] text-white outline-none placeholder:font-sans placeholder:normal-case placeholder:tracking-normal placeholder:text-steel-400/60 focus:border-electric/60 focus:ring-2 focus:ring-electric/20"
         />
         <span className="mt-1.5 block text-xs leading-relaxed text-steel-400">
-          O código de 6 números que chegou no WhatsApp, ou o código de um atendimento seu (as 6 letras do
-          agendamento, ex.: K7QM2P) em que você já esteve na barbearia.
+          {whatsapp ? "O código de 6 números que chegou no WhatsApp, ou o" : "O"} código de um atendimento seu dos
+          últimos 60 dias (as 6 letras do agendamento, ex.: K7QM2P) em que você esteve na barbearia.
         </span>
       </label>
       <Field label="Nova senha" name="senha" type="password" placeholder="Mínimo 6 caracteres" autoComplete="new-password" />
       <Field label="Repita a nova senha" name="confirmar" type="password" placeholder="••••••••" autoComplete="new-password" />
       <ErrorLine state={state} />
       <SubmitButton>Salvar nova senha e entrar</SubmitButton>
+        </>
+      )}
       <button
         type="button"
         onClick={onVoltar}
@@ -244,9 +293,7 @@ function EsqueciForm({ onVoltar }: { onVoltar: () => void }) {
         <ArrowLeft className="h-3.5 w-3.5" />
         Voltar para entrar
       </button>
-      <p className="text-center text-xs text-steel-400">
-        Não tem nenhum dos dois? Peça na barbearia para redefinir.
-      </p>
+
     </form>
   );
 }

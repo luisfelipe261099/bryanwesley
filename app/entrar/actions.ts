@@ -7,6 +7,8 @@ import { redirect } from "next/navigation";
 import { and, desc, eq, gt, isNotNull, isNull, like, lt, lte, or, sql as rawSql } from "drizzle-orm";
 import { randomInt } from "node:crypto";
 import { markSent, queueFreeText } from "@/lib/notifications";
+import { gastarLinkDeSenha, linkDeSenhaValido, registrarPedidoDeSenha } from "@/lib/senha-link";
+import { avisarPedidoDeSenha } from "@/lib/avisos";
 import { isWhatsappConfigured, sendWhatsapp } from "@/lib/providers/whatsapp";
 import { whatsappEnviando } from "@/lib/whatsapp-status";
 import { z } from "@/lib/zod-pt";
@@ -594,4 +596,75 @@ export async function redefinirMinhaSenha(_prev: NovaSenhaState, formData: FormD
     sessionCookieOptions
   );
   redirect("/cliente?senha=nova");
+}
+
+// ───────────────────── Nova senha pela barbearia ─────────────────────
+
+/**
+ * Sem WhatsApp automático e sem atendimento para servir de prova, o
+ * cliente pede à barbearia: o admin recebe o aviso, gera um link e manda
+ * pelo WhatsApp da barbearia. A resposta é a mesma exista a conta ou não.
+ */
+export async function pedirNovaSenhaNaBarbearia(telefone: string): Promise<{ ok: boolean; mensagem: string }> {
+  if (!isValidPhone(telefone)) return { ok: false, mensagem: "Informe o WhatsApp com DDD." };
+  const phone = normalizePhone(telefone);
+  const [porRede, porFone] = await Promise.all([
+    hitRateLimit(`senha:balcao:ip:${ipDaRequisicao()}`, 10, 60 * 60_000),
+    hitRateLimit(`senha:balcao:fone:${phone}`, 3, 60 * 60_000),
+  ]);
+  if (!porRede.ok || !porFone.ok) {
+    return { ok: false, mensagem: "Muitos pedidos seguidos. Aguarde um pouco." };
+  }
+  const generica = {
+    ok: true,
+    mensagem: "Pedido enviado! A barbearia vai te mandar um link no WhatsApp para você criar a senha nova.",
+  };
+  const user = await db.query.users.findFirst({ where: eq(users.phone, phone) });
+  if (!user || !user.active || user.role !== "CLIENT") return generica;
+  if (await registrarPedidoDeSenha(user.id)) await avisarPedidoDeSenha(user.id).catch(() => null);
+  return generica;
+}
+
+const linkSchema = z.object({
+  token: z.string().min(20).max(64),
+  senha: z.string().min(6, "A senha precisa ter ao menos 6 caracteres.").max(100),
+  confirmar: z.string(),
+});
+
+export async function definirSenhaPeloLink(_prev: NovaSenhaState, formData: FormData): Promise<NovaSenhaState> {
+  const parsed = linkSchema.safeParse({
+    token: formData.get("token"),
+    senha: formData.get("senha"),
+    confirmar: formData.get("confirmar"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  if (parsed.data.senha !== parsed.data.confirmar) return { error: "As duas senhas não estão iguais." };
+  const freio = await hitRateLimit(`senha:link:ip:${ipDaRequisicao()}`, 20, JANELA_LOGIN_MS);
+  if (!freio.ok) return { error: "Muitas tentativas. Aguarde um pouco." };
+
+  const link = await linkDeSenhaValido(parsed.data.token);
+  if (!link || !(await gastarLinkDeSenha(link.resetId))) {
+    return { error: "Esse link já foi usado ou venceu. Peça um novo na barbearia." };
+  }
+  await db
+    .update(users)
+    .set({
+      passwordHash: await hashPassword(parsed.data.senha),
+      tokenVersion: rawSql`${users.tokenVersion} + 1`,
+      failedLogins: 0,
+      lockedUntil: null,
+    })
+    .where(eq(users.id, link.userId));
+  const conta = await db.query.users.findFirst({ where: eq(users.id, link.userId) });
+  if (!conta) return { error: "Conta não encontrada." };
+  const barber =
+    conta.role === "BARBER" || conta.role === "ADMIN"
+      ? await db.query.barbers.findFirst({ where: eq(barbers.userId, conta.id) })
+      : undefined;
+  cookies().set(
+    SESSION_COOKIE,
+    await signSession({ id: conta.id, name: conta.name, role: conta.role, barberId: barber?.id, v: conta.tokenVersion }),
+    sessionCookieOptions
+  );
+  redirect(conta.role === "CLIENT" ? "/cliente?senha=nova" : homeFor(conta.role));
 }

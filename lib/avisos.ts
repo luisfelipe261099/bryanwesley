@@ -295,6 +295,26 @@ export async function avisarPagamento(p: { userId: number; planId: number }): Pr
   }
 }
 
+/** Cliente pediu nova senha: o admin gera o link e manda no WhatsApp. */
+export async function avisarPedidoDeSenha(userId: number): Promise<ResultadoPush> {
+  try {
+    const u = await db.query.users.findFirst({ where: eq(users.id, userId) });
+    return await enviarPush(
+      await idsDosAdmins(),
+      {
+        titulo: "Pedido de nova senha",
+        corpo: `${u?.name ?? "Um cliente"} esqueceu a senha. Toque para gerar o link e mandar no WhatsApp.`,
+        url: `/admin/clientes/${userId}`,
+        tag: `senha-${userId}`,
+      },
+      { prazoMs: PRAZO_NA_ACAO_MS }
+    );
+  } catch (e) {
+    console.error("Aviso de pedido de senha falhou:", e);
+    return { ...ZERO };
+  }
+}
+
 /** Pagamento caiu num plano já cancelado: o admin decide (reativar ou estornar). */
 export async function avisarPagamentoEmPlanoCancelado(userId: number, valorCents: number): Promise<ResultadoPush> {
   try {

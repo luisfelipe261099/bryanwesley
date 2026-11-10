@@ -41,6 +41,7 @@ import {
   resetUserPassword,
   subscribeClient,
   updateClient,
+  gerarLinkNovaSenha,
 } from "../../actions";
 
 type Cliente = {
@@ -77,6 +78,7 @@ export function FichaCliente({
   resumo,
   fixo,
   cobrancaOnline,
+  pedidoSenha,
 }: {
   cliente: Cliente;
   assinatura: Assinatura;
@@ -88,10 +90,12 @@ export function FichaCliente({
   fixo: { texto: string; barberName: string } | null;
   /** Cobrança online (Asaas) ligada: só então existe o botão "Gerar cobrança". */
   cobrancaOnline: boolean;
+  /** O cliente pediu nova senha (quando), para o painel destacar. */
+  pedidoSenha?: string | null;
 }) {
   return (
     <div className="space-y-5">
-      <Cabecalho cliente={cliente} resumo={resumo} fixo={fixo} />
+      <Cabecalho cliente={cliente} resumo={resumo} fixo={fixo} pedidoSenha={pedidoSenha ?? null} />
       <Agendar cliente={cliente} services={services} team={team} days={days} />
       <Plano cliente={cliente} assinatura={assinatura} plans={plans} cobrancaOnline={cobrancaOnline} />
     </div>
@@ -104,10 +108,12 @@ function Cabecalho({
   cliente,
   resumo,
   fixo,
+  pedidoSenha,
 }: {
   cliente: Cliente;
   resumo: { concluidos: number; gasto: number; desde: string };
   fixo: { texto: string; barberName: string } | null;
+  pedidoSenha: string | null;
 }) {
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, start] = useTransition();
@@ -117,8 +123,23 @@ function Cabecalho({
   const [fone, setFone] = useState(cliente.phonePending ? "" : cliente.phone);
   const [cpf, setCpf] = useState(formatarCpf(cliente.cpf ?? ""));
 
-  const [trocandoSenha, setTrocandoSenha] = useState(false);
+  const [trocandoSenha, setTrocandoSenha] = useState(!!pedidoSenha);
   const [senha, setSenha] = useState("");
+  const [link, setLink] = useState<{ url: string; whatsapp: string | null } | null>(null);
+
+  function gerarLink() {
+    setMsg(null);
+    start(async () => {
+      const r = await gerarLinkNovaSenha(cliente.id);
+      if (!r.ok) {
+        setMsg({ ok: false, text: r.error });
+        return;
+      }
+      setLink({ url: r.url, whatsapp: r.whatsapp });
+      // Abre o WhatsApp da barbearia com a mensagem pronta: um toque e enviar.
+      if (r.whatsapp) window.open(r.whatsapp, "_blank");
+    });
+  }
 
   function salvar() {
     setMsg(null);
@@ -280,7 +301,37 @@ function Cabecalho({
       )}
 
       {trocandoSenha && (
-        <div className="mt-5 flex flex-wrap items-end gap-3 border-t border-white/8 pt-5">
+        <div className="mt-5 space-y-3 border-t border-white/8 pt-5">
+          {pedidoSenha && (
+            <p className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-3.5 py-3 text-sm text-amber-100">
+              {cliente.name.split(" ")[0]} pediu uma senha nova ({pedidoSenha}). Mande o link pelo WhatsApp.
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={gerarLink}
+              disabled={pending}
+              className="btn-royal label inline-flex items-center gap-2 rounded-xl px-4 py-3 text-white disabled:opacity-40"
+            >
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+              Mandar link de nova senha no WhatsApp
+            </button>
+            {link && (
+              <button
+                type="button"
+                onClick={() => navigator.clipboard?.writeText(link.url).catch(() => window.prompt("Copie o link:", link.url))}
+                className="label rounded-xl border border-white/12 px-4 py-3 text-steel-200"
+              >
+                Copiar link
+              </button>
+            )}
+          </div>
+          {link && !link.whatsapp && (
+            <p className="text-xs text-amber-200">Cliente sem WhatsApp no cadastro: copie o link e mande por onde preferir.</p>
+          )}
+          <p className="text-xs text-steel-400">O cliente abre o link e escolhe a senha (vale 24 h, uma vez só). Ou defina você mesmo:</p>
+        <div className="flex flex-wrap items-end gap-3">
           <input
             type="text"
             value={senha}
@@ -297,6 +348,7 @@ function Cabecalho({
           >
             Definir senha
           </button>
+        </div>
         </div>
       )}
 

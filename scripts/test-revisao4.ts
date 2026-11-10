@@ -90,7 +90,7 @@ async function main() {
       }
     }
     // Ações públicas de propósito: login, cadastro, agenda aberta.
-    const publicas = /(entrar\/actions\.ts:(login|signup|logout|signin|primeiroAcesso|assumirConta|pedirCodigoNoWhatsapp|redefinirMinhaSenha))|(agendar\/actions\.ts:(submitBooking|fetchAvailability|currentSettings))|(confirmado\/\[token\]\/actions\.ts:(statusDoPagamento|pagarAgendamento|pagarNaBarbearia))/;
+    const publicas = /(entrar\/actions\.ts:(login|signup|logout|signin|primeiroAcesso|assumirConta|pedirCodigoNoWhatsapp|redefinirMinhaSenha|pedirNovaSenhaNaBarbearia|definirSenhaPeloLink))|(agendar\/actions\.ts:(submitBooking|fetchAvailability|currentSettings))|(confirmado\/\[token\]\/actions\.ts:(statusDoPagamento|pagarAgendamento|pagarNaBarbearia))/;
     const suspeitas = semGuarda.filter((x) => !publicas.test(x));
     ok("toda ação 'use server' confere a sessão (ou é pública de propósito)", suspeitas.length === 0, suspeitas.join(", "));
     ok("liberarFixosDe saiu do arquivo de ações", !readFileSync("app/admin/actions.ts", "utf8").includes("export async function liberarFixosDe"));
