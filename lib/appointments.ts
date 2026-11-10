@@ -624,7 +624,7 @@ export async function createBooking(input: CreateBookingInput) {
           durationMin,
           totalCents,
           // Só quando há o que pagar: horário do plano não espera nada.
-          status: input.aguardandoPagamentoAte && totalCents > 0 ? "PENDENTE" : "CONFIRMADO",
+          status: input.aguardandoPagamentoAte && totalCents > 0 ? "AGUARDANDO_PAGAMENTO" : "CONFIRMADO",
           payBy: input.aguardandoPagamentoAte && totalCents > 0 ? input.aguardandoPagamentoAte : null,
           kind: allCovered ? "ASSINANTE" : "AVULSO",
           subscriptionId: allCovered ? subscription!.id : null,
@@ -657,7 +657,7 @@ export async function createBooking(input: CreateBookingInput) {
     // agendamento: o horário já está garantido.
     try {
       await queueBookingNotifications(appt, barber.shortName, {
-        skipConfirmation: !!input.fromRecurring || !!input.skipConfirmation || appt.status === "PENDENTE",
+        skipConfirmation: !!input.fromRecurring || !!input.skipConfirmation || appt.status === "AGUARDANDO_PAGAMENTO",
       });
     } catch (e) {
       console.error("Falha ao enfileirar notificações:", e);
@@ -666,7 +666,7 @@ export async function createBooking(input: CreateBookingInput) {
     // Aviso no celular, na hora: equipe e cliente. O horário fixo
     // materializado pela varredura não avisa (seria um por semana, de
     // madrugada); a remarcação avisa de "remarcado", em rescheduleBooking.
-    if (!input.fromRecurring && !input.skipConfirmation && appt.status !== "PENDENTE") {
+    if (!input.fromRecurring && !input.skipConfirmation && appt.status !== "AGUARDANDO_PAGAMENTO") {
       const ctx = { autorUserId: input.autorUserId, barberName: barber.shortName };
       await Promise.all([avisarEquipe("criado", appt, ctx), avisarCliente("AGENDAMENTO_CRIADO", appt, ctx)]);
     }
@@ -1062,6 +1062,8 @@ const ALLOWED: Record<ApptStatusName, ApptStatusName[]> = {
   // Falta marcada por engano (o dedo pegou o botão vizinho) tem volta: o
   // cliente apareceu, o horário volta a valer.
   NO_SHOW: ["CONFIRMADO"],
+  // A reserva só é confirmada pelo pagamento (confirmarReservaPaga).
+  AGUARDANDO_PAGAMENTO: ["CANCELADO"],
 };
 
 export type { ApptStatusName };
@@ -1283,4 +1285,78 @@ export async function removerAjusteDoAtendimento(appointmentId: number, itemId: 
   if (!item) throw new BookingError("Esse ajuste não existe mais.");
   await db.delete(appointmentServices).where(eq(appointmentServices.id, item.id));
   return recalcularTotal(appointmentId);
+}
+
+// ───────────────────── Reserva paga vira agendamento ─────────────────────
+
+/**
+ * O pagamento de uma reserva de outro dia caiu: se o horário continua
+ * livre, ela vira agendamento de verdade (aparece na agenda e avisa a
+ * equipe). Se alguém marcou o horário antes do pagamento, devolve
+ * "ocupado" e quem chamou devolve o dinheiro.
+ */
+export async function confirmarReservaPaga(appointmentId: number): Promise<"confirmado" | "ocupado" | "nada"> {
+  const appt = await db.query.appointments.findFirst({ where: eq(appointments.id, appointmentId) });
+  if (!appt || appt.status !== "AGUARDANDO_PAGAMENTO") return "nada";
+  const partes = utcToShopParts(appt.startsAt);
+  const hora = `${String(partes.hour).padStart(2, "0")}:${String(partes.minute).padStart(2, "0")}`;
+
+  // Bloqueio, almoço ou folga lançados depois da reserva também contam.
+  const { slots, closed } = await getAvailability({
+    dateKey: partes.dateKey,
+    durationMin: appt.durationMin,
+    barberId: appt.barberId,
+    ignorarAntecedencia: true,
+  });
+  const vaga = !closed && slots.some((s) => s.time === hora && s.available && s.barberIds.includes(appt.barberId));
+
+  const resultado = await db.transaction(async (tx) => {
+    await tx
+      .insert(bookingLocks)
+      .values({ barberId: appt.barberId, dateKey: partes.dateKey })
+      .onDuplicateKeyUpdate({ set: { dateKey: rawSql`${bookingLocks.dateKey}` } });
+    await tx.execute(
+      rawSql`SELECT 1 FROM booking_locks WHERE barber_id = ${appt.barberId} AND date_key = ${partes.dateKey} FOR UPDATE`
+    );
+    const [clash] = await tx
+      .select({ id: appointments.id })
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.barberId, appt.barberId),
+          inArray(appointments.status, ["PENDENTE", "CONFIRMADO", "EM_ANDAMENTO", "CONCLUIDO"]),
+          lt(appointments.startsAt, appt.endsAt),
+          gt(appointments.endsAt, appt.startsAt),
+          ne(appointments.id, appt.id)
+        )
+      )
+      .for("update");
+    if (clash || !vaga) {
+      await tx
+        .update(appointments)
+        .set({
+          status: "CANCELADO",
+          notes: [appt.notes, "Horário ocupado antes do pagamento: valor devolvido."].filter(Boolean).join(" · "),
+        })
+        .where(and(eq(appointments.id, appt.id), eq(appointments.status, "AGUARDANDO_PAGAMENTO")));
+      return "ocupado" as const;
+    }
+    const [r] = await tx
+      .update(appointments)
+      .set({ status: "CONFIRMADO", payBy: null })
+      .where(and(eq(appointments.id, appt.id), eq(appointments.status, "AGUARDANDO_PAGAMENTO")));
+    return r.affectedRows === 1 ? ("confirmado" as const) : ("nada" as const);
+  });
+
+  if (resultado === "confirmado") {
+    const novo = (await db.query.appointments.findFirst({ where: eq(appointments.id, appt.id) }))!;
+    const barber = await db.query.barbers.findFirst({ where: eq(barbers.id, appt.barberId), columns: { shortName: true } });
+    const ctx = { autorUserId: appt.clientUserId, barberName: barber?.shortName ?? "" };
+    await Promise.all([avisarEquipe("criado", novo, ctx), avisarCliente("AGENDAMENTO_CRIADO", novo, ctx)]).catch((e) =>
+      console.error("Aviso da reserva paga falhou:", e)
+    );
+  } else if (resultado === "ocupado") {
+    await cancelPendingNotifications(appt.id).catch(() => {});
+  }
+  return resultado;
 }

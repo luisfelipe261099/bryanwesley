@@ -98,7 +98,7 @@ const bookingSchema = z.object({
   cpf: z.string().trim().max(20).optional(),
 });
 
-const AVISO_ANTECIPADO = `Para agendar para outro dia, pague agora com Pix ou cartão: o horário fica garantido com o pagamento (prazo de ${MINUTOS_PARA_PAGAR} minutos). Pagar na barbearia vale só para hoje.`;
+const AVISO_ANTECIPADO = `Para agendar para outro dia, pague agora com Pix ou cartão: o horário só é marcado quando o pagamento cai (prazo de ${MINUTOS_PARA_PAGAR} minutos). Pagar na barbearia vale só para hoje.`;
 
 export type BookingResult =
   | { ok: true; code: string; id: number; token: string; avisoPagamento?: string }
@@ -188,7 +188,7 @@ export async function submitBooking(
         and(
           eq(appointments.clientPhone, normalizePhone(parsed.data.clientPhone)),
           eq(appointments.startsAt, inicio),
-          inArray(appointments.status, ["PENDENTE", "CONFIRMADO"]),
+          inArray(appointments.status, ["PENDENTE", "CONFIRMADO", "AGUARDANDO_PAGAMENTO"]),
           gt(appointments.createdAt, new Date(Date.now() - 10 * 60_000))
         )
       );

@@ -130,6 +130,11 @@ export function apagarCobranca(id: string) {
   return chamar<{ deleted: boolean }>("DELETE", `/payments/${encodeURIComponent(id)}`);
 }
 
+/** Devolve ao cliente o valor de uma cobrança paga (estorno total). */
+export function estornarCobranca(id: string, descricao: string) {
+  return chamar<{ id: string; status: string }>("POST", `/payments/${encodeURIComponent(id)}/refund`, { description: descricao });
+}
+
 export type AsaasSubscription = { id: string; status?: string };
 
 /**

@@ -544,8 +544,9 @@ export function BookingForm({
               <>
                 {pagaAntes && (
                   <p className="mt-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-3.5 py-2.5 text-sm text-amber-100">
-                    Para agendar para outro dia, o pagamento é feito agora, pelo app: o horário fica garantido
-                    quando o pagamento cai (você tem 30 minutos). Para hoje, dá para pagar na barbearia.
+                    Para agendar para outro dia, o pagamento é feito agora, pelo app: o horário só fica marcado
+                    quando o pagamento cai (até lá, outra pessoa pode marcar o mesmo horário). Para hoje, dá
+                    para pagar na barbearia.
                   </p>
                 )}
                 <div className={`mt-4 grid gap-2.5 ${pagaAntes ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>

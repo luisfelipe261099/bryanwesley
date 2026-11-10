@@ -6,7 +6,7 @@
 // joins explícitos ou uma segunda consulta por lote — portável.
 // ───────────────────────────────────────────────────────────
 import {
-  and, asc, desc, eq, gt, gte, isNull, like, lt, or, inArray, sql, sum, count,
+  and, asc, desc, eq, gt, gte, isNull, like, lt, ne, or, inArray, sql, sum, count,
 } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
@@ -213,6 +213,8 @@ function condicaoAgenda(f: FiltroAgenda) {
   const partes = [
     gte(appointments.startsAt, f.de),
     lt(appointments.startsAt, f.ate),
+    // Reserva de outro dia ainda não paga não é agendamento.
+    ne(appointments.status, "AGUARDANDO_PAGAMENTO"),
   ];
   if (f.barberId) partes.push(eq(appointments.barberId, f.barberId));
   if (f.recorte === "ativos") {
@@ -444,6 +446,7 @@ export async function appointmentsOfDay(
       and(
         gte(appointments.startsAt, start),
         lt(appointments.startsAt, end),
+        ne(appointments.status, "AGUARDANDO_PAGAMENTO"),
         barberId ? eq(appointments.barberId, barberId) : undefined
       )
     )
@@ -923,7 +926,7 @@ export async function adminOverview() {
     db
       .select({ status: appointments.status, totalCents: appointments.totalCents })
       .from(appointments)
-      .where(and(gte(appointments.startsAt, start), lt(appointments.startsAt, end))),
+      .where(and(gte(appointments.startsAt, start), lt(appointments.startsAt, end), ne(appointments.status, "AGUARDANDO_PAGAMENTO"))),
     // Faturamento do dia pela base de comissão, igual ao mês: somando
     // totalCents, o atendimento do assinante (que vale 0) sumia do dia e
     // aparecia no mês.

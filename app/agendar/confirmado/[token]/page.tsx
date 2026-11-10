@@ -137,15 +137,15 @@ export default async function Confirmado({
         <h1 className="mt-6 font-display text-3xl text-white sm:text-4xl">
           {cancelado
             ? "Agendamento cancelado"
-            : appt.status === "PENDENTE" && appt.payBy
+            : appt.status === "AGUARDANDO_PAGAMENTO"
               ? `Falta pagar, ${appt.clientName.split(" ")[0]}`
               : `Tá marcado, ${appt.clientName.split(" ")[0]}!`}
         </h1>
         <p className="mt-3 text-steel-300">
           {cancelado
             ? "Esse horário foi cancelado. Quando quiser, é só marcar outro."
-            : appt.status === "PENDENTE" && appt.payBy
-              ? `O horário fica guardado para você até ${formatShopTime(appt.payBy)}. Pague abaixo para confirmar.`
+            : appt.status === "AGUARDANDO_PAGAMENTO" && appt.payBy
+              ? `Seu horário só fica marcado quando o pagamento cair. Pague abaixo até ${formatShopTime(appt.payBy)}.`
               : daCasa
               ? avisaPorWhatsapp
                 ? "Horário reservado na agenda. O cliente recebe a confirmação no WhatsApp."
@@ -190,8 +190,14 @@ export default async function Confirmado({
 
           {!cancelado && appt.kind === "AVULSO" && appt.totalCents > 0 && appt.payBy && pagamento?.status !== "PAGO" && (
             <p className="mt-5 rounded-2xl border-2 border-amber-400/50 bg-amber-400/10 p-4 text-left text-sm text-amber-100">
-              <b>Pague até {formatShopTime(appt.payBy)}</b> para garantir o horário. Sem o pagamento, ele é
-              liberado para outra pessoa.
+              <b>Pague até {formatShopTime(appt.payBy)}.</b> O horário só fica seu quando o pagamento cair:
+              até lá, outra pessoa pode marcar o mesmo horário.
+            </p>
+          )}
+          {cancelado && (appt.notes ?? "").includes("valor devolvido") && (
+            <p className="mt-5 rounded-2xl border border-red-400/40 bg-red-500/10 p-4 text-left text-sm text-red-100">
+              Outra pessoa marcou este horário antes do seu pagamento cair. O valor foi devolvido para você.
+              Agende de novo escolhendo outro horário.
             </p>
           )}
           {cancelado && appt.payBy && (appt.notes ?? "").includes("não foi pago no prazo") && (

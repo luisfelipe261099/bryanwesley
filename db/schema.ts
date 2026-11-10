@@ -46,6 +46,9 @@ export const APPT_STATUSES = [
   "CONCLUIDO",
   "CANCELADO",
   "NO_SHOW",
+  // Marcado pelo site para outro dia, ainda não pago: não ocupa a cadeira
+  // nem aparece na agenda até o pagamento cair.
+  "AGUARDANDO_PAGAMENTO",
 ] as const;
 export const APPT_KINDS = ["AVULSO", "ASSINANTE"] as const;
 export const SUB_STATUSES = ["ATIVA", "CANCELADA", "INADIMPLENTE"] as const;

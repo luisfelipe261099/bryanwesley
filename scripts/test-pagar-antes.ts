@@ -7,6 +7,7 @@ import {
   services as sv,
 } from "../db/schema";
 import { createBooking } from "../lib/appointments";
+import { appointmentsOfDay } from "../lib/queries";
 import { getAvailability, getSettings } from "../lib/schedule";
 import { addDays, shopToday, weekdayOf } from "../lib/time";
 import { eq, inArray, like } from "drizzle-orm";
@@ -18,7 +19,9 @@ const ok = (l: string, c: boolean, e = "") =>
 const status = new Map<string, string>();
 const corpos = new Map<string, Record<string, unknown>>();
 const apagadas: string[] = [];
+const estornadas: string[] = [];
 let fora = false;
+let seqTel = 0;
 let seq = 0;
 const fetchOriginal = globalThis.fetch;
 globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -37,6 +40,8 @@ globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     corpos.set(id, c);
     return json(200, c);
   }
+  const est = caminho.match(/^\/payments\/([^/]+)\/refund$/);
+  if (est && metodo === "POST") { estornadas.push(est[1]); status.set(est[1], "REFUNDED"); return json(200, { id: est[1], status: "REFUNDED" }); }
   const m = caminho.match(/^\/payments\/([^/]+)$/);
   if (m && metodo === "DELETE") {
     if (["RECEIVED", "CONFIRMED"].includes(status.get(m[1]) ?? "")) return json(400, { errors: [{ description: "já recebida" }] });
@@ -79,7 +84,7 @@ async function main() {
       if (s) livres.push({ dia: d, hora: s.time, barberId: s.barberIds[0] });
     }
     const marcar = async (i: number) => {
-      const a = await createBooking({ serviceIds: [corte.id], dateKey: livres[i].dia, time: livres[i].hora, barberId: livres[i].barberId, clientName: `Antes ${i}`, clientPhone: `4197029000${i}`, aguardandoPagamentoAte: new Date(Date.now() + 30 * 60_000) });
+      const a = await createBooking({ serviceIds: [corte.id], dateKey: livres[i].dia, time: livres[i].hora, barberId: livres[i].barberId, clientName: `Antes ${i}`, clientPhone: `419702900${String(++seqTel).padStart(2, "0")}`, aguardandoPagamentoAte: new Date(Date.now() + 30 * 60_000) });
       const c = await pay.chargeAppointment(a.id, "PIX", { cpf: "52998224725" });
       const nsu = c.ok ? (await db.select().from(payments).where(eq(payments.appointmentId, a.id)))[0].transactionNsu! : "";
       return { a, nsu };
@@ -89,9 +94,12 @@ async function main() {
 
     console.log("2. Sem pagar no prazo, o horário é liberado");
     const x = await marcar(0);
-    ok("entra como 'aguardando pagamento', não confirmado", x.a.status === "PENDENTE" && !!x.a.payBy);
+    ok("entra como reserva aguardando pagamento", x.a.status === "AGUARDANDO_PAGAMENTO" && !!x.a.payBy);
+    ok("não aparece na agenda", !(await appointmentsOfDay(livres[0].dia)).some((a) => a.id === x.a.id));
+    const disp = await getAvailability({ dateKey: livres[0].dia, durationMin: corte.durationMin, ignorarAntecedencia: true });
+    ok("e o horário continua livre para outro", !!disp.slots.find((s) => s.time === livres[0].hora && s.available && s.barberIds.includes(livres[0].barberId)));
     await pay.liberarHorariosSemPagamento({ forcar: true });
-    ok("dentro do prazo continua guardado", (await st(x.a.id)).status === "PENDENTE");
+    ok("dentro do prazo a reserva continua", (await st(x.a.id)).status === "AGUARDANDO_PAGAMENTO");
     await vencer(x.a.id);
     const n = await pay.liberarHorariosSemPagamento({ forcar: true });
     ok("passou do prazo: horário cancelado", n >= 1 && (await st(x.a.id)).status === "CANCELADO");
@@ -110,11 +118,22 @@ async function main() {
 
     console.log("3b. Pagou dentro do prazo");
     const w = await marcar(3);
+    const v = await marcar(3); // outra pessoa reserva o mesmo horário (reserva não ocupa)
+    ok("duas reservas no mesmo horário podem existir", v.a.status === "AGUARDANDO_PAGAMENTO");
     status.set(w.nsu, "RECEIVED");
     const linhaW = (await db.select().from(payments).where(eq(payments.appointmentId, w.a.id)))[0];
     await pay.conferirPagamento(linhaW);
     const sw = await st(w.a.id);
-    ok("pagou: vira confirmado e sai do prazo", sw.status === "CONFIRMADO" && sw.payBy === null);
+    ok("pagou: vira confirmado e entra na agenda", sw.status === "CONFIRMADO" && sw.payBy === null && (await appointmentsOfDay(livres[3].dia)).some((a) => a.id === w.a.id));
+
+    console.log("3c. Outro marcou antes do pagamento cair");
+    status.set(v.nsu, "RECEIVED");
+    const linhaV = (await db.select().from(payments).where(eq(payments.appointmentId, v.a.id)))[0];
+    await pay.conferirPagamento(linhaV);
+    const sv2 = await st(v.a.id);
+    ok("a reserva paga não entra por cima de quem já marcou", sv2.status === "CANCELADO");
+    ok("e o dinheiro volta pelo Asaas", estornadas.includes(v.nsu));
+    ok("o pagamento fica como devolvido", (await db.select().from(payments).where(eq(payments.id, linhaV.id)))[0].status === "CANCELADO");
 
     console.log("4. Asaas fora do ar");
     const z = await marcar(2);
@@ -122,7 +141,7 @@ async function main() {
     fora = true;
     await pay.liberarHorariosSemPagamento({ forcar: true });
     fora = false;
-    ok("não solta o horário sem conseguir tirar a cobrança", (await st(z.a.id)).status === "PENDENTE");
+    ok("não solta o horário sem conseguir tirar a cobrança", (await st(z.a.id)).status === "AGUARDANDO_PAGAMENTO");
     await pay.liberarHorariosSemPagamento({ forcar: true });
     ok("com o Asaas de volta, solta", (await st(z.a.id)).status === "CANCELADO");
   } finally {

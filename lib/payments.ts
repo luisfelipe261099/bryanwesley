@@ -4,7 +4,7 @@
 // baixa só acontece depois que a própria API do Asaas confirma.
 // Sem ASAAS_API_KEY o módulo fica inerte e a ativação segue manual.
 // ───────────────────────────────────────────────────────────
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, sql as rawSql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, sql as rawSql } from "drizzle-orm";
 import { db } from "@/db/client";
 import {
   appointmentServices,
@@ -26,6 +26,7 @@ import {
   criarAssinaturaCartao,
   cobrancaPaga,
   consultarCobranca,
+  estornarCobranca,
   criarCobranca,
   isAsaasConfigured,
   pixDaCobranca,
@@ -293,11 +294,14 @@ export async function settlePayment(input: { orderNsu: string; paymentId?: strin
   }
 
   if (payment.kind === "AVULSO" && payment.appointmentId) {
-    // Marcado para outro dia esperando o pagamento: agora está garantido.
-    await db
-      .update(appointments)
-      .set({ status: "CONFIRMADO", payBy: null })
-      .where(and(eq(appointments.id, payment.appointmentId), eq(appointments.status, "PENDENTE"), isNotNull(appointments.payBy)));
+    // Reserva de outro dia: com o pagamento ela vira agendamento — se o
+    // horário ainda estiver livre. Ocupado por quem pagou antes: devolve.
+    const { confirmarReservaPaga } = await import("./appointments");
+    const r = await confirmarReservaPaga(payment.appointmentId);
+    if (r === "ocupado") {
+      await devolverReservaOcupada(payment);
+      return { ok: true as const, already: false };
+    }
     await avisarPagamentoDoHorario(payment.appointmentId, payment.amountCents);
   }
 
@@ -882,7 +886,7 @@ export async function liberarHorariosSemPagamento(opts: { forcar?: boolean } = {
       and(
         isNotNull(appointments.payBy),
         lte(appointments.payBy, new Date()),
-        inArray(appointments.status, ["PENDENTE", "CONFIRMADO"])
+        inArray(appointments.status, ["PENDENTE", "CONFIRMADO", "AGUARDANDO_PAGAMENTO"])
       )
     )
     .limit(50);
@@ -902,10 +906,19 @@ export async function liberarHorariosSemPagamento(opts: { forcar?: boolean } = {
         if (!(await descartarCobranca(conferido).catch(() => false))) todasSairam = false;
       }
       if (pago) {
+        // conferirPagamento já confirmou (ou devolveu) a reserva; aqui só
+        // fecha o prazo de quem estava pago e não era reserva.
         await db
           .update(appointments)
-          .set({ payBy: null, ...(appt.status === "PENDENTE" ? { status: "CONFIRMADO" as const } : {}) })
-          .where(eq(appointments.id, appt.id));
+          .set({ payBy: null })
+          .where(and(eq(appointments.id, appt.id), ne(appointments.status, "AGUARDANDO_PAGAMENTO")));
+        if (appt.status === "AGUARDANDO_PAGAMENTO") {
+          const { confirmarReservaPaga } = await import("./appointments");
+          const r = await confirmarReservaPaga(appt.id);
+          const linha = doHorario.find((p) => p.status === "PAGO") ??
+            (await db.query.payments.findFirst({ where: and(eq(payments.appointmentId, appt.id), eq(payments.status, "PAGO")) }));
+          if (r === "ocupado" && linha) await devolverReservaOcupada(linha);
+        }
         continue;
       }
       if (!todasSairam) continue; // Asaas fora do ar ou já pago: tenta na próxima
@@ -925,4 +938,43 @@ export async function liberarHorariosSemPagamento(opts: { forcar?: boolean } = {
     }
   }
   return liberados;
+}
+
+
+/**
+ * Pagou a reserva depois que outra pessoa já tinha ficado com o horário:
+ * o valor volta para o cliente pelo Asaas e o admin fica sabendo. Se o
+ * estorno não sair, o admin é avisado para devolver à mão.
+ */
+async function devolverReservaOcupada(payment: Payment) {
+  let devolvido = false;
+  if (payment.transactionNsu) {
+    const r = await estornarCobranca(payment.transactionNsu, "Horário ocupado antes do pagamento").catch(() => null);
+    devolvido = !!r?.ok;
+  }
+  await db
+    .update(payments)
+    .set({
+      status: devolvido ? "CANCELADO" : "PAGO",
+      description: `${payment.description ?? ""} · ${devolvido ? "devolvido: horário já ocupado" : "DEVOLVER: horário já ocupado"}`.slice(0, 150),
+    })
+    .where(eq(payments.id, payment.id));
+  try {
+    const appt = payment.appointmentId
+      ? await db.query.appointments.findFirst({ where: eq(appointments.id, payment.appointmentId) })
+      : null;
+    const { idsDosAdmins } = await import("./avisos");
+    const { enviarPush } = await import("./push");
+    const valor = (payment.amountCents / 100).toFixed(2).replace(".", ",");
+    await enviarPush(await idsDosAdmins(), {
+      titulo: devolvido ? "Pagamento devolvido" : "Devolva um pagamento",
+      corpo: devolvido
+        ? `${appt?.clientName ?? "Cliente"} pagou R$ ${valor}, mas o horário já tinha sido marcado por outra pessoa. O valor foi devolvido.`
+        : `${appt?.clientName ?? "Cliente"} pagou R$ ${valor}, mas o horário já estava ocupado e o estorno automático falhou. Devolva pelo Asaas.`,
+      tag: `devolucao-${payment.id}`,
+      url: "/admin/agenda",
+    });
+  } catch (e) {
+    console.error("Aviso de devolução falhou:", e);
+  }
 }
