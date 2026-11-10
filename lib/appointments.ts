@@ -96,6 +96,12 @@ export type CreateBookingInput = {
   fromRecurring?: boolean;
   /** Remarcação: a mensagem certa é "remarcado", não "criado". */
   skipConfirmation?: boolean;
+  /**
+   * Marcado pelo site para outro dia: entra "aguardando pagamento" até
+   * este instante (vira confirmado quando o pagamento cai; sem pagar, é
+   * liberado). Os avisos de "novo agendamento" saem só com o pagamento.
+   */
+  aguardandoPagamentoAte?: Date | null;
   /** Horário fixo que está gerando esta ocorrência. */
   recurringSlotId?: number | null;
   /**
@@ -617,7 +623,9 @@ export async function createBooking(input: CreateBookingInput) {
           endsAt,
           durationMin,
           totalCents,
-          status: "CONFIRMADO",
+          // Só quando há o que pagar: horário do plano não espera nada.
+          status: input.aguardandoPagamentoAte && totalCents > 0 ? "PENDENTE" : "CONFIRMADO",
+          payBy: input.aguardandoPagamentoAte && totalCents > 0 ? input.aguardandoPagamentoAte : null,
           kind: allCovered ? "ASSINANTE" : "AVULSO",
           subscriptionId: allCovered ? subscription!.id : null,
           barberPctSnapshot: barberPct,
@@ -649,7 +657,7 @@ export async function createBooking(input: CreateBookingInput) {
     // agendamento: o horário já está garantido.
     try {
       await queueBookingNotifications(appt, barber.shortName, {
-        skipConfirmation: !!input.fromRecurring || !!input.skipConfirmation,
+        skipConfirmation: !!input.fromRecurring || !!input.skipConfirmation || appt.status === "PENDENTE",
       });
     } catch (e) {
       console.error("Falha ao enfileirar notificações:", e);
@@ -658,7 +666,7 @@ export async function createBooking(input: CreateBookingInput) {
     // Aviso no celular, na hora: equipe e cliente. O horário fixo
     // materializado pela varredura não avisa (seria um por semana, de
     // madrugada); a remarcação avisa de "remarcado", em rescheduleBooking.
-    if (!input.fromRecurring && !input.skipConfirmation) {
+    if (!input.fromRecurring && !input.skipConfirmation && appt.status !== "PENDENTE") {
       const ctx = { autorUserId: input.autorUserId, barberName: barber.shortName };
       await Promise.all([avisarEquipe("criado", appt, ctx), avisarCliente("AGENDAMENTO_CRIADO", appt, ctx)]);
     }

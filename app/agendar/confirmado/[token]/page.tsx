@@ -137,12 +137,16 @@ export default async function Confirmado({
         <h1 className="mt-6 font-display text-3xl text-white sm:text-4xl">
           {cancelado
             ? "Agendamento cancelado"
-            : `Tá marcado, ${appt.clientName.split(" ")[0]}!`}
+            : appt.status === "PENDENTE" && appt.payBy
+              ? `Falta pagar, ${appt.clientName.split(" ")[0]}`
+              : `Tá marcado, ${appt.clientName.split(" ")[0]}!`}
         </h1>
         <p className="mt-3 text-steel-300">
           {cancelado
             ? "Esse horário foi cancelado. Quando quiser, é só marcar outro."
-            : daCasa
+            : appt.status === "PENDENTE" && appt.payBy
+              ? `O horário fica guardado para você até ${formatShopTime(appt.payBy)}. Pague abaixo para confirmar.`
+              : daCasa
               ? avisaPorWhatsapp
                 ? "Horário reservado na agenda. O cliente recebe a confirmação no WhatsApp."
                 : "Horário reservado na agenda. O WhatsApp ainda não está conectado: passe ao cliente o código abaixo."

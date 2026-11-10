@@ -293,6 +293,11 @@ export async function settlePayment(input: { orderNsu: string; paymentId?: strin
   }
 
   if (payment.kind === "AVULSO" && payment.appointmentId) {
+    // Marcado para outro dia esperando o pagamento: agora está garantido.
+    await db
+      .update(appointments)
+      .set({ status: "CONFIRMADO", payBy: null })
+      .where(and(eq(appointments.id, payment.appointmentId), eq(appointments.status, "PENDENTE"), isNotNull(appointments.payBy)));
     await avisarPagamentoDoHorario(payment.appointmentId, payment.amountCents);
   }
 
@@ -897,7 +902,10 @@ export async function liberarHorariosSemPagamento(opts: { forcar?: boolean } = {
         if (!(await descartarCobranca(conferido).catch(() => false))) todasSairam = false;
       }
       if (pago) {
-        await db.update(appointments).set({ payBy: null }).where(eq(appointments.id, appt.id));
+        await db
+          .update(appointments)
+          .set({ payBy: null, ...(appt.status === "PENDENTE" ? { status: "CONFIRMADO" as const } : {}) })
+          .where(eq(appointments.id, appt.id));
         continue;
       }
       if (!todasSairam) continue; // Asaas fora do ar ou já pago: tenta na próxima

@@ -71,7 +71,7 @@ async function main() {
     const corte = (await db.select().from(sv).where(eq(sv.slug, "corte")))[0];
     const settings = await getSettings();
     const livres: { dia: string; hora: string; barberId: number }[] = [];
-    for (let i = 2; i <= 40 && livres.length < 3; i++) {
+    for (let i = 2; i <= 40 && livres.length < 4; i++) {
       const d = addDays(shopToday(), i);
       if (settings.closedWeekdays.includes(weekdayOf(d))) continue;
       const { slots, closed } = await getAvailability({ dateKey: d, durationMin: corte.durationMin, ignorarAntecedencia: true });
@@ -79,10 +79,9 @@ async function main() {
       if (s) livres.push({ dia: d, hora: s.time, barberId: s.barberIds[0] });
     }
     const marcar = async (i: number) => {
-      const a = await createBooking({ serviceIds: [corte.id], dateKey: livres[i].dia, time: livres[i].hora, barberId: livres[i].barberId, clientName: `Antes ${i}`, clientPhone: `4197029000${i}` });
+      const a = await createBooking({ serviceIds: [corte.id], dateKey: livres[i].dia, time: livres[i].hora, barberId: livres[i].barberId, clientName: `Antes ${i}`, clientPhone: `4197029000${i}`, aguardandoPagamentoAte: new Date(Date.now() + 30 * 60_000) });
       const c = await pay.chargeAppointment(a.id, "PIX", { cpf: "52998224725" });
       const nsu = c.ok ? (await db.select().from(payments).where(eq(payments.appointmentId, a.id)))[0].transactionNsu! : "";
-      await db.update(appointments).set({ payBy: new Date(Date.now() + 30 * 60_000) }).where(eq(appointments.id, a.id));
       return { a, nsu };
     };
     const vencer = (id: number) => db.update(appointments).set({ payBy: new Date(Date.now() - 60_000) }).where(eq(appointments.id, id));
@@ -90,8 +89,9 @@ async function main() {
 
     console.log("2. Sem pagar no prazo, o horário é liberado");
     const x = await marcar(0);
+    ok("entra como 'aguardando pagamento', não confirmado", x.a.status === "PENDENTE" && !!x.a.payBy);
     await pay.liberarHorariosSemPagamento({ forcar: true });
-    ok("dentro do prazo continua marcado", (await st(x.a.id)).status === "CONFIRMADO");
+    ok("dentro do prazo continua guardado", (await st(x.a.id)).status === "PENDENTE");
     await vencer(x.a.id);
     const n = await pay.liberarHorariosSemPagamento({ forcar: true });
     ok("passou do prazo: horário cancelado", n >= 1 && (await st(x.a.id)).status === "CANCELADO");
@@ -105,8 +105,16 @@ async function main() {
     await vencer(y.a.id);
     await pay.liberarHorariosSemPagamento({ forcar: true });
     const sy = await st(y.a.id);
-    ok("confere no Asaas e mantém o horário", sy.status === "CONFIRMADO" && sy.payBy === null);
+    ok("confere no Asaas e confirma o horário", sy.status === "CONFIRMADO" && sy.payBy === null);
     ok("e o pagamento fica creditado", (await db.select().from(payments).where(eq(payments.appointmentId, y.a.id)))[0].status === "PAGO");
+
+    console.log("3b. Pagou dentro do prazo");
+    const w = await marcar(3);
+    status.set(w.nsu, "RECEIVED");
+    const linhaW = (await db.select().from(payments).where(eq(payments.appointmentId, w.a.id)))[0];
+    await pay.conferirPagamento(linhaW);
+    const sw = await st(w.a.id);
+    ok("pagou: vira confirmado e sai do prazo", sw.status === "CONFIRMADO" && sw.payBy === null);
 
     console.log("4. Asaas fora do ar");
     const z = await marcar(2);
@@ -114,7 +122,7 @@ async function main() {
     fora = true;
     await pay.liberarHorariosSemPagamento({ forcar: true });
     fora = false;
-    ok("não solta o horário sem conseguir tirar a cobrança", (await st(z.a.id)).status === "CONFIRMADO");
+    ok("não solta o horário sem conseguir tirar a cobrança", (await st(z.a.id)).status === "PENDENTE");
     await pay.liberarHorariosSemPagamento({ forcar: true });
     ok("com o Asaas de volta, solta", (await st(z.a.id)).status === "CANCELADO");
   } finally {

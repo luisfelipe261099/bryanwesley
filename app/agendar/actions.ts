@@ -209,6 +209,7 @@ export async function submitBooking(
       // respeita a pausa da agenda, a antecedência e o limite de dias.
       publicRequest: !daCasa,
       autorUserId: session?.id ?? null,
+      aguardandoPagamentoAte: antecipado && online ? new Date(Date.now() + MINUTOS_PARA_PAGAR * 60_000) : null,
     });
     // Só cobra o que não é do plano. Na barbearia: fica anotado e pronto.
     let avisoPagamento: string | undefined;
@@ -224,7 +225,6 @@ export async function submitBooking(
         .update(appointments)
         .set({
           paymentMethod: online ? parsed.data.pagamento : "BALCAO",
-          payBy: antecipado ? new Date(Date.now() + MINUTOS_PARA_PAGAR * 60_000) : null,
         })
         .where(eq(appointments.id, appt.id));
       if (online) {

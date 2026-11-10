@@ -1,3 +1,4 @@
+import { formatShopTime } from "./time";
 // Etiqueta curta do pagamento de um horário, para a agenda da equipe:
 // o barbeiro precisa saber, antes de cobrar, se o cliente já pagou no app.
 
@@ -10,8 +11,16 @@ export function rotuloPagamento(a: {
   formaPaga?: string | null;
   /** Com o status, o atendimento já feito e não pago vira alerta vermelho. */
   status?: string;
+  /** Marcado para outro dia: até quando tem para pagar. */
+  payBy?: Date | null;
 }): { texto: string; cls: string } | null {
   if (a.kind === "ASSINANTE" || a.totalCents <= 0) return null;
+  if (a.payBy && a.pagamentoOnline !== "PAGO" && (a.status === "PENDENTE" || a.status === "CONFIRMADO")) {
+    return {
+      texto: `Não pago · libera às ${formatShopTime(a.payBy)}`,
+      cls: "bg-amber-400/20 text-amber-100 ring-1 ring-amber-400/50",
+    };
+  }
   if (a.status && devendo({ ...a, status: a.status })) {
     return {
       texto: a.pagamentoOnline === "PENDENTE" ? "Não pago · Pix em aberto" : "Não pago",
