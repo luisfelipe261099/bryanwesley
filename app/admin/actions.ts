@@ -6,6 +6,7 @@ import { z } from "@/lib/zod-pt";
 import { db } from "@/db/client";
 import {
   appointments,
+  payments,
   notifications,
   barbers,
   commissionTiers,
@@ -46,7 +47,7 @@ import {
 } from "@/lib/notifications";
 import { sendWhatsapp, isWhatsappConfigured } from "@/lib/providers/whatsapp";
 import { claimDispatchSlot, runDispatch, despacharPush } from "@/lib/dispatch";
-import { cancelarCobrancasDoPlano, chargeSubscription, encerrarCartaoRecorrente } from "@/lib/payments";
+import { cancelarCobrancasDoAgendamento, cancelarCobrancasDoPlano, chargeSubscription, encerrarCartaoRecorrente } from "@/lib/payments";
 import { cpfValido, soDigitosCpf } from "@/lib/cpf";
 import { shopTimeToUtc, parseDateKey, utcToShopParts } from "@/lib/time";
 import { normalizePhone, isValidPhone, nextPlaceholderPhone, isPlaceholderPhone } from "@/lib/phone";
@@ -282,6 +283,48 @@ export async function adminTransition(
       CANCELADO: "Horário cancelado.",
     };
     return done(RECADO[next]);
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Apaga de vez um atendimento lançado por engano ou de teste: some da
+ * agenda, da comissão e do faturamento. Só o dono, e com confirmação na
+ * tela. Pix/cartão pago pelo app não é apagado aqui (o dinheiro está no
+ * Asaas): o registro do pagamento fica, solto do horário.
+ */
+export async function excluirAtendimento(id: number): Promise<Result> {
+  try {
+    await admin();
+    const appt = await db.query.appointments.findFirst({ where: eq(appointments.id, id) });
+    if (!appt) return { ok: false, error: "Esse atendimento já não existe." };
+    if (appt.recurringSlotId && appt.startsAt.getTime() > Date.now()) {
+      return {
+        ok: false,
+        error: "É um horário fixo do plano: use Cancelar horário (excluído, ele voltaria na próxima rodada do fixo).",
+      };
+    }
+    // Fatura online em aberto sai do Asaas antes; recebido no balcão some
+    // junto (era só um registro daqui).
+    await cancelarCobrancasDoAgendamento(appt.id);
+    const aberta = await db.query.payments.findFirst({
+      where: and(eq(payments.appointmentId, appt.id), eq(payments.status, "PENDENTE")),
+      columns: { id: true },
+    });
+    if (aberta) {
+      // O Asaas não deixou apagar (fora do ar, ou o cliente acabou de pagar).
+      return { ok: false, error: "Há um Pix em aberto que o Asaas não deixou cancelar agora. Tente de novo em instantes." };
+    }
+    await db
+      .delete(payments)
+      .where(and(eq(payments.appointmentId, appt.id), inArray(payments.status, ["CANCELADO", "EXPIRADO"])));
+    await db.delete(payments).where(and(eq(payments.appointmentId, appt.id), eq(payments.provider, "balcao")));
+    await db.delete(notifications).where(eq(notifications.appointmentId, appt.id));
+    // Serviços e comissão saem junto (ON DELETE CASCADE).
+    await db.delete(appointments).where(eq(appointments.id, appt.id));
+    revalidatePath("/admin/salao");
+    return done("Atendimento excluído. O faturamento já não conta com ele.");
   } catch (e) {
     return fail(e);
   }

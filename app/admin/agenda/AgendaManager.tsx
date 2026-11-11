@@ -33,6 +33,7 @@ import { appointmentStatus as statusStyles } from "@/lib/status";
 import type { RecorteAgenda } from "@/lib/queries";
 import { ApptControls } from "../AgendaHoje";
 import { CobrarAtendimento } from "@/app/barbeiro/CobrarAtendimento";
+import { ExcluirAtendimento } from "../ExcluirAtendimento";
 import { RemarcarAdmin } from "./RemarcarAdmin";
 import { EditarServicos, type ServicoDoCatalogo } from "./EditarServicos";
 
@@ -742,6 +743,7 @@ function Item({
           {a.aCobrar && (
             <CobrarAtendimento id={a.id} token={a.token} totalCents={a.totalCents} mensalista={a.mensalista} ajustes={a.ajustes} />
           )}
+          <ExcluirAtendimento id={a.id} resumo={`${a.clientName} · ${a.hora}`} />
         </div>
       </div>
       {a.notes && !(a.fixo && /^hor.rio fixo do plano$/i.test(a.notes.trim())) && (

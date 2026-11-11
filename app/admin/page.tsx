@@ -34,6 +34,7 @@ import { pedidosDeSenhaAbertos } from "@/lib/senha-link";
 import { appointmentStatus as statusStyles } from "@/lib/status";
 import { ApptControls } from "./AgendaHoje";
 import { CobrarAtendimento } from "@/app/barbeiro/CobrarAtendimento";
+import { ExcluirAtendimento } from "./ExcluirAtendimento";
 import { aReceber, devendo, rotuloPagamento } from "@/lib/rotulo-pagamento";
 import { PlanRequests } from "./PlanRequests";
 import { AvisosPush } from "@/components/AvisosPush";
@@ -300,6 +301,7 @@ export default async function AdminDashboard({
                         {aReceber(a) && (
                           <CobrarAtendimento id={a.id} token={a.checkinToken} totalCents={a.totalCents} mensalista={a.mensalista} ajustes={a.items.filter((i) => i.serviceId === null).map((i) => ({ id: i.id, name: i.name, priceCents: i.priceCents }))} />
                         )}
+                        <ExcluirAtendimento id={a.id} resumo={`${a.clientName} · ${formatShopTime(a.startsAt)}`} />
                       </div>
                     </li>
                   );

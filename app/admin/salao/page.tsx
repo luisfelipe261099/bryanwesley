@@ -14,6 +14,7 @@ import { addDays, formatShopTime, labelFullDate, shopToday } from "@/lib/time";
 import { AppointmentActions } from "@/app/barbeiro/AgendaActions";
 import { CobrarAtendimento } from "@/app/barbeiro/CobrarAtendimento";
 import { AtualizaSozinho } from "@/components/AtualizaSozinho";
+import { ExcluirAtendimento } from "../ExcluirAtendimento";
 
 export const dynamic = "force-dynamic";
 
@@ -180,9 +181,9 @@ export default async function SalaoPage({ searchParams }: { searchParams: { dia?
                             </div>
                           </div>
                         </div>
-                        {podeAgir && (ATIVOS.includes(a.status) || aReceber(a)) && (
+                        {(
                           <div className="mt-2.5 flex flex-wrap items-start justify-end gap-2">
-                            {ATIVOS.includes(a.status) && (
+                            {podeAgir && ATIVOS.includes(a.status) && (
                               <AppointmentActions
                                 id={a.id}
                                 status={a.status}
@@ -190,7 +191,7 @@ export default async function SalaoPage({ searchParams }: { searchParams: { dia?
                                 naoPagoCents={aReceber(a) ? a.totalCents : 0}
                               />
                             )}
-                            {aReceber(a) && (
+                            {podeAgir && aReceber(a) && (
                               <CobrarAtendimento
                                 id={a.id}
                                 token={a.checkinToken}
@@ -201,6 +202,7 @@ export default async function SalaoPage({ searchParams }: { searchParams: { dia?
                                   .map((i) => ({ id: i.id, name: i.name, priceCents: i.priceCents }))}
                               />
                             )}
+                            <ExcluirAtendimento id={a.id} resumo={`${a.clientName} · ${formatShopTime(a.startsAt)}`} />
                           </div>
                         )}
                       </li>
