@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { CalendarClock, Loader2, Save, X } from "lucide-react";
 import { saveRecurringSlot, cancelRecurringSlot } from "./actions";
 import { toast } from "@/lib/toast";
@@ -39,8 +39,9 @@ export function HorarioFixo({
   closedWeekdays,
   horarios,
 }: {
-  team: { id: number; name: string }[];
-  services: { id: number; name: string }[];
+  /** Com o almoço de cada um: o horário do almoço não é oferecido. */
+  team: { id: number; name: string; lunchStart?: number | null; lunchEnd?: number | null }[];
+  services: { id: number; name: string; durationMin?: number }[];
   existing: Existing;
   closedWeekdays: number[];
   /** Horários da grade ("HH:MM"), do abre ao fecha. */
@@ -67,6 +68,19 @@ export function HorarioFixo({
   });
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+
+  // Pedido do Bryan: o almoço do barbeiro escolhido não aparece (nem o
+  // horário que, com a duração dos serviços, entraria nele).
+  const barbeiro = team.find((b) => b.id === barberId);
+  const duracao = picked.reduce((t, id) => t + (services.find((s) => s.id === id)?.durationMin ?? 0), 0) || 30;
+  const livres = horarios.filter((h) => {
+    const ini = toMin(h);
+    const { lunchStart: a, lunchEnd: b } = barbeiro ?? {};
+    return !(a != null && b != null && b > a && ini < b && ini + duracao > a);
+  });
+  useEffect(() => {
+    if (livres.length && !livres.includes(time)) setTime(livres[0]);
+  }, [livres, time]);
 
   function save() {
     setError(null);
@@ -188,7 +202,7 @@ export function HorarioFixo({
                 onChange={(e) => setTime(e.target.value)}
                 className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none [color-scheme:dark] focus:border-electric/60"
               >
-                {horarios.map((h) => (
+                {livres.map((h) => (
                   <option key={h} value={h}>
                     {h}
                   </option>

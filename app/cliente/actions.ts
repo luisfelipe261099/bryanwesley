@@ -12,6 +12,8 @@ import {
   planRequests,
   planServices,
   payments,
+  barbers,
+  services,
 } from "@/db/schema";
 import { cookies } from "next/headers";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
@@ -146,6 +148,20 @@ export async function saveRecurringSlot(input: {
       ok: false,
       error: `O plano não cobre horários a partir das ${minutesToHHMM(cfg.memberNightFrom)}. Escolha um horário antes disso.`,
     };
+  }
+  // Almoço do barbeiro: o fixo não pode cair nele (nem entrar nele com a
+  // duração dos serviços) — toda semana o horário seria recusado.
+  const barb = await db.query.barbers.findFirst({ where: eq(barbers.id, input.barberId) });
+  if (!barb || !barb.active) return { ok: false, error: "Escolha um barbeiro da equipe." };
+  if (barb.lunchStart != null && barb.lunchEnd != null && barb.lunchEnd > barb.lunchStart) {
+    const servs = await db.query.services.findMany({ where: inArray(services.id, input.serviceIds), columns: { durationMin: true } });
+    const dur = servs.reduce((t, x) => t + x.durationMin, 0) || cfg.slotMinutes;
+    if (hora < barb.lunchEnd && hora + dur > barb.lunchStart) {
+      return {
+        ok: false,
+        error: `Esse horário cai no almoço de ${barb.shortName} (${minutesToHHMM(barb.lunchStart)}–${minutesToHHMM(barb.lunchEnd)}). Escolha outro.`,
+      };
+    }
   }
   if (input.frequency === "SEMANAL") {
     if (input.weekday === null || input.weekday < 0 || input.weekday > 6) {

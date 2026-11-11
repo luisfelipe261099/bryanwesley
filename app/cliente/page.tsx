@@ -576,10 +576,10 @@ export default async function ClienteDashboard({
           <Reveal delay={0.12}>
             <div className="mt-5">
               <HorarioFixo
-                team={team.map((b) => ({ id: b.id, name: b.user.name }))}
+                team={team.map((b) => ({ id: b.id, name: b.user.name, lunchStart: b.lunchStart, lunchEnd: b.lunchEnd }))}
                 services={services
                   .filter((s) => covered.includes(s.id))
-                  .map((s) => ({ id: s.id, name: s.name }))}
+                  .map((s) => ({ id: s.id, name: s.name, durationMin: s.durationMin }))}
                 existing={
                   fixo
                     ? {
