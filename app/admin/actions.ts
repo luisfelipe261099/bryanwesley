@@ -141,6 +141,7 @@ const settingsSchema = z.object({
   defaultBarberPct: z.number({ message: "Informe a comissão sugerida." }).int().min(0, "Comissão de 0 a 100%.").max(100, "Comissão de 0 a 100%."),
   memberNightFrom: z.number().int().min(0).max(1440).nullable().optional(),
   autoCharge: z.boolean().optional(),
+  subscriptionCommissionBase: z.enum(["RATEIO", "PRECO_TABELA"]).optional(),
 });
 
 /**

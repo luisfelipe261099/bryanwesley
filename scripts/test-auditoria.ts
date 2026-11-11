@@ -97,8 +97,12 @@ async function main() {
     const com = await db.query.appointmentCommissions.findFirst({
       where: eq(appointmentCommissions.appointmentId, appt.id),
     });
-    ok("a comissão registra a base do serviço", !!com && com.baseCents === corte.priceCents,
-      JSON.stringify(com && { base: com.baseCents, esperado: corte.priceCents }));
+    // Base do atendimento do plano: rateio da mensalidade (padrão) ou
+    // preço de tabela, como estiver em Ajustes.
+    const regra = (await getSettings()).subscriptionCommissionBase;
+    const esperadoBase = regra === "RATEIO" ? Math.round(gold.priceCents / (gold.monthlyLimit || 4)) : corte.priceCents;
+    ok("a comissão registra a base do atendimento do plano", !!com && com.baseCents === esperadoBase,
+      JSON.stringify(com && { base: com.baseCents, esperado: esperadoBase }));
     const semana = await weeklyRevenue();
     const doDia = semana.find((d) => d.dateKey === dia);
     // O atendimento é futuro nos dias da semana só se couber na janela.

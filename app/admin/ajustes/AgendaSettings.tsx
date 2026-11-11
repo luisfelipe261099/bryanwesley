@@ -46,6 +46,7 @@ export function AgendaSettings({ settings }: { settings: Settings }) {
         defaultBarberPct: form.defaultBarberPct,
         memberNightFrom: form.memberNightFrom,
         autoCharge: form.autoCharge,
+        subscriptionCommissionBase: form.subscriptionCommissionBase === "PRECO_TABELA" ? "PRECO_TABELA" : "RATEIO",
       });
       setMsg(notify(res, "Salvo."));
     });
@@ -189,6 +190,21 @@ export function AgendaSettings({ settings }: { settings: Settings }) {
                 hint="3 dias antes de vencer, o sistema gera o Pix da mensalidade no Asaas e avisa o membro. Pagou, o plano renova sozinho."
               />
             </div>
+            <label className="block sm:col-span-2">
+              <span className="label mb-2 block text-steel-400">Comissão no atendimento do plano</span>
+              <select
+                value={form.subscriptionCommissionBase === "PRECO_TABELA" ? "PRECO_TABELA" : "RATEIO"}
+                onChange={(e) => patch({ subscriptionCommissionBase: e.target.value })}
+                className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none focus:border-electric/60"
+              >
+                <option value="RATEIO">Rateio da mensalidade (valor do plano ÷ atendimentos do mês)</option>
+                <option value="PRECO_TABELA">Preço de tabela do serviço</option>
+              </select>
+              <span className="mt-1.5 block text-xs text-steel-400">
+                No rateio, um plano de R$ 100 com 4 atendimentos no mês vale R$ 25 por atendimento, e o barbeiro
+                recebe a porcentagem dele sobre isso (50% = R$ 12,50). Vale para os atendimentos concluídos daqui em diante.
+              </span>
+            </label>
           </div>
         </div>
 

@@ -11,6 +11,7 @@ import { precosNoInstante } from "./precos-server";
 import {
   and,
   eq,
+  gt,
   gte,
   lt,
   isNull,
@@ -26,6 +27,8 @@ import {
   appointmentServices,
   commissionTiers,
   barbers,
+  plans,
+  subscriptions,
 } from "@/db/schema";
 import { getSettings } from "./schedule";
 import { dbErrorCode } from "./errors";
@@ -159,10 +162,17 @@ export async function recordCommission(appointmentId: number) {
   // barbeiro cortava o cabelo de graça na conta da comissão.
   const temItemCoberto = items.some((i) => i.priceCents === 0);
   let baseCents = appt.totalCents;
-  if (
-    (fromSubscription || temItemCoberto) &&
-    settings.subscriptionCommissionBase === "PRECO_TABELA"
-  ) {
+  // Rateio da mensalidade: o que o plano vale por atendimento (mensalidade
+  // ÷ atendimentos do mês). Plano de R$ 100 com 4 cortes: cada corte vale
+  // R$ 25 para a comissão. O que foi pago à parte no mesmo horário soma.
+  const rateio =
+    (fromSubscription || temItemCoberto) && settings.subscriptionCommissionBase === "RATEIO"
+      ? await rateioDoPlano(appt)
+      : null;
+  if (rateio !== null) {
+    baseCents = appt.totalCents + rateio;
+  } else if (fromSubscription || temItemCoberto) {
+    // Preço de tabela (ou rateio sem plano achado).
     const ids = items
       .map((i) => i.serviceId)
       .filter((id): id is number => id !== null);
@@ -207,4 +217,31 @@ export async function recordCommission(appointmentId: number) {
       where: eq(appointmentCommissions.appointmentId, appointmentId),
     })) ?? null
   );
+}
+
+
+/**
+ * Quanto um atendimento do plano vale no rateio: a mensalidade que o
+ * membro paga (no anual, o equivalente por mês) dividida pelos
+ * atendimentos do mês (o limite do plano; sem limite, 4 — um por semana).
+ * Null quando não acha o plano: aí vale o preço de tabela.
+ */
+async function rateioDoPlano(appt: { subscriptionId: number | null; clientUserId: number | null; startsAt: Date }) {
+  let sub = appt.subscriptionId
+    ? await db.query.subscriptions.findFirst({ where: eq(subscriptions.id, appt.subscriptionId) })
+    : undefined;
+  // Cobertura parcial (corte do plano + barba paga) fica gravada como
+  // avulso, sem o vínculo: procura o plano do cliente.
+  if (!sub && appt.clientUserId) {
+    sub = await db.query.subscriptions.findFirst({
+      where: and(eq(subscriptions.userId, appt.clientUserId), gt(subscriptions.renewsAt, appt.startsAt)),
+      orderBy: desc(subscriptions.id),
+    });
+  }
+  if (!sub) return null;
+  const plano = await db.query.plans.findFirst({ where: eq(plans.id, sub.planId) });
+  if (!plano) return null;
+  const mensal = sub.cycle === "ANUAL" ? plano.annualPriceCents : plano.priceCents;
+  const vezes = plano.monthlyLimit && plano.monthlyLimit > 0 ? plano.monthlyLimit : 4;
+  return Math.round(mensal / vezes);
 }

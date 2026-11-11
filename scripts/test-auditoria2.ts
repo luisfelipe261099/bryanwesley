@@ -203,9 +203,13 @@ async function main() {
       const com = await db.query.appointmentCommissions.findFirst({
         where: eq(appointmentCommissions.appointmentId, appt.id),
       });
+      // O coberto entra pelo rateio da mensalidade (padrão) ou pelo preço
+      // de tabela, como estiver em Ajustes; o pago à parte soma igual.
+      const regra = (await getSettings()).subscriptionCommissionBase;
+      const coberto = regra === "RATEIO" ? Math.round(gold.priceCents / (gold.monthlyLimit || 4)) : corte.priceCents;
       ok("a comissão soma também o serviço coberto pelo plano",
-        !!com && com.baseCents === corte.priceCents + fora.priceCents,
-        JSON.stringify(com && { base: com.baseCents, esperado: corte.priceCents + fora.priceCents }));
+        !!com && com.baseCents === coberto + fora.priceCents,
+        JSON.stringify(com && { base: com.baseCents, esperado: coberto + fora.priceCents }));
     }
   }
 
