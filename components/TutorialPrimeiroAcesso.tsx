@@ -91,13 +91,7 @@ function passosDe(tour: Tour, nome: string): Passo[] {
       {
         titulo: `Bem-vindo, ${nome}!`,
         texto:
-          "Seu dia no sistema cabe em poucos toques: validar a chegada, finalizar, marcar falta e encaixar. Dá para rever este tutorial em Minha conta.",
-      },
-      {
-        titulo: "Cliente chegou",
-        texto:
-          "Aponte a câmera do seu celular para o QR do cliente e toque no link, ou digite o código de 6 letras e toque em Validar. Com a cadeira livre, o atendimento começa sozinho.",
-        alvo: ['[data-tour="checkin"]'],
+          "Seu dia no sistema cabe em poucos toques: iniciar, finalizar, cobrar, marcar falta e encaixar. Dá para rever este tutorial em Minha conta.",
       },
       {
         titulo: "Sua agenda do dia",
@@ -139,7 +133,7 @@ function passosDe(tour: Tour, nome: string): Passo[] {
     {
       titulo: "No dia do corte",
       texto:
-        "Mostre o QR code ou o código de 6 letras na barbearia. Precisa mudar? Remarcar e cancelar ficam no seu próximo horário.",
+        "Seu próximo horário fica aqui. Precisa mudar? Remarcar e cancelar ficam nele.",
       alvo: ['[data-tour="proximo"]', '[data-tour="horarios"]'],
     },
     {

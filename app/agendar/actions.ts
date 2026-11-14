@@ -114,6 +114,10 @@ export async function submitBooking(
 
   const session = await getSession();
   const daCasa = session?.role === "ADMIN" || session?.role === "BARBER";
+  // Sem "mais rápido" (pedido do Bryan): o cliente escolhe o barbeiro.
+  if (!daCasa && !parsed.data.barberId) {
+    return { ok: false, error: "Escolha o barbeiro." };
+  }
 
   // Para outro dia, quem marca pelo site paga antes (Pix ou cartão): o
   // horário só fica garantido com o pagamento. Para hoje, pode pagar na

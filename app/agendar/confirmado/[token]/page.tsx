@@ -27,8 +27,6 @@ import {
   utcToShopParts,
   shopToday,
 } from "@/lib/time";
-import { checkinQrSvg, publicBaseUrl } from "@/lib/qr";
-import { CheckinQR } from "@/app/cliente/CheckinQR";
 
 export const dynamic = "force-dynamic";
 
@@ -71,10 +69,6 @@ export default async function Confirmado({
       ? `Hoje, às ${formatShopTime(appt.startsAt)}`
       : `${labelFullDate(p.dateKey)} às ${formatShopTime(appt.startsAt)}`;
 
-  const qrSvg =
-    appt.checkinToken && appt.status !== "CANCELADO"
-      ? await checkinQrSvg(publicBaseUrl(), appt.checkinToken)
-      : null;
 
   const servicos = appt.items.map((i) => i.name).join(" + ");
 
@@ -149,10 +143,10 @@ export default async function Confirmado({
               : daCasa
               ? avisaPorWhatsapp
                 ? "Horário reservado na agenda. O cliente recebe a confirmação no WhatsApp."
-                : "Horário reservado na agenda. O WhatsApp ainda não está conectado: passe ao cliente o código abaixo."
+                : "Horário reservado na agenda. O WhatsApp ainda não está conectado: avise o cliente do horário."
               : avisaPorWhatsapp
                 ? "Seu horário está reservado. Enviamos a confirmação no WhatsApp."
-                : "Seu horário está reservado. Guarde esta página ou o código abaixo."}
+                : "Seu horário está reservado. Guarde esta página."}
         </p>
 
         <div className="glass mt-8 rounded-2xl p-6 text-left">
@@ -223,11 +217,6 @@ export default async function Confirmado({
             />
           )}
 
-          {qrSvg && (
-            <div className="mt-5 flex justify-center border-t border-white/8 pt-5">
-              <CheckinQR svg={qrSvg} code={appt.code} service={servicos} />
-            </div>
-          )}
         </div>
 
         {!daCasa && (

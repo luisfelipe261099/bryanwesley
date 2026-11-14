@@ -45,7 +45,6 @@ import { formatPhone } from "@/lib/phone";
 import { CobrarAtendimento } from "./CobrarAtendimento";
 import { AppointmentActions } from "./AgendaActions";
 import { appointmentStatus as statusStyles } from "@/lib/status";
-import { CheckinBox } from "./CheckinBox";
 import { AvisosPush } from "@/components/AvisosPush";
 import { chavePublicaPush } from "@/lib/push";
 
@@ -80,11 +79,6 @@ export default async function BarbeiroPanel({
                 </Link>
                 .
               </p>
-              {/* O check-in pelo código vale para qualquer barbeiro: o balcão
-                  precisa dele mesmo sem agenda própria. */}
-              <div className="mt-5">
-                <CheckinBox />
-              </div>
             </>
           ) : (
             <p className="glass rounded-2xl p-6 text-sm text-steel-300">
@@ -287,12 +281,8 @@ export default async function BarbeiroPanel({
           </div>
         )}
 
-        {/* Check-in */}
-        <Reveal delay={0.1}>
-          <div data-tour="checkin" className="mt-5">
-            <CheckinBox />
-          </div>
-        </Reveal>
+        {/* Check-in por QR saiu (pedido do Bryan): o barbeiro inicia o
+            atendimento pela própria agenda. */}
 
         {/* Agenda */}
         <Reveal delay={0.12}>

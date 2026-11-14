@@ -15,7 +15,6 @@ import {
   Sparkles,
   Crown,
   Loader2,
-  Zap,
 } from "lucide-react";
 import { serviceIcons } from "@/components/serviceIcons";
 import { formatBRL, formatDuration } from "@/lib/money";
@@ -97,8 +96,14 @@ export function BookingForm({
   // O barbeiro que lança o encaixe começa com ele mesmo escolhido: no
   // "mais rápido" o atendimento ia para a agenda de outro (o primeiro da
   // lista), e o check-in dele recusava "é de outro barbeiro".
+  // Pedido do Bryan: sem "mais rápido" — o cliente escolhe o barbeiro.
+  // Com um só na equipe, ele já vem escolhido.
   const [barberId, setBarberId] = useState<number | null>(
-    barberPadrao && team.some((b) => b.id === barberPadrao) ? barberPadrao : null
+    barberPadrao && team.some((b) => b.id === barberPadrao)
+      ? barberPadrao
+      : team.length === 1
+        ? team[0].id
+        : null
   );
   const [dateKey, setDateKey] = useState<string | null>(
     prefill?.dia ?? days[0]?.dateKey ?? null
@@ -168,7 +173,7 @@ export function BookingForm({
 
   // Recarrega a grade sempre que muda o que afeta a disponibilidade.
   useEffect(() => {
-    if (!dateKey || totalMin === 0) {
+    if (!dateKey || totalMin === 0 || barberId === null) {
       setSlots([]);
       return;
     }
@@ -224,6 +229,7 @@ export function BookingForm({
   const canConfirm =
     (!cobra || !cobrancaOnline || (pagamento !== null && cpfOk)) &&
     selected.length > 0 &&
+    barberId !== null &&
     !!dateKey &&
     !!time &&
     name.trim().length > 2 &&
@@ -364,10 +370,6 @@ export function BookingForm({
           <StepTitle n={2} title="Barbeiro & horário" />
 
           <div className="mt-4 flex flex-wrap gap-2">
-            <ChipButton active={barberId === null} onClick={() => setBarberId(null)}>
-              <Zap className="h-3.5 w-3.5" />
-              Mais rápido
-            </ChipButton>
             {team.map((b) => (
               <ChipButton
                 key={b.id}
@@ -414,6 +416,10 @@ export function BookingForm({
           {selected.length === 0 ? (
             <p className="mt-5 rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-steel-400">
               Escolha um serviço para ver os horários livres.
+            </p>
+          ) : barberId === null ? (
+            <p className="mt-5 rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-steel-400">
+              Escolha o barbeiro para ver os horários livres.
             </p>
           ) : loadingSlots ? (
             <p className="mt-5 flex items-center justify-center gap-2 rounded-2xl border border-dashed border-white/10 px-4 py-6 text-sm text-steel-400">
@@ -535,10 +541,10 @@ export function BookingForm({
               {daCasa
                 ? avisaPorWhatsapp
                   ? "O cliente recebe a confirmação no WhatsApp."
-                  : "O WhatsApp ainda não está conectado: passe ao cliente o código que aparece na próxima tela."
+                  : "O WhatsApp ainda não está conectado: avise o cliente do horário."
                 : avisaPorWhatsapp
                   ? "Você recebe a confirmação e um lembrete no WhatsApp."
-                  : "A confirmação e o código aparecem na hora, na próxima tela."}
+                  : "A confirmação aparece na hora, na próxima tela."}
             </p>
           </div>
         </section>

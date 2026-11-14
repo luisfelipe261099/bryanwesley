@@ -35,8 +35,6 @@ import {
 import { formatBRL, formatDuration } from "@/lib/money";
 import { formatShopTime, utcToShopParts, labelFullDate, shopToday } from "@/lib/time";
 import { atendimentosDoPlanoNoMes, saldoDeExtras } from "@/lib/appointments";
-import { checkinQrSvg, publicBaseUrl } from "@/lib/qr";
-import { CheckinQR } from "./CheckinQR";
 import { CancelButton, EmptyState, ChangePassword } from "./MeusHorarios";
 import { Remarcar } from "./Remarcar";
 import { PagarPlano, CancelarPlano, ManterPlano } from "./MinhaAssinatura";
@@ -147,9 +145,6 @@ export default async function ClienteDashboard({
     );
   }
 
-  const qrSvg = proximo?.checkinToken
-    ? await checkinQrSvg(publicBaseUrl(), proximo.checkinToken)
-    : null;
 
   // Contas feitas no banco (lib/queries: memberStats). Feitas aqui sobre o
   // histórico, elas olhavam só os últimos 12 atendimentos — e a "economia"
@@ -276,13 +271,6 @@ export default async function ClienteDashboard({
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2.5">
-                  {qrSvg && (
-                    <CheckinQR
-                      svg={qrSvg}
-                      code={proximo.code}
-                      service={proximo.items.map((i) => i.name).join(" + ")}
-                    />
-                  )}
                   {proximo.status !== "EM_ANDAMENTO" && (
                     <Remarcar
                       appointmentId={proximo.id}
