@@ -171,7 +171,7 @@ export function AgendaSettings({ settings }: { settings: Settings }) {
           <p className="label text-electric">Mensalistas</p>
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
             <label className="block">
-              <span className="label mb-2 block text-steel-400">Plano não cobre a partir de</span>
+              <span className="label mb-2 block text-steel-400">Mensalista não marca a partir de</span>
               <input
                 type="time"
                 value={form.memberNightFrom === null ? "" : minutesToHHMM(form.memberNightFrom)}
@@ -179,7 +179,7 @@ export function AgendaSettings({ settings }: { settings: Settings }) {
                 className="w-full rounded-xl border border-white/10 bg-surface-2 px-4 py-3 text-white outline-none [color-scheme:dark] focus:border-electric/60"
               />
               <span className="mt-1.5 block text-xs text-steel-400">
-                Mensalista não corta pelo plano à noite: deste horário em diante sai avulso. Em branco = sem restrição.
+                Deste horário em diante o mensalista não consegue marcar pelo site (nem pagando): a noite fica para os avulsos. O encaixe da equipe ainda pode, e sai avulso. Em branco = sem restrição.
               </span>
             </label>
             <div>

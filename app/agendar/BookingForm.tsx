@@ -137,6 +137,8 @@ export function BookingForm({
   // À noite o plano não cobre: mensalista corta de noite só avulso.
   const minutoEscolhido = time ? Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)) : null;
   const deNoite = isSub && noiteMensalista !== null && minutoEscolhido !== null && minutoEscolhido >= noiteMensalista;
+  // Mensalista marcando para ele mesmo pelo site: a noite nem aparece.
+  const semNoite = isSub && !daCasa && !outroFone && noiteMensalista !== null;
   const cobre = (id: number) => {
     if (outroFone || semExtras || deNoite) return false;
     const c = plan?.covers.find((x) => x.id === id);
@@ -440,7 +442,12 @@ export function BookingForm({
           ) : (
             <div className="mt-5 space-y-5">
               {periods.map((p) => {
-                const list = slots.filter((s) => p.test(s.time));
+                // Mensalista não vê a noite (pedido do Bryan): nem pagando.
+                const list = slots.filter(
+                  (s) =>
+                    p.test(s.time) &&
+                    !(semNoite && Number(s.time.slice(0, 2)) * 60 + Number(s.time.slice(3, 5)) >= noiteMensalista!)
+                );
                 if (list.length === 0) return null;
                 return (
                   <div key={p.label}>
@@ -713,8 +720,10 @@ export function BookingForm({
             )}
             {deNoite && chosen.length > 0 && (
               <p className="mt-2 text-xs text-amber-200">
-                O plano não cobre horários a partir das {String(Math.floor(noiteMensalista! / 60)).padStart(2, "0")}:
-                {String(noiteMensalista! % 60).padStart(2, "0")}: à noite sai como avulso. Para usar o plano, escolha um horário antes.
+                {semNoite ? "Mensalista marca só antes das " : "O plano não cobre horários a partir das "}
+                {String(Math.floor(noiteMensalista! / 60)).padStart(2, "0")}:
+                {String(noiteMensalista! % 60).padStart(2, "0")}
+                {semNoite ? ". Escolha um horário mais cedo." : ": à noite sai como avulso."}
               </p>
             )}
             {!deNoite && estourouLimite && chosen.some((s) => plan?.covers.some((c) => c.id === s.id)) && (

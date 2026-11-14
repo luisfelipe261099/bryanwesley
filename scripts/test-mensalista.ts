@@ -88,6 +88,20 @@ async function main() {
     const noite = await livre(true);
     const a2 = await createBooking({ serviceIds: [corte.id], dateKey: noite.dia, time: noite.hora, barberId: noite.barberId, clientName: u.name, clientPhone: u.phone });
     ok(`à noite (${noite.hora}) sai avulso, preço cheio`, a2.totalCents > 0 && a2.kind === "AVULSO");
+    // Pedido do Bryan: pelo site o mensalista não marca à noite, nem pagando.
+    let recusou = "";
+    try {
+      const outra = await livre(true);
+      await createBooking({ serviceIds: [corte.id], dateKey: outra.dia, time: outra.hora, barberId: outra.barberId, clientName: u.name, clientPhone: u.phone, publicRequest: true });
+    } catch (e) { recusou = (e as Error).message; }
+    ok("pelo site, mensalista não marca à noite (nem pagando)", /Mensalista marca só antes/.test(recusou), recusou);
+    let deDiaOk = false;
+    try {
+      const cedo = await livre(false);
+      const a3 = await createBooking({ serviceIds: [corte.id], dateKey: cedo.dia, time: cedo.hora, barberId: cedo.barberId, clientName: u.name, clientPhone: u.phone, publicRequest: true });
+      deDiaOk = a3.kind === "ASSINANTE";
+    } catch (e) { console.log("    (de dia pelo site falhou:", (e as Error).message, ")"); }
+    ok("pelo site, de dia continua marcando pelo plano", deDiaOk);
 
     console.log("2. No salão, sem dinheiro");
     const [full] = await attachDetails([a2]);

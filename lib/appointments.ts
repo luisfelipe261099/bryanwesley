@@ -416,6 +416,20 @@ export async function createBooking(input: CreateBookingInput) {
       })
     : undefined;
 
+  // Pedido do Bryan: mensalista não marca à noite de jeito nenhum (nem
+  // pagando). Vale para o que o próprio cliente marca ou remarca pelo site;
+  // o encaixe da equipe continua podendo (e sai avulso).
+  if (subscription && input.publicRequest && !input.fromRecurring) {
+    const { memberNightFrom } = await getSettings();
+    const [h0, m0] = input.time.split(":").map(Number);
+    if (memberNightFrom != null && h0 * 60 + m0 >= memberNightFrom) {
+      const hhmm = `${String(Math.floor(memberNightFrom / 60)).padStart(2, "0")}:${String(memberNightFrom % 60).padStart(2, "0")}`;
+      throw new BookingError(
+        `Mensalista marca só antes das ${hhmm}: a partir desse horário a agenda é só para avulsos. Escolha um horário mais cedo.`
+      );
+    }
+  }
+
   let coveredIds = new Set<number>();
   let usaExtra = false;
   if (subscription) {
