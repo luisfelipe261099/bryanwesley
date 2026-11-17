@@ -75,6 +75,11 @@ export async function salvarCliente(input: {
     // Número reservado ("00…", cliente sem telefone) não vai.
     mobilePhone: telefone && !telefone.startsWith("00") ? telefone : undefined,
     externalReference: input.referencia,
+    // O Asaas cobra R$ 0,99 por cobrança paga ("taxa de mensageria") pelos
+    // avisos de e-mail/SMS que manda ao cliente. O app já mostra o Pix e
+    // avisa no celular: os avisos do Asaas ficam desligados (pedido do
+    // Bryan). Cliente que já existia é atualizado na próxima cobrança.
+    notificationDisabled: true,
   };
   if (input.asaasId) {
     const r = await chamar<AsaasCustomer>("POST", `/customers/${encodeURIComponent(input.asaasId)}`, corpo);

@@ -83,6 +83,7 @@ async function main() {
     ok("usa o sandbox com a chave de sandbox", chamadas.every((c) => c.caminho && c.chave === "$aact_hmlg_teste"));
     const cria = chamadas.find((c) => c.caminho === "/customers");
     ok("cria o cliente com nome, CPF e celular", cria?.corpo?.cpfCnpj === CPF && cria?.corpo?.mobilePhone === "41970200001");
+    ok("com os avisos do Asaas desligados (sem taxa de mensageria)", cria?.corpo?.notificationDisabled === true);
     const cob = chamadas.find((c) => c.caminho === "/payments" && c.metodo === "POST");
     ok("cobra o valor do plano, no Pix (sem boleto)", cob?.corpo?.value === plano.priceCents / 100 && cob?.corpo?.billingType === "PIX");
     const conta = (await db.select().from(users).where(eq(users.id, cliente.id)))[0];
