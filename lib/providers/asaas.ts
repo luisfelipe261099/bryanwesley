@@ -94,6 +94,8 @@ export type AsaasPayment = {
   deleted?: boolean;
   /** Cobrança gerada por uma assinatura do Asaas (cartão recorrente). */
   subscription?: string | null;
+  /** Cobrança criada pelo pagamento de um QR estático (Pix sem CPF). */
+  pixQrCodeId?: string | null;
 };
 
 /**
@@ -133,6 +135,51 @@ export function apagarCobranca(id: string) {
 /** Devolve ao cliente o valor de uma cobrança paga (estorno total). */
 export function estornarCobranca(id: string, descricao: string) {
   return chamar<{ id: string; status: string }>("POST", `/payments/${encodeURIComponent(id)}/refund`, { description: descricao });
+}
+
+// ───────── Pix na hora, sem CPF (QR estático da chave da conta) ─────────
+
+let chaveEmCache: string | null = null;
+
+/** Uma chave Pix ativa da conta (o QR estático precisa dela). */
+async function chavePixDaConta(): Promise<Resposta<string>> {
+  if (chaveEmCache) return { ok: true, data: chaveEmCache };
+  const r = await chamar<{ data: { key: string; status: string }[] }>("GET", "/pix/addressKeys?status=ACTIVE&limit=10");
+  if (!r.ok) return r;
+  const k = r.data.data?.find((x) => x.status === "ACTIVE")?.key ?? r.data.data?.[0]?.key;
+  if (!k) return { ok: false, error: "A conta do Asaas não tem chave Pix ativa." };
+  chaveEmCache = k;
+  return { ok: true, data: k };
+}
+
+export type AsaasQrEstatico = { id: string; encodedImage: string; payload: string };
+
+/**
+ * QR do Pix com o valor, sem cliente e sem CPF. O pagamento vira uma
+ * cobrança no Asaas (com o pixQrCodeId) e chega pelo webhook.
+ */
+export async function criarPixEstatico(input: {
+  valorCents: number;
+  descricao: string;
+  referencia: string;
+  expiraEmSegundos: number;
+}): Promise<Resposta<AsaasQrEstatico>> {
+  const chave = await chavePixDaConta();
+  if (!chave.ok) return chave;
+  return chamar<AsaasQrEstatico>("POST", "/pix/qrCodes/static", {
+    addressKey: chave.data,
+    description: input.descricao.slice(0, 140),
+    value: Number((input.valorCents / 100).toFixed(2)),
+    format: "ALL",
+    expirationSeconds: input.expiraEmSegundos,
+    allowsMultiplePayments: false,
+    externalReference: input.referencia.slice(0, 100),
+  });
+}
+
+/** Apaga um QR estático que não será mais usado. */
+export function apagarPixEstatico(id: string) {
+  return chamar<{ deleted: boolean }>("DELETE", `/pix/qrCodes/static/${encodeURIComponent(id)}`);
 }
 
 export type AsaasSubscription = { id: string; status?: string };

@@ -33,7 +33,10 @@ export function EditarServicos({
   variante = "icone",
   dia,
   hora,
+  acao,
 }: {
+  /** Outra ação de salvar (a do barbeiro, que confere se o horário é dele). */
+  acao?: (input: { appointmentId: number; serviceIds: number[] }) => Promise<{ ok: true; message?: string } | { ok: false; error: string }>;
   appointmentId: number;
   /** Dia e hora do atendimento: o preço que entra é o do turno. */
   dia?: string;
@@ -44,7 +47,7 @@ export function EditarServicos({
   atuais: number[];
   resumo: string;
   /** "menu" desenha o gatilho como linha do menu de ações. */
-  variante?: "icone" | "menu";
+  variante?: "icone" | "menu" | "texto";
 }) {
   const [open, setOpen] = useState(false);
   const [escolhidos, setEscolhidos] = useState<number[]>(atuais);
@@ -68,7 +71,7 @@ export function EditarServicos({
   function salvar() {
     setErro(null);
     start(async () => {
-      const r = await editarServicos({ appointmentId, serviceIds: escolhidos });
+      const r = await (acao ?? editarServicos)({ appointmentId, serviceIds: escolhidos });
       if (r.ok) {
         setOpen(false);
         toast(r.message ?? "Serviços atualizados.", "ok");
@@ -83,6 +86,15 @@ export function EditarServicos({
           <Scissors className="h-3.5 w-3.5" />
           Mudar serviços
         </ItemMenu>
+      ) : variante === "texto" ? (
+        <button
+          type="button"
+          onClick={abrir}
+          className="label inline-flex items-center justify-center gap-1.5 rounded-full border border-white/15 px-3 py-2 text-steel-100 hover:border-electric/50"
+        >
+          <Scissors className="h-3.5 w-3.5" />
+          Mudar serviços
+        </button>
       ) : (
         <button
           type="button"

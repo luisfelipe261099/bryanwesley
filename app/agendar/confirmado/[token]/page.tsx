@@ -207,7 +207,7 @@ export default async function Confirmado({
               metodo={appt.paymentMethod ?? null}
               status={pagamento?.status === "PAGO" ? "PAGO" : pagamento?.status === "PENDENTE" ? "PENDENTE" : null}
               pix={pix}
-              faturaUrl={pagamento?.checkoutUrl ?? null}
+              faturaUrl={pagamento?.slug === "PIX_QR" ? null : pagamento?.checkoutUrl ?? null}
               reciboUrl={pagamento?.receiptUrl ?? null}
               online={online}
               pedirCpf={!cpfSalvoUsavel}

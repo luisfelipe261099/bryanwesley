@@ -7,9 +7,16 @@ import { appointments, appointmentServices, services, users } from "@/db/schema"
 import { activeSubscription, dayBounds } from "@/lib/queries";
 import { requireRole } from "@/lib/auth";
 import { isNextControlFlow } from "@/lib/errors";
-import { transitionAppointment, BookingError, ajustarValorDoAtendimento, removerAjusteDoAtendimento } from "@/lib/appointments";
-import { registrarPagamentoNoBalcao, type FormaBalcao } from "@/lib/payments";
-import { subscriptions } from "@/db/schema";
+import {
+  transitionAppointment,
+  BookingError,
+  ajustarValorDoAtendimento,
+  removerAjusteDoAtendimento,
+  reabrirAtendimento,
+  updateAppointmentServices,
+} from "@/lib/appointments";
+import { gerarPixNaHora, registrarPagamentoNoBalcao, type FormaBalcao } from "@/lib/payments";
+import { payments, subscriptions } from "@/db/schema";
 import { shopToday, utcToShopParts, labelFullDate } from "@/lib/time";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -288,6 +295,113 @@ export async function removerAjuste(id: number, itemId: number): Promise<ActionR
     revalidateAll();
     revalidatePath("/admin/agenda");
     return { ok: true, message: "Ajuste removido." };
+  } catch (e) {
+    return toResult(e);
+  }
+}
+
+// ───────────────────── Pix na hora (sem CPF) ─────────────────────
+
+/** Gera (ou reaproveita) o QR do Pix com o valor do atendimento. */
+export async function gerarPixDoAtendimento(
+  id: number
+): Promise<{ ok: true; payload: string; svg: string } | { ok: false; error: string }> {
+  try {
+    await assertOwnership(id);
+    const r = await gerarPixNaHora(id);
+    if (!r.ok) return r;
+    const QRCode = (await import("qrcode")).default;
+    const svg = await QRCode.toString(r.payload, {
+      type: "svg",
+      errorCorrectionLevel: "M",
+      margin: 1,
+      color: { dark: "#0B0E14", light: "#FFFFFF" },
+    });
+    revalidatePath("/barbeiro");
+    return { ok: true, payload: r.payload, svg };
+  } catch (e) {
+    return toResult(e) as { ok: false; error: string };
+  }
+}
+
+/** Já caiu? (a tela pergunta enquanto o QR está aberto) */
+export async function atendimentoPago(id: number): Promise<{ pago: boolean }> {
+  try {
+    await assertOwnership(id);
+    const p = await db.query.payments.findFirst({
+      where: and(eq(payments.appointmentId, id), eq(payments.status, "PAGO")),
+      columns: { id: true },
+    });
+    if (p) {
+      revalidateAll();
+      revalidatePath("/admin/agenda");
+    }
+    return { pago: !!p };
+  } catch {
+    return { pago: false };
+  }
+}
+
+// ───────────────────── Corrigir (comando errado) ─────────────────────
+
+/** Finalizou sem querer: volta a "em andamento" e a comissão sai. */
+export async function reabrir(id: number): Promise<ActionResult> {
+  try {
+    await assertOwnership(id);
+    await reabrirAtendimento(id);
+    revalidateAll();
+    revalidatePath("/admin/agenda");
+    return { ok: true, message: "Atendimento reaberto. Finalize de novo quando estiver certo." };
+  } catch (e) {
+    return toResult(e);
+  }
+}
+
+/** Marcou falta por engano: o horário volta a valer (só no dia). */
+export async function desfazerFalta(id: number): Promise<ActionResult> {
+  try {
+    const { session } = await assertOwnership(id);
+    await transitionAppointment(id, "CONFIRMADO", { autorUserId: session.id });
+    revalidateAll();
+    revalidatePath("/admin/agenda");
+    return { ok: true, message: "Falta desfeita: o horário voltou a valer." };
+  } catch (e) {
+    return toResult(e);
+  }
+}
+
+/** Registrou o recebimento errado (forma ou valor): apaga para registrar de novo. */
+export async function desfazerRecebimento(id: number): Promise<ActionResult> {
+  try {
+    await assertOwnership(id);
+    const [r] = await db
+      .delete(payments)
+      .where(and(eq(payments.appointmentId, id), eq(payments.provider, "balcao"), eq(payments.status, "PAGO")));
+    if (r.affectedRows === 0) {
+      return { ok: false, error: "Não há recebimento no balcão para desfazer (Pix pago pelo app não sai daqui)." };
+    }
+    revalidateAll();
+    revalidatePath("/admin/agenda");
+    return { ok: true, message: "Recebimento desfeito. Registre de novo pelo Cobrar." };
+  } catch (e) {
+    return toResult(e);
+  }
+}
+
+/** Trocar os serviços do atendimento (o cliente pediu barba junto, ou marcou errado). */
+export async function editarServicosDoAtendimento(input: {
+  appointmentId: number;
+  serviceIds: number[];
+}): Promise<ActionResult> {
+  try {
+    await assertOwnership(input.appointmentId);
+    const appt = await updateAppointmentServices(input);
+    revalidateAll();
+    revalidatePath("/admin/agenda");
+    return {
+      ok: true,
+      message: appt.kind === "ASSINANTE" ? "Serviços atualizados: incluso no plano." : "Serviços atualizados.",
+    };
   } catch (e) {
     return toResult(e);
   }

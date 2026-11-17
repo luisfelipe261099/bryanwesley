@@ -27,6 +27,8 @@ import {
   cobrancaPaga,
   consultarCobranca,
   estornarCobranca,
+  criarPixEstatico,
+  apagarPixEstatico,
   criarCobranca,
   isAsaasConfigured,
   pixDaCobranca,
@@ -206,7 +208,8 @@ export async function settlePayment(input: { orderNsu: string; paymentId?: strin
   if (payment.status === "PAGO") return { ok: true as const, already: true };
   if (!input.paymentId) return { ok: false as const, error: "Pagamento não confirmado." };
   // A cobrança gravada é a única que dá baixa nesta referência.
-  if (payment.transactionNsu && payment.transactionNsu !== input.paymentId) {
+  const doQr = payment.transactionNsu?.startsWith("qr:") ?? false;
+  if (payment.transactionNsu && !doQr && payment.transactionNsu !== input.paymentId) {
     return { ok: false as const, error: "Pagamento não confirmado." };
   }
 
@@ -221,7 +224,9 @@ export async function settlePayment(input: { orderNsu: string; paymentId?: strin
     const nossa = await db.query.subscriptions.findFirst({ where: eq(subscriptions.id, payment.subscriptionId) });
     daAssinatura = !!nossa?.asaasSubscriptionId && nossa.asaasSubscriptionId === c.subscription;
   }
-  if (c.deleted || !cobrancaPaga(c.status) || (c.externalReference !== payment.orderNsu && !daAssinatura)) {
+  // Pix na hora: a cobrança nasce do QR; vale se veio do QR desta linha.
+  const qrConfere = doQr && !!c.pixQrCodeId && payment.transactionNsu === `qr:${c.pixQrCodeId}`;
+  if (c.deleted || !cobrancaPaga(c.status) || (c.externalReference !== payment.orderNsu && !daAssinatura && !qrConfere)) {
     return { ok: false as const, error: "Pagamento não confirmado." };
   }
   if (Math.round(c.value * 100) < payment.amountCents) {
@@ -461,7 +466,11 @@ export async function chargeAppointment(
 /** Apaga no Asaas uma cobrança pendente e a marca como cancelada aqui. */
 async function descartarCobranca(p: Payment): Promise<boolean> {
   if (p.status !== "PENDENTE") return false;
-  if (p.transactionNsu) {
+  if (p.transactionNsu?.startsWith("qr:")) {
+    // Pix na hora (QR estático): apaga o QR; se não der, ele vence sozinho
+    // em minutos, e um pagamento que ainda chegue é creditado pelo aviso.
+    await apagarPixEstatico(p.transactionNsu.slice(3)).catch(() => null);
+  } else if (p.transactionNsu) {
     const r = await apagarCobranca(p.transactionNsu);
     // O Asaas recusa apagar cobrança já paga (e pode estar fora do ar):
     // aí ela fica pendente aqui, e a baixa acontece quando o aviso chegar.
@@ -525,7 +534,9 @@ export async function pagamentoDoAgendamento(appointmentId: number) {
  * Garante o "Pago" na tela mesmo se o webhook atrasar.
  */
 export async function conferirPagamento(p: Payment): Promise<Payment> {
-  if (p.status !== "PENDENTE" || !p.transactionNsu) return p;
+  // O Pix na hora (QR estático) só vira cobrança quando é pago: a baixa vem
+  // pelo aviso do Asaas.
+  if (p.status !== "PENDENTE" || !p.transactionNsu || p.transactionNsu.startsWith("qr:")) return p;
   const c = await consultarCobranca(p.transactionNsu);
   if (c.ok && cobrancaPaga(c.data.status)) {
     await settlePayment({ orderNsu: p.orderNsu, paymentId: p.transactionNsu });
@@ -536,6 +547,12 @@ export async function conferirPagamento(p: Payment): Promise<Payment> {
 
 /** QR do Pix da cobrança, para mostrar na própria tela. */
 export async function pixDoPagamento(p: Payment) {
+  // Pix na hora (sem CPF): o "copia e cola" está guardado; a imagem sai dele.
+  if (p.status === "PENDENTE" && p.slug === "PIX_QR" && p.checkoutUrl) {
+    const QRCode = (await import("qrcode")).default;
+    const url = await QRCode.toDataURL(p.checkoutUrl, { margin: 1, width: 360 });
+    return { imagem: url.replace(/^data:image\/png;base64,/, ""), copiaECola: p.checkoutUrl };
+  }
   if (p.status !== "PENDENTE" || p.slug !== "PIX" || !p.transactionNsu) return null;
   const r = await pixDaCobranca(p.transactionNsu);
   return r.ok ? { imagem: r.data.encodedImage, copiaECola: r.data.payload } : null;
@@ -977,4 +994,76 @@ async function devolverReservaOcupada(payment: Payment) {
   } catch (e) {
     console.error("Aviso de devolução falhou:", e);
   }
+}
+
+
+// ───────────────────── Pix na hora, sem CPF ─────────────────────
+
+/** Minutos que o QR do Pix na hora vale. */
+const MINUTOS_PIX_NA_HORA = 30;
+
+/**
+ * O barbeiro cobra no balcão com Pix sem pedir CPF: um QR da chave da
+ * conta, com o valor do atendimento. Reaproveita o QR ainda aberto do
+ * mesmo valor; pago, a baixa chega pelo aviso do Asaas.
+ */
+export async function gerarPixNaHora(
+  appointmentId: number
+): Promise<{ ok: true; payload: string } | { ok: false; error: string }> {
+  if (!isCobrancaOnline()) return { ok: false, error: "O Pix pelo Asaas não está ligado." };
+  const appt = await db.query.appointments.findFirst({ where: eq(appointments.id, appointmentId) });
+  if (!appt) return { ok: false, error: "Agendamento não encontrado." };
+  if (appt.totalCents <= 0) return { ok: false, error: "Nada a cobrar: o plano cobre este horário." };
+  if (["CANCELADO", "NO_SHOW"].includes(appt.status)) return { ok: false, error: "Esse horário foi cancelado." };
+  const linhas = await db.select().from(payments).where(eq(payments.appointmentId, appt.id));
+  if (linhas.some((p) => p.status === "PAGO")) return { ok: false, error: "Esse horário já está pago." };
+
+  const recente = Date.now() - (MINUTOS_PIX_NA_HORA - 5) * 60_000;
+  const aberto = linhas.find(
+    (p) =>
+      p.status === "PENDENTE" &&
+      p.slug === "PIX_QR" &&
+      p.amountCents === appt.totalCents &&
+      p.checkoutUrl &&
+      p.createdAt.getTime() > recente
+  );
+  if (aberto?.checkoutUrl) return { ok: true, payload: aberto.checkoutUrl };
+
+  // Pix/cartão antigos (com CPF) ou QR de outro valor saem antes.
+  await cancelarCobrancasDoAgendamento(appt.id);
+  const orderNsu = nsu();
+  const qr = await criarPixEstatico({
+    valorCents: appt.totalCents,
+    descricao: `Bryan Wesley · ${appt.code}`,
+    referencia: orderNsu,
+    expiraEmSegundos: MINUTOS_PIX_NA_HORA * 60,
+  });
+  if (!qr.ok) {
+    console.error("Pix na hora não saiu:", qr.error);
+    return { ok: false, error: "Não deu para gerar o Pix agora. Tente de novo ou receba na maquininha." };
+  }
+  await db.insert(payments).values({
+    orderNsu,
+    userId: appt.clientUserId,
+    appointmentId: appt.id,
+    kind: "AVULSO",
+    amountCents: appt.totalCents,
+    description: `Pix na hora · ${appt.code}`,
+    status: "PENDENTE",
+    provider: "asaas",
+    slug: "PIX_QR",
+    transactionNsu: `qr:${qr.data.id}`,
+    checkoutUrl: qr.data.payload.slice(0, 500),
+  });
+  await db.update(appointments).set({ paymentMethod: "PIX" }).where(eq(appointments.id, appt.id));
+  return { ok: true, payload: qr.data.payload };
+}
+
+/** A referência (orderNsu) do Pix na hora cujo QR gerou esta cobrança. */
+export async function referenciaDoQr(pixQrCodeId: string) {
+  const p = await db.query.payments.findFirst({
+    where: eq(payments.transactionNsu, `qr:${pixQrCodeId}`),
+    columns: { orderNsu: true },
+  });
+  return p?.orderNsu ?? null;
 }

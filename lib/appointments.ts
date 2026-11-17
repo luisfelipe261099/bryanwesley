@@ -1374,3 +1374,26 @@ export async function confirmarReservaPaga(appointmentId: number): Promise<"conf
   }
   return resultado;
 }
+
+// ───────────────────── Corrigir um atendimento ─────────────────────
+
+/**
+ * Finalizou por engano (ou com o serviço errado): o atendimento volta a
+ * "em andamento", a comissão lançada sai e é lançada de novo quando
+ * finalizar outra vez. Só atendimentos dos últimos 7 dias.
+ */
+export async function reabrirAtendimento(id: number) {
+  const appt = await db.query.appointments.findFirst({ where: eq(appointments.id, id) });
+  if (!appt) throw new BookingError("Agendamento não encontrado.");
+  if (appt.status !== "CONCLUIDO") throw new BookingError("Só dá para reabrir um atendimento finalizado.");
+  const dia = utcToShopParts(appt.startsAt).dateKey;
+  if (dia < addDaysKey(shopToday(), -7)) {
+    throw new BookingError("Esse atendimento é de mais de 7 dias atrás: peça ao dono para corrigir.");
+  }
+  const [r] = await db
+    .update(appointments)
+    .set({ status: "EM_ANDAMENTO", finishedAt: null })
+    .where(and(eq(appointments.id, id), eq(appointments.status, "CONCLUIDO")));
+  if (r.affectedRows === 0) throw new BookingError("A situação desse atendimento acabou de mudar. Atualize a tela.");
+  await db.delete(appointmentCommissions).where(eq(appointmentCommissions.appointmentId, id));
+}

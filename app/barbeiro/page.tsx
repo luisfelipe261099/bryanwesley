@@ -43,6 +43,9 @@ import { db } from "@/db/client";
 import { appointments } from "@/db/schema";
 import { formatPhone } from "@/lib/phone";
 import { CobrarAtendimento } from "./CobrarAtendimento";
+import { CorrigirAtendimento } from "./CorrigirAtendimento";
+import { listServices } from "@/lib/queries";
+import { carregarRegras } from "@/lib/precos-server";
 import { AppointmentActions } from "./AgendaActions";
 import { appointmentStatus as statusStyles } from "@/lib/status";
 import { AvisosPush } from "@/components/AvisosPush";
@@ -113,6 +116,16 @@ export default async function BarbeiroPanel({
     // o percentual base e não batia com a comissão logo abaixo.
     resolveBarberPct(barber.id).then((r) => r.pct).catch(() => barber.commissionPct),
   ]);
+
+  // Catálogo para "Corrigir → Mudar serviços".
+  const [catalogo, regras] = await Promise.all([listServices(), carregarRegras()]);
+  const catalogoEdicao = catalogo.map((s) => ({
+    id: s.id,
+    name: s.name,
+    priceCents: s.priceCents,
+    durationMin: s.durationMin,
+    regras: regras.filter((r) => r.serviceId === s.id),
+  }));
 
   // Meta individual, definida pelo admin em Equipe. Meta zerada é "sem
   // meta" — a conta dividia por zero e mostrava "NaN%".
@@ -512,6 +525,20 @@ export default async function BarbeiroPanel({
                               totalCents={a.totalCents}
                               mensalista={a.mensalista}
                               ajustes={a.items.filter((i) => i.serviceId === null).map((i) => ({ id: i.id, name: i.name, priceCents: i.priceCents }))}
+                            />
+                          </div>
+                        )}
+                        {podeAgir && (
+                          <div className="ml-auto sm:ml-0">
+                            <CorrigirAtendimento
+                              id={a.id}
+                              status={a.status}
+                              pagoNoBalcao={a.pagamentoOnline === "PAGO" && ["DINHEIRO", "PIX_BALCAO", "CARTAO_BALCAO"].includes(a.formaPaga ?? "")}
+                              servicos={catalogoEdicao}
+                              atuais={a.items.map((i) => i.serviceId).filter((x): x is number => x !== null)}
+                              resumo={`${a.clientName.split(" ")[0]} · ${formatShopTime(a.startsAt)}`}
+                              dia={dateKey}
+                              hora={formatShopTime(a.startsAt)}
                             />
                           </div>
                         )}

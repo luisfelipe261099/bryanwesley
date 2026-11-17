@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { cancelPayment, settleCobrancaRecorrente, settlePayment } from "@/lib/payments";
+import { cancelPayment, referenciaDoQr, settleCobrancaRecorrente, settlePayment } from "@/lib/payments";
 
 export const dynamic = "force-dynamic";
 // Confere a cobrança na API do Asaas e avisa no celular: mais que o padrão.
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
   }
   let body: {
     event?: string;
-    payment?: { id?: string; externalReference?: string | null; subscription?: string | null };
+    payment?: { id?: string; externalReference?: string | null; subscription?: string | null; pixQrCodeId?: string | null };
   };
   try {
     body = await req.json();
@@ -36,7 +36,12 @@ export async function POST(req: Request) {
 
   const evento = String(body.event ?? "");
   const paymentId = body.payment?.id ? String(body.payment.id) : undefined;
-  const orderNsu = body.payment?.externalReference ? String(body.payment.externalReference) : "";
+  let orderNsu = body.payment?.externalReference ? String(body.payment.externalReference) : "";
+  // Pix na hora (QR estático, sem CPF): a cobrança nasce no Asaas quando o
+  // cliente paga; a nossa referência é achada pelo QR que a gerou.
+  if (!orderNsu && body.payment?.pixQrCodeId) {
+    orderNsu = (await referenciaDoQr(String(body.payment.pixQrCodeId))) ?? "";
+  }
 
   // Cobrança da assinatura do cartão (a do mês seguinte nasce lá sem
   // registro aqui): baixa pela assinatura, conferida na API.

@@ -5,7 +5,9 @@
 import Link from "next/link";
 import { AlertTriangle, ChevronLeft, ChevronRight, Crown, Scissors } from "lucide-react";
 import { requireRole } from "@/lib/auth";
-import { appointmentsOfDay, listTeam } from "@/lib/queries";
+import { appointmentsOfDay, listServices, listTeam } from "@/lib/queries";
+import { carregarRegras } from "@/lib/precos-server";
+import { CorrigirAtendimento } from "@/app/barbeiro/CorrigirAtendimento";
 import { liberarHorariosSemPagamento } from "@/lib/payments";
 import { aReceber, devendo, rotuloPagamento } from "@/lib/rotulo-pagamento";
 import { appointmentStatus as statusStyles } from "@/lib/status";
@@ -30,7 +32,19 @@ export default async function SalaoPage({ searchParams }: { searchParams: { dia?
   const podeAgir = dia <= hoje;
 
   await liberarHorariosSemPagamento().catch((e) => console.error("Liberar horários:", e));
-  const [equipe, agenda] = await Promise.all([listTeam(), appointmentsOfDay(dia)]);
+  const [equipe, agenda, catalogo, regras] = await Promise.all([
+    listTeam(),
+    appointmentsOfDay(dia),
+    listServices(),
+    carregarRegras(),
+  ]);
+  const catalogoEdicao = catalogo.map((s) => ({
+    id: s.id,
+    name: s.name,
+    priceCents: s.priceCents,
+    durationMin: s.durationMin,
+    regras: regras.filter((r) => r.serviceId === s.id),
+  }));
 
   const semPagar = agenda.filter((a) => devendo(a));
   const recebido = agenda
@@ -200,6 +214,18 @@ export default async function SalaoPage({ searchParams }: { searchParams: { dia?
                                 ajustes={a.items
                                   .filter((i) => i.serviceId === null)
                                   .map((i) => ({ id: i.id, name: i.name, priceCents: i.priceCents }))}
+                              />
+                            )}
+                            {podeAgir && (
+                              <CorrigirAtendimento
+                                id={a.id}
+                                status={a.status}
+                                pagoNoBalcao={a.pagamentoOnline === "PAGO" && ["DINHEIRO", "PIX_BALCAO", "CARTAO_BALCAO"].includes(a.formaPaga ?? "")}
+                                servicos={catalogoEdicao}
+                                atuais={a.items.map((i) => i.serviceId).filter((x): x is number => x !== null)}
+                                resumo={`${a.clientName.split(" ")[0]} · ${formatShopTime(a.startsAt)}`}
+                                dia={dia}
+                                hora={formatShopTime(a.startsAt)}
                               />
                             )}
                             <ExcluirAtendimento id={a.id} resumo={`${a.clientName} · ${formatShopTime(a.startsAt)}`} />

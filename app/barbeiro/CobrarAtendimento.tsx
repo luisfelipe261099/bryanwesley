@@ -7,16 +7,15 @@
 //  · Recebi no balcão — dinheiro, Pix na maquininha/chave ou cartão: marca
 //    pago e tira a fatura online em aberto.
 
-import { useState, useTransition } from "react";
-import { Banknote, CreditCard, Loader2, Minus, Plus, QrCode, Wallet, X } from "lucide-react";
+import { useEffect, useState, useTransition } from "react";
+import { Banknote, Check, Copy, CreditCard, Loader2, Minus, Plus, QrCode, Wallet, X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { formatBRL } from "@/lib/money";
-import { ajustarValor, receberNoBalcao, removerAjuste } from "./actions";
+import { ajustarValor, atendimentoPago, gerarPixDoAtendimento, receberNoBalcao, removerAjuste } from "./actions";
 import type { FormaBalcao } from "@/lib/payments";
 
 export function CobrarAtendimento({
   id,
-  token,
   totalCents,
   mensalista = false,
   ajustes = [],
@@ -24,13 +23,53 @@ export function CobrarAtendimento({
   /** Descontos e vendas extras já lançados (linhas sem serviço). */
   ajustes?: { id: number; name: string; priceCents: number }[];
   id: number;
-  token: string | null;
+  /** Não é mais usado (o Pix sai aqui mesmo); fica para as telas que passam. */
+  token?: string | null;
   totalCents: number;
   mensalista?: boolean;
 }) {
   const [aberto, setAberto] = useState(false);
   const [pending, start] = useTransition();
   const [erro, setErro] = useState<string | null>(null);
+  // Pix na hora, sem CPF: o QR aparece aqui mesmo e vira "Pago" sozinho.
+  const [pix, setPix] = useState<{ svg: string; payload: string } | null>(null);
+  const [gerando, startGerar] = useTransition();
+  const [copiado, setCopiado] = useState(false);
+
+  function gerarPix() {
+    setErro(null);
+    startGerar(async () => {
+      const r = await gerarPixDoAtendimento(id);
+      if (r.ok) setPix({ svg: r.svg, payload: r.payload });
+      else setErro(r.error);
+    });
+  }
+
+  // Enquanto o QR está na tela, pergunta a cada 4 s se já caiu (até 30 min).
+  useEffect(() => {
+    if (!pix) return;
+    let parar = false;
+    const fim = window.setTimeout(() => (parar = true), 30 * 60_000);
+    const t = window.setInterval(async () => {
+      if (parar) return;
+      try {
+        const r = await atendimentoPago(id);
+        if (r.pago && !parar) {
+          parar = true;
+          toast("Pix recebido!", "ok");
+          setPix(null);
+          setAberto(false);
+        }
+      } catch {
+        /* rede oscilou: tenta de novo */
+      }
+    }, 4000);
+    return () => {
+      parar = true;
+      window.clearInterval(t);
+      window.clearTimeout(fim);
+    };
+  }, [pix, id]);
   const [ajuste, setAjuste] = useState<"DESCONTO" | "EXTRA" | null>(null);
   const [valor, setValor] = useState("");
   const [descricao, setDescricao] = useState("");
@@ -182,14 +221,40 @@ export function CobrarAtendimento({
           </button>
         </div>
       )}
-      {token && (
-        <a
-          href={`/agendar/confirmado/${token}`}
-          className="label inline-flex items-center justify-center gap-1.5 rounded-full bg-electric px-3 py-2 text-white"
+      {pix ? (
+        <div className="space-y-2 rounded-lg bg-white p-2 text-center">
+          <div className="mx-auto w-48 [&>svg]:h-auto [&>svg]:w-full" dangerouslySetInnerHTML={{ __html: pix.svg }} />
+          <p className="text-[11px] font-semibold text-ink">Peça para o cliente ler este QR · {formatBRL(totalCents)}</p>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(pix.payload);
+                setCopiado(true);
+                window.setTimeout(() => setCopiado(false), 2000);
+              } catch {
+                /* sem permissão de copiar */
+              }
+            }}
+            className="label inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1.5 text-white"
+          >
+            {copiado ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            {copiado ? "Copiado" : "Copiar código Pix"}
+          </button>
+          <p className="flex items-center justify-center gap-1.5 text-[11px] text-ink/70">
+            <Loader2 className="h-3 w-3 animate-spin" /> Esperando o pagamento: vira Pago sozinho.
+          </p>
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={gerando}
+          onClick={gerarPix}
+          className="label inline-flex items-center justify-center gap-1.5 rounded-full bg-electric px-3 py-2 text-white disabled:opacity-50"
         >
-          <QrCode className="h-3.5 w-3.5" />
-          Mostrar Pix para o cliente
-        </a>
+          {gerando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <QrCode className="h-3.5 w-3.5" />}
+          Gerar Pix (sem CPF)
+        </button>
       )}
       <p className="text-[11px] text-steel-300">Ou já recebeu? Marque como:</p>
       <div className="grid grid-cols-1 gap-1.5">
