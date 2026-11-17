@@ -280,7 +280,7 @@ export default async function ClienteDashboard({
                       team={teamChips}
                     />
                   )}
-                  <CancelButton appointmentId={proximo.id} />
+                  <CancelButton appointmentId={proximo.id} pago={proximo.pagamentoOnline === "PAGO"} />
                 </div>
               </div>
             </div>
@@ -539,7 +539,7 @@ export default async function ClienteDashboard({
                               days={days}
                               team={teamChips}
                             />
-                            <CancelButton appointmentId={a.id} />
+                            <CancelButton appointmentId={a.id} pago={a.pagamentoOnline === "PAGO"} />
                           </span>
                         )}
                       </div>

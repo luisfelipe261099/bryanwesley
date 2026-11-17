@@ -5,7 +5,7 @@ import { AlertCircle, Loader2, Scissors, X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { cancelMyAppointment, changeMyPassword } from "./actions";
 
-export function CancelButton({ appointmentId }: { appointmentId: number }) {
+export function CancelButton({ appointmentId, pago = false }: { appointmentId: number; pago?: boolean }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -22,6 +22,11 @@ export function CancelButton({ appointmentId }: { appointmentId: number }) {
 
   return (
     <div className="flex flex-col items-end gap-2">
+      {confirming && pago && (
+        <p className="max-w-[240px] text-right text-xs text-amber-200">
+          Este horário já foi pago pelo app: cancelando, o valor não é devolvido. Prefere remarcar?
+        </p>
+      )}
       {confirming ? (
         <span className="flex items-center gap-2">
           <button
