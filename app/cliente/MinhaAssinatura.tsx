@@ -33,7 +33,7 @@ function Acao({
 
 /** Mensalidade: Pix ou cartão de crédito à vista (sem boleto, sem parcelar). */
 export function PagarPlano({ rotulo = "Pagar com Pix" }: { rotulo?: string }) {
-  const pagar = (metodo: "PIX" | "CARTAO") => async () => {
+  const pagar = (metodo: "PIX" | "CARTAO" | "CARTAO_AVULSO") => async () => {
     let r = await payMyPlan({ metodo });
     // Sem CPF na conta, o Asaas não gera a cobrança: pergunta e tenta de novo.
     if (!r.ok && r.precisaCpf) {
@@ -50,9 +50,13 @@ export function PagarPlano({ rotulo = "Pagar com Pix" }: { rotulo?: string }) {
         <QrCode className="h-3.5 w-3.5" />
         {rotulo}
       </Acao>
-      <Acao className="border border-electric/40 bg-electric/10 text-electric" onRun={pagar("CARTAO")}>
+      <Acao className="border border-electric/40 bg-electric/10 text-electric" onRun={pagar("CARTAO_AVULSO")}>
         <CreditCard className="h-3.5 w-3.5" />
-        Cartão (automático)
+        Cartão (só este mês)
+      </Acao>
+      <Acao className="border border-white/15 text-steel-200" onRun={pagar("CARTAO")}>
+        <CreditCard className="h-3.5 w-3.5" />
+        Cartão automático (todo mês)
       </Acao>
     </span>
   );

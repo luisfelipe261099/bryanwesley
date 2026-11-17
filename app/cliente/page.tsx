@@ -354,6 +354,28 @@ export default async function ClienteDashboard({
                     </div>
                   )}
 
+                  {/* Pagar antes de vencer (pedido do Bryan): o mês novo conta a
+                      partir do vencimento, ninguém perde dias. */}
+                  {!mensalidadeAberta &&
+                    !subscription.asaasSubscriptionId &&
+                    !subscription.canceledAt &&
+                    isCobrancaOnline() &&
+                    subscription.renewsAt.getTime() <= Date.now() + 35 * 86400_000 && (
+                      <div className="relative mt-5 rounded-2xl border border-electric/30 bg-electric/[0.06] p-4">
+                        <p className="text-sm font-semibold text-white">
+                          {subscription.cycle === "ANUAL" ? "Renovar o plano anual agora" : "Pagar a mensalidade agora"} ·{" "}
+                          {formatBRL(subscription.cycle === "ANUAL" ? plan.annualPriceCents * 12 : plan.priceCents)}
+                        </p>
+                        <p className="mt-1 text-xs text-steel-300">
+                          Vence em {labelFullDate(utcToShopParts(subscription.renewsAt).dateKey)}. Pode pagar antes: o próximo mês
+                          começa a contar do vencimento, você não perde nenhum dia.
+                        </p>
+                        <div className="mt-3">
+                          <PagarPlano rotulo="Pagar com Pix" />
+                        </div>
+                      </div>
+                    )}
+
                   {limiteDoPlano !== null && (
                     <div className="relative mt-5">
                       <div className="flex items-center justify-between text-sm">

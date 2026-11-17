@@ -711,7 +711,7 @@ export async function resumeMyPlan(): Promise<ActionResult> {
 
 /** Gera de novo o link de pagamento de quem está vencido. */
 export async function payMyPlan(
-  input: { cpf?: string; metodo?: "PIX" | "CARTAO" } = {}
+  input: { cpf?: string; metodo?: "PIX" | "CARTAO" | "CARTAO_AVULSO" } = {}
 ): Promise<SubscribeResult> {
   const session = await requireRole(["CLIENT", "ADMIN"]);
   const sub = await db.query.subscriptions.findFirst({
@@ -728,12 +728,30 @@ export async function payMyPlan(
       error: "Pagamento online ainda não está ligado. Acerte na barbearia.",
     };
   }
-  // Mensalista: Pix, ou cartão de crédito cobrado sozinho todo mês
-  // (assinatura do Asaas, à vista — não parcela).
+  // Pagar antes de vencer (pedido do Bryan): vale um ciclo à frente. Quem
+  // já pagou o próximo não paga de novo sem querer.
+  if (sub.status === "ATIVA" && sub.renewsAt.getTime() > Date.now() + 35 * 86400_000) {
+    const aberta = await db.query.payments.findFirst({
+      where: and(eq(payments.subscriptionId, sub.id), eq(payments.status, "PENDENTE")),
+      columns: { id: true },
+    });
+    if (!aberta) {
+      const { dateKey } = utcToShopParts(sub.renewsAt);
+      return {
+        ok: false,
+        error: `Sua mensalidade já está paga até ${dateKey.slice(8, 10)}/${dateKey.slice(5, 7)}.`,
+      };
+    }
+  }
+  // Mensalista: Pix, cartão só deste mês (à vista) ou cartão cobrado
+  // sozinho todo mês (assinatura do Asaas, à vista — não parcela).
   const charge =
     input.metodo === "CARTAO"
       ? await assinarNoCartao(session.id, sub.cycle, { cpf: input.cpf })
-      : await chargeSubscription(session.id, sub.cycle, { cpf: input.cpf, tipo: "PIX" });
+      : await chargeSubscription(session.id, sub.cycle, {
+          cpf: input.cpf,
+          tipo: input.metodo === "CARTAO_AVULSO" ? "CREDIT_CARD" : "PIX",
+        });
   if (!charge.ok) return { ok: false, error: charge.error, precisaCpf: charge.precisaCpf };
   revalidatePath("/cliente");
   return { ok: true, mode: "pagamento", url: charge.url };
