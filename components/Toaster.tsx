@@ -28,12 +28,12 @@ export function Toaster() {
         <div
           key={t.id}
           role="status"
-          className={`pointer-events-auto flex w-full max-w-sm items-start gap-2.5 rounded-2xl border px-4 py-3.5 text-sm shadow-card backdrop-blur-xl ${
-            // Fundo quase opaco: o aviso fica por cima da página, e com o
-            // fundo transparente o texto de baixo atravessava a mensagem.
+          className={`pointer-events-auto flex w-full max-w-sm items-start gap-2.5 rounded-2xl border px-4 py-3.5 text-sm shadow-card ${
+            // Fundo sólido, sem desfoque: o backdrop-blur fazia o tablet
+            // do salão "chuviscar" a tela.
             t.tone === "ok"
-              ? "border-neon/40 bg-[#0b1a17]/95 text-neon"
-              : "border-amber-400/45 bg-[#1d180c]/95 text-amber-200"
+              ? "border-neon/40 bg-[#0b1a17] text-neon"
+              : "border-amber-400/45 bg-[#1d180c] text-amber-200"
           }`}
         >
           {t.tone === "ok" ? (
