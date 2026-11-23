@@ -1397,3 +1397,66 @@ export async function reabrirAtendimento(id: number) {
   if (r.affectedRows === 0) throw new BookingError("A situação desse atendimento acabou de mudar. Atualize a tela.");
   await db.delete(appointmentCommissions).where(eq(appointmentCommissions.appointmentId, id));
 }
+
+/**
+ * Troca o barbeiro de um atendimento, no mesmo horário (pedido do Bryan: o
+ * cliente chega e prefere outro barbeiro). Só enquanto não foi encerrado,
+ * e só se o outro barbeiro estiver livre naquele horário.
+ */
+export async function trocarBarbeiroDoAtendimento(appointmentId: number, novoBarberId: number) {
+  const appt = await db.query.appointments.findFirst({ where: eq(appointments.id, appointmentId) });
+  if (!appt) throw new BookingError("Agendamento não encontrado.");
+  if (!["PENDENTE", "CONFIRMADO", "EM_ANDAMENTO"].includes(appt.status)) {
+    throw new BookingError("Esse atendimento já foi encerrado. Reabra antes de trocar o barbeiro.");
+  }
+  if (appt.barberId === novoBarberId) throw new BookingError("Esse atendimento já é desse barbeiro.");
+  const barber = await db.query.barbers.findFirst({
+    where: and(eq(barbers.id, novoBarberId), eq(barbers.active, true)),
+  });
+  if (!barber) throw new BookingError("Barbeiro indisponível.");
+  const settings = await getSettings();
+  const dateKey = utcToShopParts(appt.startsAt).dateKey;
+
+  await db.transaction(async (tx) => {
+    // A mesma trava (barbeiro, dia) do agendamento: ninguém marca nesse
+    // horário com o barbeiro novo enquanto a troca acontece.
+    await tx
+      .insert(bookingLocks)
+      .values({ barberId: novoBarberId, dateKey })
+      .onDuplicateKeyUpdate({ set: { dateKey: rawSql`${bookingLocks.dateKey}` } });
+    await tx.execute(
+      rawSql`SELECT 1 FROM booking_locks WHERE barber_id = ${novoBarberId} AND date_key = ${dateKey} FOR UPDATE`
+    );
+    // Atendimento já finalizado não segura o barbeiro: ele está livre.
+    const [clash] = await tx
+      .select({ clientName: appointments.clientName, startsAt: appointments.startsAt })
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.barberId, novoBarberId),
+          inArray(appointments.status, ["PENDENTE", "CONFIRMADO", "EM_ANDAMENTO"]),
+          lt(appointments.startsAt, appt.endsAt),
+          gt(appointments.endsAt, appt.startsAt)
+        )
+      )
+      .limit(1)
+      .for("update");
+    if (clash) {
+      const h = utcToShopParts(clash.startsAt).minutesOfDay;
+      const hora = `${String(Math.floor(h / 60)).padStart(2, "0")}:${String(h % 60).padStart(2, "0")}`;
+      throw new BookingError(
+        `${barber.shortName} já tem cliente nesse horário (${clash.clientName.split(" ")[0]}, ${hora}). Finalize ou remarque o dele antes.`
+      );
+    }
+    const [r] = await tx
+      .update(appointments)
+      .set({
+        barberId: novoBarberId,
+        // A divisão combinada é a do barbeiro que atende.
+        barberPctSnapshot: barber.commissionPct ?? settings.defaultBarberPct,
+      })
+      .where(and(eq(appointments.id, appt.id), eq(appointments.status, appt.status), eq(appointments.barberId, appt.barberId)));
+    if (r.affectedRows === 0) throw new BookingError("A situação desse atendimento acabou de mudar. Atualize a tela.");
+  });
+  return { barbeiro: barber.shortName };
+}

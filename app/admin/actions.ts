@@ -2180,3 +2180,17 @@ export async function setBarberLunch(input: {
     return fail(e);
   }
 }
+
+
+/** Salão: o cliente preferiu outro barbeiro (mesmo horário). */
+export async function trocarBarbeiro(input: { appointmentId: number; barberId: number }): Promise<Result> {
+  try {
+    await admin();
+    const { trocarBarbeiroDoAtendimento } = await import("@/lib/appointments");
+    const r = await trocarBarbeiroDoAtendimento(input.appointmentId, input.barberId);
+    revalidatePath("/admin/salao");
+    return done(`Atendimento passado para ${r.barbeiro}`);
+  } catch (e) {
+    return fail(e);
+  }
+}

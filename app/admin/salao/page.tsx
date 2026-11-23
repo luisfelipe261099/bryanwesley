@@ -8,6 +8,7 @@ import { requireRole } from "@/lib/auth";
 import { appointmentsOfDay, listServices, listTeam } from "@/lib/queries";
 import { carregarRegras } from "@/lib/precos-server";
 import { CorrigirAtendimento } from "@/app/barbeiro/CorrigirAtendimento";
+import { trocarBarbeiro } from "../actions";
 import { liberarHorariosSemPagamento } from "@/lib/payments";
 import { aReceber, devendo, rotuloPagamento } from "@/lib/rotulo-pagamento";
 import { appointmentStatus as statusStyles } from "@/lib/status";
@@ -226,6 +227,9 @@ export default async function SalaoPage({ searchParams }: { searchParams: { dia?
                                 resumo={`${a.clientName.split(" ")[0]} · ${formatShopTime(a.startsAt)}`}
                                 dia={dia}
                                 hora={formatShopTime(a.startsAt)}
+                                barbeiroId={a.barberId}
+                                barbeiros={equipe.map((b) => ({ id: b.id, nome: b.shortName }))}
+                                trocarBarbeiro={trocarBarbeiro}
                               />
                             )}
                             <ExcluirAtendimento id={a.id} resumo={`${a.clientName} · ${formatShopTime(a.startsAt)}`} />

@@ -5,7 +5,7 @@
 // errado ou o serviço está errado — e precisa arrumar sem chamar o dono.
 
 import { useState, useTransition } from "react";
-import { Loader2, Pencil, RotateCcw, Undo2, X } from "lucide-react";
+import { Loader2, Pencil, RotateCcw, Undo2, Users, X } from "lucide-react";
 import { toast } from "@/lib/toast";
 import { EditarServicos, type ServicoDoCatalogo } from "@/app/admin/agenda/EditarServicos";
 import {
@@ -25,6 +25,9 @@ export function CorrigirAtendimento({
   resumo,
   dia,
   hora,
+  barbeiroId,
+  barbeiros,
+  trocarBarbeiro,
 }: {
   id: number;
   status: string;
@@ -35,6 +38,10 @@ export function CorrigirAtendimento({
   resumo: string;
   dia: string;
   hora: string;
+  /** Salão (dono): o cliente preferiu outro barbeiro. */
+  barbeiroId?: number;
+  barbeiros?: { id: number; nome: string }[];
+  trocarBarbeiro?: (input: { appointmentId: number; barberId: number }) => Promise<ActionResult>;
 }) {
   const [aberto, setAberto] = useState(false);
   const [pending, start] = useTransition();
@@ -52,6 +59,8 @@ export function CorrigirAtendimento({
   }
 
   const podeServicos = ["PENDENTE", "CONFIRMADO", "EM_ANDAMENTO"].includes(status);
+  const outros = (barbeiros ?? []).filter((b) => b.id !== barbeiroId);
+  const podeBarbeiro = podeServicos && !!trocarBarbeiro && outros.length > 0;
   const temAlgo = status === "CONCLUIDO" || status === "NO_SHOW" || pagoNoBalcao || podeServicos;
   if (!temAlgo) return null;
 
@@ -113,6 +122,26 @@ export function CorrigirAtendimento({
           hora={hora}
           acao={editarServicosDoAtendimento}
         />
+      )}
+      {podeBarbeiro && (
+        <div className="border-t border-white/10 pt-2">
+          <p className="flex items-center gap-1.5 text-[11px] text-steel-300">
+            <Users className="h-3.5 w-3.5" /> Passar para outro barbeiro
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {outros.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                disabled={pending}
+                onClick={() => run((apptId) => trocarBarbeiro!({ appointmentId: apptId, barberId: b.id }))}
+                className={botao}
+              >
+                {b.nome}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
       {status === "CONCLUIDO" && (
         <p className="text-[11px] text-steel-400">Para trocar o serviço de um finalizado: reabra, troque e finalize de novo.</p>
