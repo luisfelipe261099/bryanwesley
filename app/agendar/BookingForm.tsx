@@ -90,9 +90,15 @@ export function BookingForm({
 }) {
   const isSub = !!plan;
 
+  // Pedido do Bryan: o mensalista já entra com o serviço do plano dele
+  // marcado e só escolhe o barbeiro e o horário (escolhendo na lista, ele
+  // marcava o serviço errado). A lista fica atrás de "Trocar ou adicionar".
+  const doPlano =
+    plan && !daCasa ? plan.covers.map((c) => c.id).filter((id) => services.some((s) => s.id === id)) : [];
   const [selected, setSelected] = useState<number[]>(
-    prefill?.servicoId ? [prefill.servicoId] : []
+    prefill?.servicoId ? [prefill.servicoId] : doPlano
   );
+  const [listaAberta, setListaAberta] = useState(doPlano.length === 0 || !!prefill?.servicoId);
   // O barbeiro que lança o encaixe começa com ele mesmo escolhido: no
   // "mais rápido" o atendimento ia para a agenda de outro (o primeiro da
   // lista), e o check-in dele recusava "é de outro barbeiro".
@@ -294,8 +300,34 @@ export function BookingForm({
       <div className="min-w-0 space-y-10">
         {/* ── 1. Serviço ── */}
         <section>
-          <StepTitle n={1} title="Escolha o serviço" />
-          <div className="mt-4 space-y-2.5">
+          <StepTitle n={1} title={listaAberta ? "Escolha o serviço" : "Seu serviço"} />
+          {!listaAberta && (
+            <div className="mt-4 rounded-2xl border border-electric/60 bg-electric/[0.07] p-4">
+              <p className="label text-electric">Do seu {plan?.name}</p>
+              <ul className="mt-2.5 space-y-2">
+                {chosen.map((s) => (
+                  <li key={s.id} className="flex items-center justify-between gap-3">
+                    <span className="flex min-w-0 items-center gap-2.5 font-semibold text-white">
+                      <Check className="h-4 w-4 flex-none text-electric" strokeWidth={3} />
+                      <span className="truncate">{s.name}</span>
+                    </span>
+                    <span className="flex-none text-xs text-steel-300">{formatDuration(s.durationMin)}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 text-sm text-steel-300">
+                Já está marcado. Escolha só o barbeiro e o horário.
+              </p>
+              <button
+                type="button"
+                onClick={() => setListaAberta(true)}
+                className="label mt-3 inline-flex min-h-[44px] items-center text-electric underline underline-offset-4"
+              >
+                Trocar ou adicionar serviço
+              </button>
+            </div>
+          )}
+          <div className={listaAberta ? "mt-4 space-y-2.5" : "hidden"}>
             {services.map((s) => {
               const Icon = serviceIcons[s.slug] ?? serviceIcons.corte;
               const active = selected.includes(s.id);
