@@ -8,8 +8,11 @@ import {
   desligarAvisosDoCliente,
   listarClientes,
   listarCobrancas,
+  cancelarAssinaturaAsaas,
   listarNegativacoes,
 } from "@/lib/providers/asaas";
+import { cancelarCobrancasDoPlano, encerrarCartaoRecorrente } from "@/lib/payments";
+import { desligarFixosDe } from "@/lib/recurring";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -113,7 +116,7 @@ export async function GET(req: Request) {
  */
 export async function POST(req: Request) {
   if (!autorizado(req)) return naoExiste();
-  const body = (await req.json().catch(() => ({}))) as { acao?: string; ids?: string[] };
+  const body = (await req.json().catch(() => ({}))) as { acao?: string; ids?: string[]; assinaturaAsaas?: string };
 
   if (body.acao === "desligar-avisos") {
     const clientes = await listarClientes();
@@ -146,6 +149,31 @@ export async function POST(req: Request) {
       resultado.push({ id, ok: true });
     }
     return NextResponse.json({ resultado });
+  }
+
+  // Cancela o plano de quem tem esta assinatura de cartão no Asaas, igual
+  // ao "Cancelar assinatura" do painel: o cartão para de ser cobrado, as
+  // mensalidades em aberto saem e o horário fixo é liberado.
+  if (body.acao === "cancelar-plano" && typeof body.assinaturaAsaas === "string") {
+    const dona = await db.query.subscriptions.findFirst({
+      where: eq(subscriptions.asaasSubscriptionId, body.assinaturaAsaas),
+    });
+    if (!dona) {
+      // O sistema não conhece a assinatura: só existe no Asaas.
+      const r = await cancelarAssinaturaAsaas(body.assinaturaAsaas);
+      if (!r.ok && r.status !== 404) return NextResponse.json({ error: r.error }, { status: 502 });
+      return NextResponse.json({ ok: true, noSistema: false });
+    }
+    const parou = await encerrarCartaoRecorrente(dona.userId);
+    if (!parou.ok) return NextResponse.json({ error: parou.error }, { status: 502 });
+    await cancelarCobrancasDoPlano(dona.userId);
+    const [upd] = await db
+      .update(subscriptions)
+      .set({ status: "CANCELADA", canceledAt: new Date() })
+      .where(and(eq(subscriptions.userId, dona.userId), inArray(subscriptions.status, ["ATIVA", "INADIMPLENTE"])));
+    const fixos = await desligarFixosDe([dona.userId]);
+    const u = await db.query.users.findFirst({ where: eq(users.id, dona.userId), columns: { name: true } });
+    return NextResponse.json({ ok: true, noSistema: true, cliente: u?.name, planosCancelados: upd.affectedRows, fixosLiberados: fixos });
   }
 
   return NextResponse.json({ error: "ação desconhecida" }, { status: 400 });
