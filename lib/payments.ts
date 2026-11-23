@@ -150,10 +150,15 @@ export async function chargeSubscription(
   const orderNsu = nsu();
   const descricao = `${plan.name} — ${cycle === "ANUAL" ? "12 meses" : "1 mês"}`;
 
+  // Plano em dia: a cobrança é do PRÓXIMO ciclo e vence com ele. Vencendo
+  // em 3 dias, o Asaas tratava como atrasado quem já tinha pago o mês no
+  // balcão (e o cliente recebia cobrança de uma mensalidade que não devia).
+  const emDiaAte = sub.status === "ATIVA" ? utcToShopParts(sub.renewsAt).dateKey : null;
+  const pedido = opts.vencimento ?? emDiaAte;
   const cobranca = await criarCobranca({
     cliente: cliente.data.id,
     valorCents: amountCents,
-    vencimento: opts.vencimento && opts.vencimento > shopToday() ? opts.vencimento : addDays(shopToday(), PRAZO_DIAS),
+    vencimento: pedido && pedido > shopToday() ? pedido : addDays(shopToday(), PRAZO_DIAS),
     descricao: `Clube VIP Bryan Wesley · ${descricao}`,
     referencia: orderNsu,
     tipo,
