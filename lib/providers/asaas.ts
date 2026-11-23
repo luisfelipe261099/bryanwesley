@@ -230,3 +230,55 @@ export function consultarCobranca(id: string) {
 export function cobrancaPaga(status: string) {
   return status === "RECEIVED" || status === "CONFIRMED" || status === "RECEIVED_IN_CASH";
 }
+
+// ───────── Conferência (manutenção): o que está em aberto no Asaas ─────────
+
+export type AsaasPaymentListado = AsaasPayment & {
+  customer: string;
+  dueDate: string;
+  dateCreated?: string;
+  description?: string | null;
+  billingType?: string;
+};
+
+/** Todas as cobranças de uma situação (PENDING, OVERDUE…), página a página. */
+export async function listarCobrancas(status: string): Promise<Resposta<AsaasPaymentListado[]>> {
+  const todas: AsaasPaymentListado[] = [];
+  for (let offset = 0; offset < 2000; offset += 100) {
+    const r = await chamar<{ data: AsaasPaymentListado[]; hasMore: boolean }>(
+      "GET",
+      `/payments?status=${encodeURIComponent(status)}&limit=100&offset=${offset}`
+    );
+    if (!r.ok) return r;
+    todas.push(...(r.data.data ?? []));
+    if (!r.data.hasMore) break;
+  }
+  return { ok: true, data: todas };
+}
+
+export type AsaasClienteListado = { id: string; name: string; notificationDisabled?: boolean };
+
+/** Todos os clientes cadastrados no Asaas. */
+export async function listarClientes(): Promise<Resposta<AsaasClienteListado[]>> {
+  const todos: AsaasClienteListado[] = [];
+  for (let offset = 0; offset < 5000; offset += 100) {
+    const r = await chamar<{ data: AsaasClienteListado[]; hasMore: boolean }>("GET", `/customers?limit=100&offset=${offset}`);
+    if (!r.ok) return r;
+    todos.push(...(r.data.data ?? []));
+    if (!r.data.hasMore) break;
+  }
+  return { ok: true, data: todos };
+}
+
+/** Desliga os avisos de e-mail/SMS do Asaas para um cliente já cadastrado. */
+export function desligarAvisosDoCliente(id: string) {
+  return chamar<AsaasClienteListado>("POST", `/customers/${encodeURIComponent(id)}`, { notificationDisabled: true });
+}
+
+/** Negativações (Serasa) abertas na conta. */
+export function listarNegativacoes() {
+  return chamar<{ data: { id: string; status: string; payment?: string }[]; totalCount?: number }>(
+    "GET",
+    "/paymentDunnings?limit=100"
+  );
+}
