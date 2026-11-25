@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Crown,
   Gem,
+  Banknote,
   Link2,
   Loader2,
   Phone,
@@ -25,6 +26,7 @@ import { subscriptionStatus } from "@/lib/status";
 import {
   ajustarExtras,
   cancelSubscription,
+  darBaixaMensalidade,
   createSubscriptionCharge,
   renewSubscription,
   subscribeClient,
@@ -90,8 +92,22 @@ function urlDoClube(a: {
   return qs ? `/admin/clube?${qs}` : "/admin/clube";
 }
 
+export type Atrasado = {
+  userId: number;
+  name: string;
+  phone: string;
+  phonePending: boolean;
+  planName: string;
+  /** Valor do ciclo em aberto. */
+  valorCents: number;
+  venceu: string;
+  dias: number;
+  cartaoAutomatico: boolean;
+};
+
 export function ClubeManager({
   resumo,
+  atrasados = [],
   pedidos,
   planos,
   servicos,
@@ -105,6 +121,8 @@ export function ClubeManager({
   cobrancaOnline,
 }: {
   resumo: Resumo;
+  /** Membros com a mensalidade vencida, para dar baixa em quem pagou por fora. */
+  atrasados?: Atrasado[];
   pedidos: RequestRow[];
   planos: PlanoEditavel[];
   servicos: PlanoServico[];
@@ -156,18 +174,48 @@ export function ClubeManager({
           rotulo="Membros ativos"
           dica={`${resumo.vencendo} renova(m) em 7 dias`}
         />
-        <Numero
-          icon={<Crown className="h-4 w-4 sm:h-5 sm:w-5" />}
-          valor={String(resumo.vencidos)}
-          rotulo="Planos vencidos"
-          dica="Cobrança em atraso"
-        />
+        <a href="#atrasados" className="block rounded-2xl transition-colors hover:ring-1 hover:ring-electric/40">
+          <Numero
+            icon={<Crown className="h-4 w-4 sm:h-5 sm:w-5" />}
+            valor={String(resumo.vencidos)}
+            rotulo="Planos vencidos"
+            dica={resumo.vencidos > 0 ? "Toque para ver e dar baixa" : "Ninguém em atraso"}
+          />
+        </a>
         <Numero
           icon={<Gem className="h-4 w-4 sm:h-5 sm:w-5" />}
           valor={String(resumo.cancelados)}
           rotulo="Cancelados"
           dica="Histórico do clube"
         />
+      </div>
+
+      <div id="atrasados" className="scroll-mt-24">
+        <Card
+          title="Mensalidades em atraso"
+          desc="Quem está com o plano vencido. Recebeu em dinheiro, no Pix ou na maquininha? Dê baixa aqui: o pagamento fica anotado e o plano renova na hora."
+          icon={<Banknote className="h-5 w-5" />}
+        >
+          {atrasados.length === 0 ? (
+            <p className="rounded-2xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-steel-400">
+              Ninguém em atraso. Todos os membros estão com o plano em dia.
+            </p>
+          ) : (
+            <>
+              <p className="mb-3 text-sm text-steel-300">
+                {atrasados.length} membro(s) devendo{" "}
+                <span className="font-semibold text-white">
+                  {formatBRL(atrasados.reduce((t, a) => t + a.valorCents, 0))}
+                </span>
+              </p>
+              <ul className="space-y-2.5">
+                {atrasados.map((a) => (
+                  <AtrasadoRow key={a.userId} a={a} />
+                ))}
+              </ul>
+            </>
+          )}
+        </Card>
       </div>
 
       {resumo.porPlano.length > 0 && (
@@ -339,6 +387,93 @@ export function ClubeManager({
         )}
       </Card>
     </div>
+  );
+}
+
+const FORMAS_BAIXA = [
+  { valor: "DINHEIRO", label: "Dinheiro" },
+  { valor: "PIX_BALCAO", label: "Pix" },
+  { valor: "CARTAO_BALCAO", label: "Cartão" },
+] as const;
+
+function AtrasadoRow({ a }: { a: Atrasado }) {
+  const [aberto, setAberto] = useState(false);
+  const [pending, start] = useTransition();
+  const [msg, setMsg] = useState<Msg | null>(null);
+
+  function baixar(forma: (typeof FORMAS_BAIXA)[number]["valor"]) {
+    setMsg(null);
+    start(async () => {
+      const r = await darBaixaMensalidade({ userId: a.userId, forma });
+      setMsg(notify(r, "Baixa registrada."));
+      if (r.ok) setAberto(false);
+    });
+  }
+
+  return (
+    <li className="rounded-2xl border border-amber-400/25 bg-amber-400/[0.05] p-3.5" data-ocupado={aberto ? "" : undefined}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="min-w-0 flex-1 basis-[55%]">
+          <Link href={`/admin/clientes/${a.userId}`} className="block truncate font-medium text-white hover:text-electric">
+            {a.name}
+          </Link>
+          <p className="mt-0.5 text-xs text-steel-300">
+            {a.planName.replace("Plano ", "")} · <span className="font-semibold text-white">{formatBRL(a.valorCents)}</span>
+          </p>
+          <p className="mt-0.5 text-xs text-amber-200">
+            Venceu {a.venceu} · {a.dias === 0 ? "hoje" : a.dias === 1 ? "há 1 dia" : `há ${a.dias} dias`}
+            {a.cartaoAutomatico ? " · cartão automático" : ""}
+          </p>
+        </div>
+        <div className="flex w-full flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:flex-none">
+          {!a.phonePending && (
+            <a
+              href={`https://wa.me/55${a.phone}`}
+              target="_blank"
+              rel="noreferrer"
+              className="label inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-white/12 px-3.5 text-steel-300 hover:border-electric/45 hover:text-white"
+            >
+              <Phone className="h-3.5 w-3.5" />
+              WhatsApp
+            </a>
+          )}
+          <button
+            type="button"
+            onClick={() => setAberto((v) => !v)}
+            disabled={pending}
+            className="label inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-emerald-400/50 bg-emerald-400/15 px-4 text-emerald-100 disabled:opacity-50"
+          >
+            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Banknote className="h-3.5 w-3.5" />}
+            {aberto ? "Fechar" : "Dar baixa"}
+          </button>
+        </div>
+      </div>
+      {aberto && (
+        <div className="mt-3 border-t border-white/10 pt-3">
+          <p className="text-sm text-steel-200">
+            Como {a.name.split(" ")[0]} pagou os {formatBRL(a.valorCents)}?
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {FORMAS_BAIXA.map((f) => (
+              <button
+                key={f.valor}
+                type="button"
+                disabled={pending}
+                onClick={() => baixar(f.valor)}
+                className="label inline-flex min-h-[44px] items-center rounded-full border border-white/15 px-4 text-white hover:border-emerald-400/60 disabled:opacity-50"
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {msg && (
+        <div className="mt-2">
+          <Feedback msg={msg} />
+        </div>
+      )}
+    </li>
   );
 }
 

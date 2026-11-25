@@ -2194,3 +2194,70 @@ export async function trocarBarbeiro(input: { appointmentId: number; barberId: n
     return fail(e);
   }
 }
+
+
+/**
+ * Clube VIP: o membro pagou a mensalidade por fora (dinheiro, Pix na chave
+ * ou maquininha). Registra o recebimento e renova o plano de uma vez — o
+ * "Renovar" estendia o plano mas não deixava o pagamento anotado.
+ */
+export async function darBaixaMensalidade(input: {
+  userId: number;
+  forma: "DINHEIRO" | "PIX_BALCAO" | "CARTAO_BALCAO";
+}): Promise<Result> {
+  try {
+    await admin();
+    if (!["DINHEIRO", "PIX_BALCAO", "CARTAO_BALCAO"].includes(input.forma)) {
+      return { ok: false, error: "Escolha como o cliente pagou." };
+    }
+    const current = await db.query.subscriptions.findFirst({
+      where: and(eq(subscriptions.userId, input.userId), inArray(subscriptions.status, ["ATIVA", "INADIMPLENTE"])),
+      orderBy: (s, { desc }) => [desc(s.startedAt)],
+    });
+    if (!current) return { ok: false, error: "Esse cliente não tem assinatura." };
+    const plano = await db.query.plans.findFirst({ where: eq(plans.id, current.planId) });
+    if (!plano) return { ok: false, error: "Plano não encontrado." };
+    const meses = current.cycle === "ANUAL" ? 12 : 1;
+    const amountCents = (current.cycle === "ANUAL" ? plano.annualPriceCents : plano.priceCents) * meses;
+
+    // A mensalidade em aberto no Asaas sai: senão ficaria atrasada lá
+    // mesmo com o mês pago aqui.
+    await cancelarCobrancasDoPlano(input.userId);
+    if (current.asaasSubscriptionId) {
+      const { cobrancasDaAssinatura, apagarCobranca } = await import("@/lib/providers/asaas");
+      const lista = await cobrancasDaAssinatura(current.asaasSubscriptionId).catch(() => null);
+      for (const c of lista?.ok ? lista.data.data ?? [] : []) {
+        if (c.status === "OVERDUE" && !c.deleted) await apagarCobranca(c.id).catch(() => null);
+      }
+    }
+    // Só quem der a baixa estende: dois toques seguidos não dão dois meses.
+    const [upd] = await db
+      .update(subscriptions)
+      .set({ status: "ATIVA", renewsAt: nextRenewal(current.renewsAt, current.cycle), canceledAt: null })
+      .where(and(eq(subscriptions.id, current.id), eq(subscriptions.renewsAt, current.renewsAt)));
+    if (upd.affectedRows === 0) return { ok: false, error: "Essa mensalidade acabou de receber baixa. Atualize a tela." };
+    await db.insert(payments).values({
+      orderNsu: `bx${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
+      userId: input.userId,
+      subscriptionId: current.id,
+      kind: "ASSINATURA",
+      cycle: current.cycle,
+      planId: plano.id,
+      amountCents,
+      description: `Mensalidade recebida no balcão · ${plano.name}`.slice(0, 160),
+      status: "PAGO",
+      provider: "balcao",
+      slug: input.forma,
+      paidAt: new Date(),
+    });
+    await db
+      .update(planRequests)
+      .set({ status: "ATENDIDA" })
+      .where(and(eq(planRequests.userId, input.userId), eq(planRequests.status, "ABERTA")));
+    await avisarPlanoAtivado({ userId: input.userId, planId: current.planId, renovacao: true });
+    revalidatePath("/admin/clube");
+    return done("Baixa registrada. Plano renovado.");
+  } catch (e) {
+    return fail(e);
+  }
+}

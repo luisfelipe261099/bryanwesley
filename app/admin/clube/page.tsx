@@ -39,12 +39,14 @@ export default async function AdminClube({
   const pagina = Number.isFinite(pedida) && pedida > 0 ? Math.floor(pedida) : 1;
 
   const filtro = { situacao, planId, q };
-  const [resumo, planos, servicos, pedidos, total] = await Promise.all([
+  const [resumo, planos, servicos, pedidos, total, atrasados] = await Promise.all([
     clubOverview(),
     listPlans({ todos: true }),
     db.select().from(servicesTable).orderBy(asc(servicesTable.sortOrder)),
     openPlanRequests(),
     countSubscribers(filtro),
+    // Quem está devendo a mensalidade, sempre à mão no topo (pedido do Bryan).
+    listSubscribers({ situacao: "vencidos", limit: 60 }),
   ]);
 
   const ultimaPagina = Math.max(1, Math.ceil(total / POR_PAGINA));
@@ -93,6 +95,17 @@ export default async function AdminClube({
         vencida: a.status === "ATIVA" && a.renewsAt.getTime() < Date.now(),
         // Pediu para sair pelo app: segue membro até o fim do ciclo pago.
         saindo: a.status === "ATIVA" && Boolean(a.canceledAt),
+      }))}
+      atrasados={atrasados.map((a) => ({
+        userId: a.userId,
+        name: a.name,
+        phone: a.phone,
+        phonePending: a.phonePending,
+        planName: a.planName,
+        valorCents: a.monthlyCents * (a.cycle === "ANUAL" ? 12 : 1),
+        venceu: labelDayMonth(utcToShopParts(a.renewsAt).dateKey),
+        dias: Math.max(0, Math.floor((Date.now() - a.renewsAt.getTime()) / 86400_000)),
+        cartaoAutomatico: a.cartaoAutomatico,
       }))}
       situacao={situacao}
       planId={planId}
