@@ -193,8 +193,8 @@ export default async function Confirmado({
               devolvido se o cliente faltar. */}
           {!cancelado && !daCasa && p.dateKey > shopToday() && pagamento?.status === "PAGO" && pagamento.provider === "asaas" && (
             <p className="mt-5 rounded-2xl border border-amber-400/40 bg-amber-400/10 p-4 text-left text-sm text-amber-100">
-              <b>Pagamento antecipado:</b> se você não comparecer, o valor pago não será devolvido. Precisa mudar? Remarque com
-              antecedência.
+              <b>Pagamento antecipado:</b> se você não comparecer, o valor pago não será devolvido. Precisa mudar?{" "}
+              <b>Remarque com no mínimo 2h de antecedência.</b>
             </p>
           )}
           {cancelado && (appt.notes ?? "").includes("valor devolvido") && (
